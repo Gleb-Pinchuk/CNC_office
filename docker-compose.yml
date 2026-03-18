@@ -2,7 +2,7 @@ services:
   db:
     image: postgres:16
     volumes:
-      - postgres_/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
     environment:
       POSTGRES_DB: cnc_office
       POSTGRES_USER: cnc_user
@@ -98,8 +98,8 @@ services:
       - cnc_network
 
 volumes:
-  postgres_
-  redis_
+  postgres_data:
+  redis_data:
   media_volume:
   static_volume:
 
