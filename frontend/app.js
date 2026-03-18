@@ -1,6 +1,3 @@
-// ============================================
-// CNC Office - Frontend Application
-// ============================================
 
 // API Configuration
 const BASE_URL = window.location.origin;
@@ -26,18 +23,12 @@ const uploadForm = document.getElementById('uploadForm');
 const loginForm = document.getElementById('loginForm');
 const navItems = document.querySelectorAll('.nav-item');
 
-// ============================================
-// Initialize
-// ============================================
 document.addEventListener('DOMContentLoaded', () => {
     checkAuth();
     setupEventListeners();
     setupDragAndDrop();
 });
 
-// ============================================
-// CSRF Token Helper
-// ============================================
 function getCookie(name) {
     let cookieValue = null;
     if (document.cookie && document.cookie !== '') {
@@ -53,35 +44,27 @@ function getCookie(name) {
     return cookieValue;
 }
 
-// ============================================
-// Authentication
-// ============================================
 async function checkAuth() {
-    // Try to get username from localStorage first
     const savedUsername = localStorage.getItem('cnc_username');
 
     try {
-        // Check if session is still valid
         const response = await fetch(`${API_BASE}/files/`, {
             credentials: 'include',
             headers: { 'Accept': 'application/json' }
         });
 
         if (response.status === 200) {
-            // Session is valid
             const username = savedUsername || 'Пользователь';
             currentUser = { username: username };
             document.getElementById('username').textContent = username;
             loadView('files');
         } else {
-            // Session expired
             localStorage.removeItem('cnc_username');
             showLoginModal();
         }
     } catch (error) {
         console.error('Auth check error:', error);
         if (savedUsername) {
-            // Show saved username but might fail on API calls
             currentUser = { username: savedUsername };
             document.getElementById('username').textContent = savedUsername;
             loadView('files');
@@ -120,9 +103,7 @@ async function handleLogin(e) {
         });
 
         if (response.ok || response.status === 302) {
-            // Save username to localStorage
             localStorage.setItem('cnc_username', username);
-
             currentUser = { username: username };
             document.getElementById('username').textContent = username;
             hideModal(loginModal);
@@ -139,7 +120,6 @@ async function handleLogin(e) {
 async function logout() {
     try {
         const csrftoken = getCookie('csrftoken');
-
         await fetch(`${AUTH_BASE}/logout/`, {
             method: 'POST',
             credentials: 'include',
@@ -148,10 +128,7 @@ async function logout() {
     } catch (error) {
         console.error('Logout error:', error);
     }
-
-    // Clear localStorage
     localStorage.removeItem('cnc_username');
-
     currentUser = null;
     currentFolder = null;
     location.reload();
@@ -161,9 +138,6 @@ function showLoginModal() {
     showModal(loginModal);
 }
 
-// ============================================
-// Navigation & View Switching
-// ============================================
 function setupEventListeners() {
     if (uploadBtn) {
         uploadBtn.addEventListener('click', () => {
@@ -190,10 +164,8 @@ function setupEventListeners() {
     navItems.forEach(item => {
         item.addEventListener('click', (e) => {
             e.preventDefault();
-
             navItems.forEach(nav => nav.classList.remove('active'));
             item.classList.add('active');
-
             const view = item.getAttribute('data-view');
             currentFolder = null;
             loadView(view);
@@ -294,7 +266,6 @@ async function navigateToFolder(folderId) {
         const folder = allFolders.find(f => f.id === folderId);
         currentFolder = folder;
     }
-
     updateBreadcrumb();
     await loadFiles();
 }
@@ -309,7 +280,6 @@ function hideModal(modal) {
 
 function setupDragAndDrop() {
     const dropZone = document.querySelector('.content-area') || document.querySelector('.main-content') || document.body;
-
     if (!dropZone) return;
 
     ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
@@ -346,10 +316,8 @@ function setupDragAndDrop() {
 
 function handleDrop(e) {
     if (currentView !== 'files') return;
-
     const dt = e.dataTransfer;
     const files = dt.files;
-
     if (files.length > 0) {
         uploadFile(files[0]);
     }
@@ -357,14 +325,12 @@ function handleDrop(e) {
 
 async function loadFiles() {
     showLoading();
-
     try {
         let url = `${API_BASE}/files/?`;
-
         if (currentFolder) {
             url += `folder=${currentFolder.id}`;
         } else {
-            url += `folder=`;  // Empty folder parameter means root
+            url += `folder=`;
         }
 
         const response = await fetch(url, {
@@ -389,16 +355,14 @@ async function loadFiles() {
 
 function renderFiles(files) {
     hideLoading();
-
     if (!files || files.length === 0) {
         showEmpty();
         return;
     }
-
     hideEmpty();
     filesGrid.innerHTML = '';
-
     files.forEach((file, index) => {
+        if (!file) return;
         const card = createFileCard(file, index);
         filesGrid.appendChild(card);
     });
@@ -411,36 +375,50 @@ function createFileCard(file, index) {
 
     const icon = getFileIcon(file.mime_type);
 
-    let fileName = file.file_name || '';
-    if (!fileName && file.file) {
-        fileName = file.file.split('/').pop();
+    // Безопасное получение имени файла
+    let fileName = 'Без имени';
+    if (file.file_name) {
+        fileName = file.file_name;
+    } else if (file.file && typeof file.file === 'string') {
         try {
+            fileName = file.file.split('/').pop();
             fileName = decodeURIComponent(fileName);
-        } catch (e) {}
+        } catch (e) {
+            fileName = 'Без имени';
+        }
     }
-    if (!fileName) fileName = 'Без имени';
 
-    const sizeMB = file.size ? (file.size / (1024 * 1024)).toFixed(2) : '0';
+    // Безопасное получение размера
+    const sizeMB = file.size_mb ? `${file.size_mb} MB` : (file.size ? `${(file.size / (1024 * 1024)).toFixed(2)} MB` : '0 MB');
+
+    // Безопасное получение даты
     const uploadedDate = file.uploaded_at ? new Date(file.uploaded_at).toLocaleDateString('ru-RU') : '';
 
-    // Сохраняем download_url для использования в кнопке
-    const downloadUrl = file.download_url || `${API_BASE}/files/${fileId}/download/`;
+    // Проверяем, есть ли download_url и является ли пользователь владельцем
+    const canDownload = file.download_url || file.owner === currentUser?.username;
+    const isOwner = file.owner === currentUser?.username;
 
     card.innerHTML = `
         <div class="file-icon">${icon}</div>
-        <div class="file-name" title="${fileName}">${fileName}</div>
+        <div class="file-name" title="${escapeHtml(fileName)}">${escapeHtml(fileName)}</div>
         <div class="file-meta">
-            <span>${sizeMB} MB</span>
+            <span>${sizeMB}</span>
             <span>${uploadedDate}</span>
         </div>
         <div class="file-actions">
-            <button class="file-action-btn" onclick="window.open('${downloadUrl}', '_blank')" title="Скачать">⬇️</button>
-            <button class="file-action-btn" onclick="shareFile(${file.id})" title="Поделиться">🔗</button>
-            <button class="file-action-btn" onclick="deleteFile(${file.id})" title="Удалить">🗑️</button>
+            ${canDownload ? `<button class="file-action-btn" onclick="downloadFile(${file.id})" title="Скачать">⬇️</button>` : ''}
+            ${isOwner ? `<button class="file-action-btn" onclick="shareFile(${file.id})" title="Поделиться">🔗</button>` : ''}
+            ${isOwner ? `<button class="file-action-btn" onclick="deleteFile(${file.id})" title="Удалить">🗑️</button>` : ''}
         </div>
     `;
 
     return card;
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }
 
 function getFileIcon(mimeType) {
@@ -457,18 +435,14 @@ function getFileIcon(mimeType) {
 async function loadFoldersForDropdown() {
     const folderSelect = document.getElementById('folderSelect');
     if (!folderSelect) return;
-
     folderSelect.innerHTML = '<option value="">Корневая папка</option>';
-
     try {
         const response = await fetch(`${API_BASE}/folders/`, {
             credentials: 'include',
             headers: { 'Accept': 'application/json' }
         });
-
         if (response.status === 200) {
             allFolders = await response.json();
-
             allFolders.forEach(folder => {
                 const option = document.createElement('option');
                 option.value = folder.id;
@@ -484,7 +458,6 @@ async function loadFoldersForDropdown() {
 async function uploadFile(file) {
     const formData = new FormData();
     formData.append('file', file);
-
     if (currentFolder) {
         formData.append('folder', currentFolder.id);
     } else {
@@ -493,17 +466,14 @@ async function uploadFile(file) {
             formData.append('folder', folderSelect.value);
         }
     }
-
     try {
         const csrftoken = getCookie('csrftoken');
-
         const response = await fetch(`${API_BASE}/files/`, {
             method: 'POST',
             credentials: 'include',
             headers: { 'X-CSRFToken': csrftoken },
             body: formData
         });
-
         if (response.ok) {
             hideModal(uploadModal);
             if (uploadForm) uploadForm.reset();
@@ -520,63 +490,70 @@ async function uploadFile(file) {
 
 async function handleUpload(e) {
     e.preventDefault();
-
     const fileInput = document.getElementById('fileInput');
     if (!fileInput || !fileInput.files[0]) {
         alert('Выберите файл для загрузки');
         return;
     }
-
     await uploadFile(fileInput.files[0]);
 }
 
 function downloadFile(fileId) {
+    // Открываем файл в новой вкладке для скачивания
     window.open(`${API_BASE}/files/${fileId}/`, '_blank');
 }
 
 async function shareFile(fileId) {
-    const username = prompt('Введите имя пользователя для доступа:');
+    const username = prompt('Введите имя пользователя для предоставления доступа:');
     if (!username) return;
 
     try {
         const csrftoken = getCookie('csrftoken');
 
-        const response = await fetch(`${API_BASE}/permissions/`, {
+        const response = await fetch(`${API_BASE}/files/${fileId}/share/`, {
             method: 'POST',
             credentials: 'include',
             headers: {
                 'Content-Type': 'application/json',
-                'X-CSRFToken': csrftoken
+                'X-CSRFToken': csrftoken,
+                'Accept': 'application/json'
             },
             body: JSON.stringify({
-                file: fileId,
                 username: username,
                 permission: 'read'
             })
         });
 
-        if (response.ok) {
-            alert('✅ Доступ предоставлен!');
+        let data;
+        try {
+            data = await response.json();
+        } catch (e) {
+            data = {};
+        }
+
+        if (response.ok || response.status === 201) {
+            alert(`✅ Доступ предоставлен пользователю ${username}`);
         } else {
-            alert('❌ Ошибка предоставления доступа');
+            // Показываем детальную ошибку
+            const errorMessage = data.detail || data.error || JSON.stringify(data) || 'Неизвестная ошибка';
+            alert(`❌ Ошибка предоставления доступа:\n${errorMessage}`);
+            console.error('Share error:', data);
         }
     } catch (error) {
-        alert('Ошибка подключения к серверу');
+        console.error('Share error:', error);
+        alert(`❌ Ошибка подключения к серверу: ${error.message}`);
     }
 }
 
 async function deleteFile(fileId) {
     if (!confirm('Вы уверены, что хотите удалить этот файл?')) return;
-
     try {
         const csrftoken = getCookie('csrftoken');
-
         const response = await fetch(`${API_BASE}/files/${fileId}/`, {
             method: 'DELETE',
             credentials: 'include',
             headers: { 'X-CSRFToken': csrftoken }
         });
-
         if (response.ok || response.status === 204) {
             loadFiles();
         } else {
@@ -589,13 +566,11 @@ async function deleteFile(fileId) {
 
 async function loadFolders() {
     showLoading();
-
     try {
         const response = await fetch(`${API_BASE}/folders/`, {
             credentials: 'include',
             headers: { 'Accept': 'application/json' }
         });
-
         if (response.status === 200) {
             const folders = await response.json();
             renderFolders(folders);
@@ -610,15 +585,12 @@ async function loadFolders() {
 
 function renderFolders(folders) {
     hideLoading();
-
     if (!folders || folders.length === 0) {
         showEmpty();
         return;
     }
-
     hideEmpty();
     filesGrid.innerHTML = '';
-
     folders.forEach((folder, index) => {
         const card = createFolderCard(folder, index);
         filesGrid.appendChild(card);
@@ -635,17 +607,15 @@ function createFolderCard(folder, index) {
         if (!e.target.closest('.file-actions')) {
             currentFolder = folder;
             currentView = 'files';
-
             navItems.forEach(nav => nav.classList.remove('active'));
             document.querySelector('[data-view="files"]')?.classList.add('active');
-
             loadView('files');
         }
     });
 
     card.innerHTML = `
         <div class="file-icon">📁</div>
-        <div class="file-name" title="${folder.name}">${folder.name}</div>
+        <div class="file-name" title="${escapeHtml(folder.name)}">${escapeHtml(folder.name)}</div>
         <div class="file-meta">
             <span>${folder.files_count || 0} файлов</span>
             <span>${new Date(folder.created_at).toLocaleDateString('ru-RU')}</span>
@@ -654,17 +624,14 @@ function createFolderCard(folder, index) {
             <button class="file-action-btn" onclick="deleteFolder(${folder.id})" title="Удалить">🗑️</button>
         </div>
     `;
-
     return card;
 }
 
 async function createFolder() {
     const name = prompt('Введите имя папки:');
     if (!name) return;
-
     try {
         const csrftoken = getCookie('csrftoken');
-
         const response = await fetch(`${API_BASE}/folders/`, {
             method: 'POST',
             credentials: 'include',
@@ -674,7 +641,6 @@ async function createFolder() {
             },
             body: JSON.stringify({ name: name })
         });
-
         if (response.ok) {
             loadFolders();
         } else {
@@ -687,16 +653,13 @@ async function createFolder() {
 
 async function deleteFolder(folderId) {
     if (!confirm('Удалить эту папку?')) return;
-
     try {
         const csrftoken = getCookie('csrftoken');
-
         const response = await fetch(`${API_BASE}/folders/${folderId}/`, {
             method: 'DELETE',
             credentials: 'include',
             headers: { 'X-CSRFToken': csrftoken }
         });
-
         if (response.ok || response.status === 204) {
             loadFolders();
         } else {
@@ -709,13 +672,11 @@ async function deleteFolder(folderId) {
 
 async function loadShared() {
     showLoading();
-
     try {
         const response = await fetch(`${API_BASE}/permissions/`, {
             credentials: 'include',
             headers: { 'Accept': 'application/json' }
         });
-
         if (response.status === 200) {
             const permissions = await response.json();
             renderShared(permissions);
@@ -730,15 +691,12 @@ async function loadShared() {
 
 function renderShared(permissions) {
     hideLoading();
-
     if (!permissions || permissions.length === 0) {
         showEmpty();
         return;
     }
-
     hideEmpty();
     filesGrid.innerHTML = '';
-
     permissions.forEach((perm, index) => {
         const card = createSharedCard(perm, index);
         filesGrid.appendChild(card);
@@ -750,35 +708,39 @@ function createSharedCard(perm, index) {
     card.className = 'file-card';
     card.style.animationDelay = `${index * 0.1}s`;
 
+    let fileName = 'Файл';
+    if (perm.file_name) {
+        fileName = perm.file_name;
+    } else if (perm.file && typeof perm.file === 'number') {
+        fileName = `Файл #${perm.file}`;
+    }
+
     const permissionBadge = perm.permission === 'write' ? '✏️ Запись' : '👁️ Чтение';
+    const grantedDate = perm.granted_at ? new Date(perm.granted_at).toLocaleDateString('ru-RU') : '';
 
     card.innerHTML = `
         <div class="file-icon">🔗</div>
-        <div class="file-name" title="${perm.file_name || 'Файл'}">${perm.file_name || 'Файл #' + perm.file}</div>
+        <div class="file-name" title="${escapeHtml(fileName)}">${escapeHtml(fileName)}</div>
         <div class="file-meta">
             <span>${permissionBadge}</span>
-            <span>${new Date(perm.granted_at).toLocaleDateString('ru-RU')}</span>
+            <span>${grantedDate}</span>
         </div>
         <div class="file-actions">
             <button class="file-action-btn" onclick="revokePermission(${perm.id})" title="Отозвать">❌</button>
         </div>
     `;
-
     return card;
 }
 
 async function revokePermission(permId) {
     if (!confirm('Отозвать доступ?')) return;
-
     try {
         const csrftoken = getCookie('csrftoken');
-
         const response = await fetch(`${API_BASE}/permissions/${permId}/`, {
             method: 'DELETE',
             credentials: 'include',
             headers: { 'X-CSRFToken': csrftoken }
         });
-
         if (response.ok || response.status === 204) {
             loadShared();
         } else {
@@ -791,13 +753,11 @@ async function revokePermission(permId) {
 
 async function loadLogs() {
     showLoading();
-
     try {
         const response = await fetch(`${API_BASE}/audit-logs/`, {
             credentials: 'include',
             headers: { 'Accept': 'application/json' }
         });
-
         if (response.status === 200) {
             const logs = await response.json();
             renderLogs(logs);
@@ -812,15 +772,12 @@ async function loadLogs() {
 
 function renderLogs(logs) {
     hideLoading();
-
     if (!logs || logs.length === 0) {
         showEmpty();
         return;
     }
-
     hideEmpty();
     filesGrid.innerHTML = '';
-
     logs.forEach((log, index) => {
         const card = createLogCard(log, index);
         filesGrid.appendChild(card);
@@ -840,19 +797,18 @@ function createLogCard(log, index) {
         'login': '🔑',
         'logout': '🚪'
     };
-
     const icon = actionIcons[log.action] || '📝';
+    const details = log.details ? `<div class="file-meta" style="margin-top: 0.5rem; font-size: 0.75rem;">${escapeHtml(log.details)}</div>` : '';
 
     card.innerHTML = `
         <div class="file-icon">${icon}</div>
-        <div class="file-name">${log.action}</div>
+        <div class="file-name">${escapeHtml(log.action)}</div>
         <div class="file-meta">
             <span>${log.user_username || 'Система'}</span>
             <span>${new Date(log.timestamp).toLocaleString('ru-RU')}</span>
         </div>
-        ${log.details ? `<div class="file-meta" style="margin-top: 0.5rem; font-size: 0.75rem;">${log.details}</div>` : ''}
+        ${details}
     `;
-
     return card;
 }
 

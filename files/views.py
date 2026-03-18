@@ -1,30 +1,47 @@
 from django.shortcuts import render
-
-# Create your views here.
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from django.utils import timezone
 from datetime import timedelta
+from django.db import models
+from django.contrib.auth import get_user_model
 
 from .models import StorageFile, StorageFolder, FileAccessPermission, FileLock, AuditLog
 from .serializers import (
     StorageFileSerializer, StorageFolderSerializer,
-    FileAccessPermissionSerializer, FileLockSerializer, AuditLogSerializer
+    FileAccessPermissionSerializer, FileLockSerializer, AuditLogSerializer,
+    UserSerializer
 )
 from .filters import StorageFileFilter, StorageFolderFilter
-from django.db import models
+
+User = get_user_model()
+
 
 class IsOwnerOrShared(permissions.BasePermission):
     """Разрешение: владелец или есть доступ"""
 
+    def has_permission(self, request, view):
+        return request.user and request.user.is_authenticated
+
     def has_object_permission(self, request, view, obj):
-        if obj.owner == request.user:
-            return True
-        return FileAccessPermission.objects.filter(
-            file=obj, user=request.user
-        ).exists()
+        # Разрешаем безопасные методы (GET, HEAD, OPTIONS)
+        if request.method in permissions.SAFE_METHODS:
+            # Проверяем: владелец ИЛИ есть права доступа
+            if obj.owner == request.user:
+                return True
+
+            # Проверяем права доступа
+            has_permission = FileAccessPermission.objects.filter(
+                file=obj,
+                user=request.user
+            ).exists()
+
+            return has_permission
+
+        # Для изменения (PUT, DELETE) - только владелец
+        return obj.owner == request.user
 
 
 class StorageFileViewSet(viewsets.ModelViewSet):
@@ -41,7 +58,12 @@ class StorageFileViewSet(viewsets.ModelViewSet):
             models.Q(owner=user) |
             models.Q(permissions__user=user) |
             models.Q(is_shared=True)
-        ).distinct()
+        ).distinct().select_related(
+            'owner', 'folder'
+        ).prefetch_related(
+            'permissions', 'permissions__user'
+        )
+
         folder_id = self.request.query_params.get('folder', None)
         if folder_id is not None:
             if folder_id == '':
@@ -51,27 +73,35 @@ class StorageFileViewSet(viewsets.ModelViewSet):
 
         return queryset
 
+    def get_serializer_context(self):
+        """Передаём request в контекст сериализатора"""
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context
+
     def perform_create(self, serializer):
         """Автосохранение владельца при загрузке"""
-        serializer.save(owner=self.request.user)
+        instance = serializer.save(owner=self.request.user)
 
         # Логирование действия
         AuditLog.objects.create(
             user=self.request.user,
             action='upload',
             ip_address=self.get_request_ip(),
-            details=f"Uploaded: {serializer.instance.file.name}"
+            details=f"Загружен файл: {instance.file_name}"
         )
 
     def perform_destroy(self, instance):
         """Логирование удаления"""
+        file_name = instance.file_name
+        instance.delete()
+
         AuditLog.objects.create(
             user=self.request.user,
             action='delete',
             ip_address=self.get_request_ip(),
-            details=f"Deleted: {instance.file.name}"
+            details=f"Удалён файл: {file_name}"
         )
-        instance.delete()
 
     def get_request_ip(self):
         x_forwarded_for = self.request.META.get('HTTP_X_FORWARDED_FOR')
@@ -126,6 +156,76 @@ class StorageFileViewSet(viewsets.ModelViewSet):
             return Response(FileLockSerializer(lock).data)
         return Response({'status': 'unlocked'})
 
+    @action(detail=True, methods=['post'])
+    def share(self, request, pk=None):
+        """Предоставить доступ к файлу"""
+        file = self.get_object()
+
+        # Проверка: только владелец может предоставлять доступ
+        if file.owner != request.user:
+            return Response(
+                {'detail': 'Только владелец файла может предоставлять доступ'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        user_id = request.data.get('user_id')
+        username = request.data.get('username')
+        permission_type = request.data.get('permission', 'read')
+
+        # Находим пользователя
+        target_user = None
+        if user_id:
+            try:
+                target_user = User.objects.get(id=user_id)
+            except User.DoesNotExist:
+                return Response(
+                    {'detail': 'Пользователь не найден'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+        elif username:
+            try:
+                target_user = User.objects.get(username=username)
+            except User.DoesNotExist:
+                return Response(
+                    {'detail': 'Пользователь не найден'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+        else:
+            return Response(
+                {'detail': 'Необходимо указать user_id или username'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if target_user == request.user:
+            return Response(
+                {'detail': 'Нельзя предоставить доступ самому себе'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Создаём или обновляем право доступа
+        permission, created = FileAccessPermission.objects.get_or_create(
+            file=file,
+            user=target_user,
+            defaults={'permission': permission_type}
+        )
+
+        if not created:
+            permission.permission = permission_type
+            permission.save()
+
+        # Логируем
+        AuditLog.objects.create(
+            user=request.user,
+            action='share',
+            ip_address=self.get_request_ip(),
+            details=f"Предоставлен доступ {permission_type} к файлу {file.file_name} пользователю {target_user.username}"
+        )
+
+        return Response(
+            FileAccessPermissionSerializer(permission, context={'request': request}).data,
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK
+        )
+
 
 class StorageFolderViewSet(viewsets.ModelViewSet):
     """ViewSet для папок"""
@@ -138,8 +238,26 @@ class StorageFolderViewSet(viewsets.ModelViewSet):
         user = self.request.user
         return StorageFolder.objects.filter(owner=user)
 
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context
+
     def perform_create(self, serializer):
-        serializer.save(owner=self.request.user)
+        instance = serializer.save(owner=self.request.user)
+
+        AuditLog.objects.create(
+            user=self.request.user,
+            action='create_folder',
+            ip_address=self.get_request_ip(),
+            details=f"Создана папка: {instance.name}"
+        )
+
+    def get_request_ip(self):
+        x_forwarded_for = self.request.META.get('HTTP_X_FORWARDED_FOR')
+        if x_forwarded_for:
+            return x_forwarded_for.split(',')[0]
+        return self.request.META.get('REMOTE_ADDR')
 
 
 class FileAccessPermissionViewSet(viewsets.ModelViewSet):
@@ -151,21 +269,52 @@ class FileAccessPermissionViewSet(viewsets.ModelViewSet):
         user = self.request.user
         return FileAccessPermission.objects.filter(
             models.Q(file__owner=user) | models.Q(user=user)
-        )
+        ).select_related('file', 'user').order_by('-granted_at')
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context
 
     def perform_create(self, serializer):
-        file = serializer.validated_data['file']
-        if file.owner != self.request.user:
+        # Получаем файл из validated_data
+        file = serializer.validated_data.get('file')
+
+        if file and file.owner != self.request.user:
             raise permissions.PermissionDenied('Только владелец может предоставлять доступ')
 
-        serializer.save()
+        instance = serializer.save()
+
+        # Получаем пользователя из validated_data
+        user = serializer.validated_data.get('user')
+        username = user.username if user else 'unknown'
 
         AuditLog.objects.create(
             user=self.request.user,
             action='share',
-            ip_address=self.request.META.get('REMOTE_ADDR'),
-            details=f"Shared {file.file.name} with {serializer.validated_data['user'].username}"
+            ip_address=self.get_request_ip(),
+            details=f"Предоставлен доступ к файлу {file.file_name if file else 'unknown'} пользователю {username}"
         )
+
+    def get_request_ip(self):
+        x_forwarded_for = self.request.META.get('HTTP_X_FORWARDED_FOR')
+        if x_forwarded_for:
+            return x_forwarded_for.split(',')[0]
+        return self.request.META.get('REMOTE_ADDR')
+
+    @action(detail=False, methods=['get'])
+    def search_users(self, request):
+        """Поиск пользователей для предоставления доступа"""
+        query = request.query_params.get('q', '')
+        if len(query) < 2:
+            return Response([])
+
+        users = User.objects.filter(
+            username__icontains=query
+        ).exclude(id=request.user.id)[:10]
+
+        serializer = UserSerializer(users, many=True)
+        return Response(serializer.data)
 
 
 class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):

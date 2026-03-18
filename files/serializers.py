@@ -16,6 +16,14 @@ class UserSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'date_joined']
 
 
+class UserShortSerializer(serializers.ModelSerializer):
+    """Краткий сериализатор пользователя для отображения"""
+
+    class Meta:
+        model = User
+        fields = ['id', 'username', 'email']
+
+
 class StorageFolderSerializer(serializers.ModelSerializer):
     """Сериализатор папки"""
     owner = serializers.ReadOnlyField(source='owner.username')
@@ -33,36 +41,44 @@ class StorageFolderSerializer(serializers.ModelSerializer):
 class StorageFileSerializer(serializers.ModelSerializer):
     """Сериализатор файла"""
     owner = serializers.ReadOnlyField(source='owner.username')
-    folder_name = serializers.ReadOnlyField(source='folder.name')
+    folder_name = serializers.SerializerMethodField()
     size_mb = serializers.SerializerMethodField()
     download_url = serializers.SerializerMethodField()
     file_name = serializers.SerializerMethodField()
+    shared_with = serializers.SerializerMethodField()
 
     class Meta:
         model = StorageFile
         fields = [
             'id', 'owner', 'folder', 'folder_name', 'file', 'file_name',
             'size', 'size_mb', 'mime_type', 'uploaded_at', 'updated_at',
-            'is_shared', 'download_url'
+            'is_shared', 'download_url', 'shared_with'
         ]
         read_only_fields = [
             'id', 'owner', 'size', 'mime_type',
-            'uploaded_at', 'updated_at', 'download_url', 'file_name'
+            'uploaded_at', 'updated_at', 'download_url', 'file_name', 'shared_with'
         ]
+
+    def get_folder_name(self, obj):
+        """Безопасное получение имени папки"""
+        if obj.folder:
+            return obj.folder.name
+        return None
 
     def get_file_name(self, obj):
         """Извлекаем читаемое имя файла из пути"""
-        if obj.file and hasattr(obj.file, 'name'):
-            # Получаем последнюю часть пути (имя файла)
-            file_name = os.path.basename(obj.file.name)
-            # Декодируем URL-encoding если есть
-            try:
-                from urllib.parse import unquote
-                file_name = unquote(file_name)
-            except:
-                pass
-            return file_name
-        return ''
+        try:
+            if obj.file and hasattr(obj.file, 'name'):
+                file_name = os.path.basename(obj.file.name)
+                try:
+                    from urllib.parse import unquote
+                    file_name = unquote(file_name)
+                except:
+                    pass
+                return file_name
+        except Exception as e:
+            print(f"Error getting file name: {e}")
+        return 'Без имени'
 
     def get_size_mb(self, obj):
         """Конвертируем размер в MB"""
@@ -72,10 +88,28 @@ class StorageFileSerializer(serializers.ModelSerializer):
 
     def get_download_url(self, obj):
         """Генерируем полный URL для скачивания"""
-        request = self.context.get('request')
-        if request and obj.file:
-            return request.build_absolute_uri(obj.file.url)
+        try:
+            request = self.context.get('request')
+            if request and obj.file:
+                return request.build_absolute_uri(obj.file.url)
+        except Exception as e:
+            print(f"Error getting download URL: {e}")
         return None
+
+    def get_shared_with(self, obj):
+        """Возвращает список пользователей, с которыми предоставлен доступ"""
+        try:
+            permissions = obj.permissions.select_related('user').all()
+            return [
+                {
+                    'id': p.user.id,
+                    'username': p.user.username,
+                    'permission': p.permission
+                }
+                for p in permissions
+            ]
+        except:
+            return []
 
     def validate_file(self, value):
         """Валидация файла: проверка размера и определение mime_type"""
@@ -100,13 +134,9 @@ class StorageFileSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         """Создание файла с авто-заполнением размера и mime_type"""
-        # Извлекаем файл из данных
         file = validated_data.pop('file', None)
-
-        # Создаем экземпляр модели с остальными данными
         instance = super().create(validated_data)
 
-        # Если файл был загружен, обновляем размер и mime_type
         if file:
             instance.file = file
             instance.size = getattr(self, '_file_size', file.size)
@@ -118,11 +148,8 @@ class StorageFileSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         """Обновление файла с авто-заполнением размера и mime_type"""
         file = validated_data.pop('file', None)
-
-        # Обновляем остальные поля
         instance = super().update(instance, validated_data)
 
-        # Если новый файл был загружен, обновляем размер и mime_type
         if file:
             instance.file = file
             instance.size = getattr(self, '_file_size', file.size)
@@ -134,38 +161,155 @@ class StorageFileSerializer(serializers.ModelSerializer):
 
 class FileAccessPermissionSerializer(serializers.ModelSerializer):
     """Сериализатор прав доступа"""
-    user_username = serializers.ReadOnlyField(source='user.username')
-    file_name = serializers.ReadOnlyField(source='file.file.name')
+    # Для отображения (read-only)
+    user = UserShortSerializer(read_only=True)
+    # ИСПРАВЛЕНИЕ: используем SerializerMethodField вместо ReadOnlyField
+    file_name = serializers.SerializerMethodField(read_only=True)
+
+    # Для записи (write-only) - принимаем ID пользователя или username
+    user_id = serializers.IntegerField(write_only=True, required=False)
+    username = serializers.CharField(write_only=True, required=False)
 
     class Meta:
         model = FileAccessPermission
-        fields = ['id', 'file', 'file_name', 'user', 'user_username', 'permission', 'granted_at']
-        read_only_fields = ['id', 'granted_at']
+        fields = [
+            'id', 'file', 'file_name', 'user', 'user_id', 'username',
+            'permission', 'granted_at'
+        ]
+        read_only_fields = ['id', 'granted_at', 'user', 'file_name']
 
-    def validate_user(self, value):
-        """Проверка: нельзя дать доступ самому себе"""
+    def get_file_name(self, obj):
+        """Безопасное получение имени файла для прав доступа"""
+        try:
+            if obj.file and obj.file.file and hasattr(obj.file.file, 'name'):
+                file_name = os.path.basename(obj.file.file.name)
+                try:
+                    from urllib.parse import unquote
+                    file_name = unquote(file_name)
+                except:
+                    pass
+                return file_name
+        except Exception as e:
+            print(f"Error getting permission file name: {e}")
+        return 'Файл'
+
+    def validate_user_id(self, value):
+        """Проверка существования пользователя по ID"""
+        if not User.objects.filter(id=value).exists():
+            raise serializers.ValidationError("Пользователь с таким ID не найден")
+        return value
+
+    def validate_username(self, value):
+        """Проверка существования пользователя по username"""
+        if not User.objects.filter(username=value).exists():
+            raise serializers.ValidationError("Пользователь с таким именем не найден")
+        return value
+
+    def validate(self, attrs):
+        """Дополнительная валидация прав доступа"""
         request = self.context.get('request')
-        if request and value == request.user:
+
+        # Определяем целевого пользователя
+        user = None
+        if 'user_id' in attrs:
+            user = User.objects.get(id=attrs['user_id'])
+        elif 'username' in attrs:
+            user = User.objects.get(username=attrs['username'])
+
+        if not user:
+            raise serializers.ValidationError("Необходимо указать user_id или username")
+
+        # Проверка: нельзя дать доступ самому себе
+        if request and user == request.user:
             raise serializers.ValidationError('Нельзя предоставить доступ самому себе')
-        return value
 
-    def validate_file(self, value):
-        """Проверка: только владелец может предоставлять доступ"""
-        request = self.context.get('request')
-        if request and value.owner != request.user:
+        # Проверка: только владелец файла может предоставлять доступ
+        file = attrs.get('file') or (self.instance.file if self.instance else None)
+        if request and file and file.owner != request.user:
             raise serializers.ValidationError('Только владелец файла может предоставлять доступ')
-        return value
+
+        # Проверка: нельзя дать доступ, если он уже есть
+        if file and user:
+            if FileAccessPermission.objects.filter(file=file, user=user).exists() and not self.instance:
+                raise serializers.ValidationError('Доступ этому пользователю уже предоставлен')
+
+        return attrs
+
+    def create(self, validated_data):
+        """Создание прав доступа"""
+        try:
+            # Извлекаем данные пользователя
+            user = None
+            if 'user_id' in validated_data:
+                user = User.objects.get(id=validated_data.pop('user_id'))
+            elif 'username' in validated_data:
+                user = User.objects.get(username=validated_data.pop('username'))
+
+            if not user:
+                raise serializers.ValidationError("Необходимо указать user_id или username")
+
+            file = validated_data.get('file')
+            permission = validated_data.get('permission', 'read')
+            request = self.context.get('request')
+
+            # Создаём или обновляем право доступа
+            perm, created = FileAccessPermission.objects.get_or_create(
+                file=file,
+                user=user,
+                defaults={'permission': permission}
+            )
+
+            if not created:
+                perm.permission = permission
+                perm.save()
+
+            # Логируем действие
+            if request and file:
+                try:
+                    # ИСПРАВЛЕНИЕ: используем os.path.basename вместо file.file_name
+                    file_name = os.path.basename(file.file.name) if file.file else f"File #{file.id}"
+
+                    AuditLog.objects.create(
+                        user=request.user,
+                        action='share',
+                        ip_address=request.META.get('REMOTE_ADDR', ''),
+                        details=f"Предоставлен доступ {permission} к файлу {file_name} пользователю {user.username}"
+                    )
+                except Exception as log_error:
+                    print(f"AuditLog error: {log_error}")
+
+            return perm
+
+        except User.DoesNotExist:
+            raise serializers.ValidationError("Пользователь не найден")
+        except Exception as e:
+            print(f"Permission create error: {e}")
+            raise serializers.ValidationError(f"Ошибка создания доступа: {str(e)}")
+
+    def update(self, instance, validated_data):
+        """Обновление прав доступа"""
+        # Удаляем write-only поля
+        validated_data.pop('user_id', None)
+        validated_data.pop('username', None)
+
+        # Обновляем поле permission
+        if 'permission' in validated_data:
+            instance.permission = validated_data['permission']
+            instance.save()
+
+        return instance
 
 
 class FileLockSerializer(serializers.ModelSerializer):
     """Сериализатор блокировки файла"""
+    locked_by = UserShortSerializer(read_only=True)
     locked_by_username = serializers.ReadOnlyField(source='locked_by.username')
     is_expired = serializers.SerializerMethodField()
 
     class Meta:
         model = FileLock
         fields = ['id', 'file', 'locked_by', 'locked_by_username', 'locked_at', 'expires_at', 'is_expired']
-        read_only_fields = ['id', 'locked_at', 'is_expired']
+        read_only_fields = ['id', 'locked_at', 'is_expired', 'locked_by', 'locked_by_username']
 
     def get_is_expired(self, obj):
         from django.utils import timezone
@@ -176,9 +320,10 @@ class FileLockSerializer(serializers.ModelSerializer):
 
 class AuditLogSerializer(serializers.ModelSerializer):
     """Сериализатор логов аудита"""
+    user = UserShortSerializer(read_only=True)
     user_username = serializers.ReadOnlyField(source='user.username')
 
     class Meta:
         model = AuditLog
         fields = ['id', 'user', 'user_username', 'action', 'timestamp', 'ip_address', 'details']
-        read_only_fields = ['id', 'timestamp']
+        read_only_fields = ['id', 'timestamp', 'user', 'user_username']
