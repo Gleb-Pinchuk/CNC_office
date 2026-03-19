@@ -1,60 +1,63 @@
-from rest_framework import generics, permissions
+from rest_framework import generics, permissions, status
 from rest_framework.response import Response
-from rest_framework import status
-from rest_framework.views import APIView
+from rest_framework.authtoken.models import Token
+from rest_framework.authtoken.views import ObtainAuthToken
 from django.contrib.auth import get_user_model
-from django.views.decorators.csrf import csrf_exempt
-from django.utils.decorators import method_decorator
-from .serializers import UserSerializer, UserListSerializer
+from .serializers import UserSerializer, UserListSerializer, RegisterSerializer
 
 User = get_user_model()
 
 
-@method_decorator(csrf_exempt, name='dispatch')
-class RegisterView(APIView):
-    """
-    Регистрация нового пользователя
+class RegisterView(generics.CreateAPIView):
+    """Регистрация нового пользователя"""
+    queryset = User.objects.all()
+    serializer_class = RegisterSerializer  # Используйте RegisterSerializer с password2
+    permission_classes = [permissions.AllowAny]
+    authentication_classes = []
 
-    Примечание: CSRF отключен для публичной регистрации,
-    так как у новых пользователей ещё нет CSRF токена.
-    Для авторизованных операций (вход, файлы) CSRF обязателен.
-    """
-    permission_classes = []  # Публичный доступ
-    authentication_classes = []  # Не требуем аутентификацию
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.save()
 
-    def post(self, request):
-        # Валидация данных
-        serializer = UserSerializer(data=request.data)
+        # Создаём токен для авто-входа
+        token, _ = Token.objects.get_or_create(user=user)
 
-        if not serializer.is_valid():
-            return Response(
-                serializer.errors,
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        return Response({
+            'token': token.key,
+            'user': UserListSerializer(user).data,
+            'message': 'Пользователь успешно зарегистрирован'
+        }, status=status.HTTP_201_CREATED)
 
-        # Создание пользователя
-        try:
-            user = serializer.save()
 
-            return Response({
-                'user': UserListSerializer(user).data,
-                'message': 'Пользователь успешно зарегистрирован'
-            }, status=status.HTTP_201_CREATED)
+class LoginView(ObtainAuthToken):
+    """Вход пользователя — возвращает токен"""
+    permission_classes = [permissions.AllowAny]
+    authentication_classes = []
 
-        except Exception as e:
-            return Response(
-                {'detail': f'Ошибка создания пользователя: {str(e)}'},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+    def post(self, request, *args, **kwargs):
+        serializer = self.serializer_class(data=request.data, context={'request': request})
+        serializer.is_valid(raise_exception=True)
+        user = serializer.validated_data['user']
+        token, _ = Token.objects.get_or_create(user=user)
+
+        return Response({
+            'token': token.key,
+            'user': UserListSerializer(user).data
+        })
+
+
+class UserProfileView(generics.RetrieveAPIView):
+    """Данные текущего пользователя"""
+    serializer_class = UserListSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_object(self):
+        return self.request.user
 
 
 class UserListView(generics.ListAPIView):
-    """
-    Список пользователей
-
-    Доступно только для авторизованных пользователей.
-    CSRF защита включена.
-    """
+    """Список пользователей (только для авторизованных)"""
     queryset = User.objects.all()
     serializer_class = UserListSerializer
     permission_classes = [permissions.IsAuthenticated]
