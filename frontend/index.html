@@ -144,9 +144,10 @@
 
     <!-- Upload Modal -->
     <div class="modal" id="uploadModal">
-        <div class="modal-backdrop" onclick="hideModal(uploadModal)"></div>
+        <!-- ✅ Исправлено: добавлены кавычки в onclick -->
+        <div class="modal-backdrop" onclick="hideModal('uploadModal')"></div>
         <div class="modal-content">
-            <button class="modal-close" onclick="hideModal(uploadModal)">&times;</button>
+            <button class="modal-close" onclick="hideModal('uploadModal')">&times;</button>
             <div class="modal-header">
                 <svg class="modal-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
@@ -187,11 +188,12 @@
         </div>
     </div>
 
-    <!-- ✅ Login/Register Modal (ИСПРАВЛЕНА) -->
+    <!-- Login/Register Modal -->
     <div class="modal" id="loginModal">
-        <div class="modal-backdrop" onclick="hideModal(loginModal)"></div>
+        <!-- ✅ Исправлено: добавлены кавычки в onclick -->
+        <div class="modal-backdrop" onclick="hideModal('loginModal')"></div>
         <div class="modal-content modal-small">
-            <button class="modal-close" onclick="hideModal(loginModal)">&times;</button>
+            <button class="modal-close" onclick="hideModal('loginModal')">&times;</button>
             <div class="modal-header">
                 <svg class="modal-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                     <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M13.8 12H3"/>
@@ -201,7 +203,7 @@
             </div>
             <div class="modal-body">
 
-                <!-- ✅ Форма входа -->
+                <!-- Форма входа -->
                 <form id="loginForm" class="modal-form" onsubmit="return false;" autocomplete="off">
                     <div class="form-group">
                         <label for="loginUsername">Имя пользователя</label>
@@ -235,7 +237,7 @@
                     </p>
                 </form>
 
-                <!-- ✅ Форма регистрации (была скрыта) -->
+                <!-- Форма регистрации (скрыта по умолчанию) -->
                 <form id="registerForm" class="modal-form hidden" onsubmit="return false;" autocomplete="off">
                     <div class="form-group">
                         <label for="registerUsername">Имя пользователя</label>
@@ -295,6 +297,7 @@
         </div>
     </div>
 
+    <!-- ✅ Исправлен путь к скрипту -->
     <script src="/static/app.js"></script>
 </body>
 </html>
