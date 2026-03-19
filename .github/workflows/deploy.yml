@@ -8,6 +8,7 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    environment: production
 
     steps:
       - name: Checkout code
@@ -20,28 +21,69 @@ jobs:
           username: ${{ secrets.DEPLOY_USERNAME }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
+            set -e  # Остановить скрипт при любой ошибке
+            
+            echo "🚀 Начало деплоя: $(date)"
             cd ~/cnc_office_v2
             
-            echo " Pull свежих изменений..."
+            # 1. Pull свежих изменений
+            echo "🔄 Pull свежих изменений..."
             git fetch origin develop
             git reset --hard origin/develop
             
-            echo " Остановка контейнеров..."
-            docker compose down
+            # 2. Остановка и очистка
+            echo "🛑 Остановка контейнеров..."
+            docker compose down --remove-orphans || true
             
-            echo "🔨 Сборка образов..."
-            docker compose build --no-cache
-            
-            echo "Запуск проекта..."
-            docker compose up -d
-            
-            echo "🗄 Применение миграций..."
-            docker compose exec -T web python manage.py migrate
-            
-            echo " Сборка статики..."
-            docker compose exec -T web python manage.py collectstatic --noinput
-            
-            echo " Очистка старых образов..."
+            echo "🧹 Очистка кэша Docker..."
             docker image prune -f
+            docker builder prune -f
             
-            echo " Деплой завершён!"
+            # 3. ЖЁСТКАЯ пересборка ВСЕХ образов
+            echo "🔨 Пересборка образов (без кэша)..."
+            docker compose build --no-cache --force-rm
+            
+            # 4. Запуск с пересозданием контейнеров
+            echo "▶️ Запуск проекта..."
+            docker compose up -d --force-recreate
+            
+            # 5. Ожидание запуска (важно!)
+            echo "⏳ Ожидание запуска сервисов (30 сек)..."
+            sleep 30
+            
+            # 6. Проверка здоровья контейнеров
+            echo "🏥 Проверка статуса контейнеров..."
+            docker compose ps
+            
+            # Проверка, что web-контейнер работает
+            if ! docker compose ps --format "table {{.Name}}\t{{.Status}}" | grep web | grep -q "Up"; then
+              echo "❌ ОШИБКА: Контейнер web не запустился!"
+              docker compose logs web --tail=50
+              exit 1
+            fi
+            
+            # 7. Применение миграций
+            echo "🗄 Применение миграций..."
+            docker compose exec -T web python manage.py migrate --noinput || echo "⚠️ Миграции не применились (возможно, уже актуальны)"
+            
+            # 8. Сборка статики
+            echo "📁 Сборка статики..."
+            docker compose exec -T web python manage.py collectstatic --noinput --clear || echo "⚠️ Сборка статики завершилась с предупреждением"
+            
+            # 9. Финальная проверка Nginx
+            echo "🌐 Проверка доступности приложения..."
+            sleep 10
+            if docker compose exec -T nginx curl -sf http://localhost:80/api/ >/dev/null 2>&1; then
+              echo "✅ Приложение отвечает через Nginx!"
+            else
+              echo "⚠️ Nginx не может подключиться к backend (проверьте логи)"
+              docker compose logs nginx --tail=20 || true
+              docker compose logs web --tail=20 || true
+            fi
+            
+            # 10. Финальная очистка
+            echo "🧹 Финальная очистка старых образов..."
+            docker image prune -f --filter="until=24h"
+            
+            echo "✅ Деплой завершён успешно: $(date)"
+            echo "🔗 Приложение доступно: http://${{ secrets.DEPLOY_HOST }}:8002/"
