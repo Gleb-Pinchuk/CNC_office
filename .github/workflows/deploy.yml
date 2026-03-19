@@ -21,7 +21,7 @@ jobs:
           username: ${{ secrets.DEPLOY_USERNAME }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
-            set -e  # Остановить скрипт при любой ошибке
+            set -e
             
             echo "🚀 Начало деплоя: $(date)"
             cd ~/cnc_office_v2
@@ -31,59 +31,68 @@ jobs:
             git fetch origin develop
             git reset --hard origin/develop
             
-            # 2. Остановка и очистка
-            echo "🛑 Остановка контейнеров..."
-            docker compose down --remove-orphans || true
+            # 2. 🛑 ЖЁСТКАЯ очистка всех контейнеров и портов
+            echo "🛑 Полная очистка контейнеров..."
+            docker compose down --remove-orphans --volumes || true
+            docker stop $(docker ps -aq) 2>/dev/null || true
+            docker rm $(docker ps -aq) 2>/dev/null || true
             
+            # 3. Проверка и освобождение порта 8002
+            echo "🔍 Проверка порта 8002..."
+            sudo fuser -k 8002/tcp 2>/dev/null || true
+            sudo lsof -ti:8002 | xargs kill -9 2>/dev/null || true
+            sleep 2
+            
+            # 4. Очистка кэша Docker
             echo "🧹 Очистка кэша Docker..."
             docker image prune -f
             docker builder prune -f
             
-            # 3. ЖЁСТКАЯ пересборка ВСЕХ образов
+            # 5. ЖЁСТКАЯ пересборка
             echo "🔨 Пересборка образов (без кэша)..."
             docker compose build --no-cache --force-rm
             
-            # 4. Запуск с пересозданием контейнеров
+            # 6. Запуск
             echo "▶️ Запуск проекта..."
             docker compose up -d --force-recreate
             
-            # 5. Ожидание запуска (важно!)
+            # 7. Ожидание запуска
             echo "⏳ Ожидание запуска сервисов (30 сек)..."
             sleep 30
             
-            # 6. Проверка здоровья контейнеров
+            # 8. Проверка статуса
             echo "🏥 Проверка статуса контейнеров..."
             docker compose ps
             
-            # Проверка, что web-контейнер работает
+            # 9. Проверка, что web работает
             if ! docker compose ps --format "table {{.Name}}\t{{.Status}}" | grep web | grep -q "Up"; then
               echo "❌ ОШИБКА: Контейнер web не запустился!"
               docker compose logs web --tail=50
               exit 1
             fi
             
-            # 7. Применение миграций
+            # 10. Миграции
             echo "🗄 Применение миграций..."
-            docker compose exec -T web python manage.py migrate --noinput || echo "⚠️ Миграции не применились (возможно, уже актуальны)"
+            docker compose exec -T web python manage.py migrate --noinput || echo "⚠️ Миграции не применились"
             
-            # 8. Сборка статики
+            # 11. Статика
             echo "📁 Сборка статики..."
-            docker compose exec -T web python manage.py collectstatic --noinput --clear || echo "⚠️ Сборка статики завершилась с предупреждением"
+            docker compose exec -T web python manage.py collectstatic --noinput --clear || echo "⚠️ Сборка статики с предупреждением"
             
-            # 9. Финальная проверка Nginx
+            # 12. Проверка Nginx
             echo "🌐 Проверка доступности приложения..."
             sleep 10
             if docker compose exec -T nginx curl -sf http://localhost:80/api/ >/dev/null 2>&1; then
               echo "✅ Приложение отвечает через Nginx!"
             else
-              echo "⚠️ Nginx не может подключиться к backend (проверьте логи)"
+              echo "⚠️ Nginx не может подключиться к backend"
               docker compose logs nginx --tail=20 || true
               docker compose logs web --tail=20 || true
             fi
             
-            # 10. Финальная очистка
-            echo "🧹 Финальная очистка старых образов..."
+            # 13. Финальная очистка
+            echo "🧹 Финальная очистка..."
             docker image prune -f --filter="until=24h"
             
-            echo "✅ Деплой завершён успешно: $(date)"
-            echo "🔗 Приложение доступно: http://${{ secrets.DEPLOY_HOST }}:8002/"
+            echo "✅ Деплой завершён: $(date)"
+            echo "🔗 Приложение: http://${{ secrets.DEPLOY_HOST }}:8002/"
