@@ -4,11 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CNC Office | Облачное хранилище нового поколения</title>
-    <link rel="stylesheet" href="landing.css">
+
+    <!-- ✅ Исправленные пути к статике и шрифтам -->
+    <link rel="stylesheet" href="/static/landing.css">
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=Rajdhani:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
-    <!-- Animated Background -->
     <div class="bg-animation">
         <div class="grid-lines"></div>
         <div class="floating-particles">
@@ -18,7 +19,6 @@
         <div class="scan-line"></div>
     </div>
 
-    <!-- Navigation -->
     <nav class="navbar">
         <div class="container">
             <div class="logo">
@@ -52,7 +52,6 @@
         </div>
     </nav>
 
-    <!-- Hero Section -->
     <section class="hero">
         <div class="container">
             <div class="hero-content">
@@ -109,7 +108,6 @@
         </div>
     </section>
 
-    <!-- Features Section -->
     <section class="features" id="features">
         <div class="container">
             <div class="section-header">
@@ -188,7 +186,6 @@
         </div>
     </section>
 
-    <!-- Tech Stack Section -->
     <section class="tech-stack">
         <div class="container">
             <div class="section-header">
@@ -205,7 +202,7 @@
                             <line x1="15" y1="9" x2="15.01" y2="9"/>
                         </svg>
                     </div>
-                    <span>Python 3.14</span>
+                    <span>Python 3.12</span>
                 </div>
                 <div class="tech-item">
                     <div class="tech-icon">
@@ -215,7 +212,7 @@
                             <path d="M2 12l10 5 10-5"/>
                         </svg>
                     </div>
-                    <span>Django 5.1</span>
+                    <span>Django 4.2</span>
                 </div>
                 <div class="tech-item">
                     <div class="tech-icon">
@@ -257,7 +254,6 @@
         </div>
     </section>
 
-    <!-- CTA Section -->
     <section class="cta">
         <div class="container">
             <div class="cta-content">
@@ -272,7 +268,6 @@
         </div>
     </section>
 
-    <!-- Footer -->
     <footer class="footer">
         <div class="container">
             <div class="footer-content">
@@ -321,7 +316,6 @@
         </div>
     </footer>
 
-    <!-- Login Modal -->
     <div class="modal" id="loginModal">
         <div class="modal-backdrop" onclick="closeModal('loginModal')"></div>
         <div class="modal-content">
@@ -343,7 +337,7 @@
                             <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
                             <circle cx="12" cy="7" r="4"/>
                         </svg>
-                        <input type="text" id="loginUsername" name="username" required autocomplete="username">
+                        <input type="text" id="loginUsername" name="username" required autocomplete="username" placeholder="admin">
                     </div>
                 </div>
                 <div class="form-group">
@@ -353,7 +347,7 @@
                             <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
                             <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
                         </svg>
-                        <input type="password" id="loginPassword" name="password" required autocomplete="current-password">
+                        <input type="password" id="loginPassword" name="password" required autocomplete="current-password" placeholder="••••••••">
                     </div>
                 </div>
                 <div class="form-options">
@@ -376,7 +370,6 @@
         </div>
     </div>
 
-    <!-- Register Modal -->
     <div class="modal" id="registerModal">
         <div class="modal-backdrop" onclick="closeModal('registerModal')"></div>
         <div class="modal-content">
@@ -398,7 +391,7 @@
                             <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
                             <circle cx="12" cy="7" r="4"/>
                         </svg>
-                        <input type="text" id="regUsername" name="username" required minlength="3" maxlength="150">
+                        <input type="text" id="regUsername" name="username" required minlength="3" maxlength="150" placeholder="admin">
                     </div>
                     <span class="input-hint">От 3 до 150 символов</span>
                 </div>
@@ -409,7 +402,7 @@
                             <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
                             <polyline points="22,6 12,13 2,6"/>
                         </svg>
-                        <input type="email" id="regEmail" name="email" required>
+                        <input type="email" id="regEmail" name="email" required placeholder="user@example.com">
                     </div>
                 </div>
                 <div class="form-group">
@@ -419,7 +412,7 @@
                             <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
                             <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
                         </svg>
-                        <input type="password" id="regPassword" name="password1" required minlength="8">
+                        <input type="password" id="regPassword" name="password" required minlength="8" placeholder="Мин. 8 символов">
                     </div>
                     <span class="input-hint">Минимум 8 символов</span>
                 </div>
@@ -430,7 +423,7 @@
                             <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
                             <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
                         </svg>
-                        <input type="password" id="regPasswordConfirm" name="password2" required>
+                        <input type="password" id="regPasswordConfirm" name="password2" required placeholder="Повторите пароль">
                     </div>
                 </div>
                 <div class="form-options">
@@ -452,6 +445,7 @@
         </div>
     </div>
 
-    <script src="landing.js"></script>
+    <!-- ✅ Исправленный путь к скрипту -->
+    <script src="/static/landing.js"></script>
 </body>
 </html>
