@@ -4,9 +4,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CNC Office | Облачное хранилище</title>
-    <!-- Исправлен путь к стилям (абсолютный) и ссылка на шрифты -->
-    <link rel="stylesheet" href="/style.css">
+
+    <!-- ✅ Исправлен путь к стилям и шрифтам (убраны пробелы в URL) -->
+    <link rel="stylesheet" href="/static/style.css">
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=Rajdhani:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- ✅ CSS для переключения форм -->
+    <style>
+        .hidden { display: none !important; }
+        .modal-form { transition: opacity 0.2s ease; }
+    </style>
 </head>
 <body>
     <div class="app-container">
@@ -103,9 +110,9 @@
                 </div>
             </header>
 
-            <!-- Breadcrumb (исправлен эмодзи на текст) -->
+            <!-- Breadcrumb -->
             <div class="breadcrumb" id="breadcrumb" style="display: none;">
-                <a href="#" onclick="navigateToFolder(null); return false;">Корень</a>
+                <a href="#" onclick="navigateToFolder(null); return false;">📁 Корень</a>
                 <span id="breadcrumbPath"></span>
             </div>
 
@@ -137,9 +144,9 @@
 
     <!-- Upload Modal -->
     <div class="modal" id="uploadModal">
-        <div class="modal-backdrop" onclick="hideModal('uploadModal')"></div>
+        <div class="modal-backdrop" onclick="hideModal(uploadModal)"></div>
         <div class="modal-content">
-            <button class="modal-close" onclick="hideModal('uploadModal')">&times;</button>
+            <button class="modal-close" onclick="hideModal(uploadModal)">&times;</button>
             <div class="modal-header">
                 <svg class="modal-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
@@ -180,20 +187,22 @@
         </div>
     </div>
 
-    <!-- Login Modal -->
+    <!-- ✅ Login/Register Modal (ИСПРАВЛЕНА) -->
     <div class="modal" id="loginModal">
-        <div class="modal-backdrop" onclick="hideModal('loginModal')"></div>
+        <div class="modal-backdrop" onclick="hideModal(loginModal)"></div>
         <div class="modal-content modal-small">
-            <button class="modal-close" onclick="hideModal('loginModal')">&times;</button>
+            <button class="modal-close" onclick="hideModal(loginModal)">&times;</button>
             <div class="modal-header">
                 <svg class="modal-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                     <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M13.8 12H3"/>
                 </svg>
-                <h2>Вход в систему</h2>
-                <p>Введите учётные данные для доступа</p>
+                <h2 id="modalTitle">Вход в систему</h2>
+                <p id="modalSubtitle">Введите учётные данные для доступа</p>
             </div>
             <div class="modal-body">
-                <form id="loginForm" onsubmit="return false;" autocomplete="off">
+
+                <!-- ✅ Форма входа -->
+                <form id="loginForm" class="modal-form" onsubmit="return false;" autocomplete="off">
                     <div class="form-group">
                         <label for="loginUsername">Имя пользователя</label>
                         <div class="input-wrapper">
@@ -201,7 +210,7 @@
                                 <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
                                 <circle cx="12" cy="7" r="4"/>
                             </svg>
-                            <input type="text" id="loginUsername" required autocomplete="username">
+                            <input type="text" id="loginUsername" name="username" required autocomplete="username" placeholder="admin">
                         </div>
                     </div>
                     <div class="form-group">
@@ -211,7 +220,7 @@
                                 <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
                                 <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
                             </svg>
-                            <input type="password" id="loginPassword" required autocomplete="current-password">
+                            <input type="password" id="loginPassword" name="password" required autocomplete="current-password" placeholder="••••••••">
                         </div>
                     </div>
                     <button type="submit" class="btn btn-primary btn-full">
@@ -220,12 +229,72 @@
                         </svg>
                         Войти
                     </button>
+                    <p class="modal-switch">
+                        Нет аккаунта?
+                        <a href="#" id="toggleToRegister">Зарегистрироваться</a>
+                    </p>
                 </form>
+
+                <!-- ✅ Форма регистрации (была скрыта) -->
+                <form id="registerForm" class="modal-form hidden" onsubmit="return false;" autocomplete="off">
+                    <div class="form-group">
+                        <label for="registerUsername">Имя пользователя</label>
+                        <div class="input-wrapper">
+                            <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                                <circle cx="12" cy="7" r="4"/>
+                            </svg>
+                            <input type="text" id="registerUsername" name="username" required autocomplete="username" placeholder="admin">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="registerEmail">Email</label>
+                        <div class="input-wrapper">
+                            <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+                                <polyline points="22,6 12,13 2,6"/>
+                            </svg>
+                            <input type="email" id="registerEmail" name="email" required autocomplete="email" placeholder="user@example.com">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="registerPassword">Пароль</label>
+                        <div class="input-wrapper">
+                            <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                                <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                            </svg>
+                            <input type="password" id="registerPassword" name="password" required autocomplete="new-password" placeholder="Мин. 8 символов" minlength="8">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="registerPassword2">Повторите пароль</label>
+                        <div class="input-wrapper">
+                            <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                                <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                            </svg>
+                            <input type="password" id="registerPassword2" name="password2" required autocomplete="new-password" placeholder="Повторите пароль">
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-full">
+                        <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                            <circle cx="8.5" cy="7" r="4"/>
+                            <polyline points="17 11 19 13 23 9"/>
+                        </svg>
+                        Зарегистрироваться
+                    </button>
+                    <p class="modal-switch">
+                        Уже есть аккаунт?
+                        <a href="#" id="toggleToLogin">Войти</a>
+                    </p>
+                </form>
+
             </div>
         </div>
     </div>
 
-    <!-- Исправлен путь к скрипту (абсолютный) -->
-    <script src="/app.js"></script>
+    <script src="/static/app.js"></script>
 </body>
 </html>
