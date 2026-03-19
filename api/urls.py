@@ -6,7 +6,6 @@ from files.views import (
     FileAccessPermissionViewSet,
     AuditLogViewSet,
 )
-
 router = DefaultRouter()
 router.register(r'files', StorageFileViewSet, basename='file')
 router.register(r'folders', StorageFolderViewSet, basename='folder')
