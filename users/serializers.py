@@ -1,47 +1,52 @@
 from rest_framework import serializers
-from django.contrib.auth import get_user_model
-from django.contrib.auth.password_validation import validate_password
+from django.contrib.auth import get_user_model, password_validation
+from django.core.exceptions import ValidationError
 
 User = get_user_model()
 
 
-class UserSerializer(serializers.ModelSerializer):
-    """Сериализатор для регистрации пользователя"""
+class RegisterSerializer(serializers.ModelSerializer):
+    """Сериализатор для регистрации"""
     password = serializers.CharField(
         write_only=True,
         required=True,
-        validators=[validate_password]
+        validators=[password_validation.validate_password]
     )
-    password_confirm = serializers.CharField(write_only=True, required=True)
+    password2 = serializers.CharField(write_only=True, required=True)
 
     class Meta:
         model = User
-        fields = ('id', 'username', 'email', 'password', 'password_confirm')
+        fields = ('id', 'username', 'email', 'password', 'password2')
         extra_kwargs = {
-            'username': {'required': True},
             'email': {'required': True},
         }
 
     def validate(self, attrs):
-        if attrs['password'] != attrs['password_confirm']:
-            raise serializers.ValidationError(
-                {"password": "Пароли не совпадают"}
-            )
+        if attrs['password'] != attrs['password2']:
+            raise serializers.ValidationError({'password2': 'Пароли не совпадают'})
         return attrs
 
     def create(self, validated_data):
-        validated_data.pop('password_confirm')
-        user = User.objects.create(
-            username=validated_data['username'],
-            email=validated_data['email']
-        )
-        user.set_password(validated_data['password'])
-        user.save()
-        return user
+        validated_data.pop('password2')
+        return User.objects.create_user(**validated_data)
+
+
+class UserSerializer(serializers.ModelSerializer):
+    """Сериализатор для создания/обновления пользователя"""
+    class Meta:
+        model = User
+        fields = ('id', 'username', 'email', 'password')
+        extra_kwargs = {
+            'password': {'write_only': True},
+            'email': {'required': True},
+        }
+
+    def create(self, validated_data):
+        return User.objects.create_user(**validated_data)
 
 
 class UserListSerializer(serializers.ModelSerializer):
-    """Упрощённый сериализатор для списка пользователей"""
+    """Сериализатор для списка пользователей"""
     class Meta:
         model = User
         fields = ('id', 'username', 'email')
