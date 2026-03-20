@@ -1,3 +1,5 @@
+version: '3.8'
+
 services:
   db:
     image: postgres:16
@@ -12,7 +14,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 60s
+      start_period: 30s
     networks:
       - cnc_network
 
@@ -25,6 +27,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
     networks:
       - cnc_network
 
@@ -49,6 +52,13 @@ services:
       ALLOWED_HOSTS: "*"
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
+    # ✅ HEALTHCHECK ДЛЯ WEB (использует публичный эндпоинт /api/health/)
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     networks:
       - cnc_network
 
