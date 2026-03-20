@@ -396,35 +396,27 @@ async function handleUpload(e) {
 // ✅ Исправленная функция скачивания
 async function downloadFile(fileId) {
     try {
-        const headers = getAuthHeaders(); // ✅ Добавляем токен
+        const headers = getAuthHeaders();
 
-        const response = await fetch(`${API_BASE}/files/${fileId}/`, {
+        // ✅ Используем /download/ эндпоинт
+        const response = await fetch(`${API_BASE}/files/${fileId}/download/`, {
             method: 'GET',
             headers: headers
         });
 
         if (response.ok) {
-            const fileData = await response.json();
+            // Получаем файл как blob
+            const blob = await response.blob();
 
-            // Если есть прямая ссылка на файл — открываем её
-            if (fileData.file) {
-                // ✅ Создаём временную ссылку с токеном (если нужно)
-                // Или используем fetch для получения blob
-                const blobResponse = await fetch(fileData.file, {
-                    headers: { 'Authorization': headers['Authorization'] }
-                });
-                if (blobResponse.ok) {
-                    const blob = await blobResponse.blob();
-                    triggerDownload(blob, fileData.file_name || `file_${fileId}`);
-                } else {
-                    // Фоллбэк: открываем в новой вкладке (может не работать без токена)
-                    window.open(fileData.file, '_blank');
-                }
-            } else {
-                // Если прямой ссылки нет — скачиваем через blob
-                const blob = await response.blob();
-                triggerDownload(blob, fileData.file_name || `file_${fileId}`);
-            }
+            // Создаём ссылку для скачивания
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `file_${fileId}`;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
         } else if (response.status === 401 || response.status === 403) {
             alert('Ошибка авторизации. Пожалуйста, войдите снова.');
             clearAuth();
