@@ -393,31 +393,62 @@ async function handleUpload(e) {
     await uploadFile(fileInput.files[0]);
 }
 
-// ✅ Исправлено: добавляет токен авторизации для скачивания
+// ✅ Исправленная функция скачивания
 async function downloadFile(fileId) {
     try {
-        const headers = getAuthHeaders();
-        const response = await fetch(`${API_BASE}/files/${fileId}/`, { method: 'GET', headers });
+        const headers = getAuthHeaders(); // ✅ Добавляем токен
+
+        const response = await fetch(`${API_BASE}/files/${fileId}/`, {
+            method: 'GET',
+            headers: headers
+        });
+
         if (response.ok) {
             const fileData = await response.json();
-            if (fileData.file) window.open(fileData.file, '_blank');
-            else {
+
+            // Если есть прямая ссылка на файл — открываем её
+            if (fileData.file) {
+                // ✅ Создаём временную ссылку с токеном (если нужно)
+                // Или используем fetch для получения blob
+                const blobResponse = await fetch(fileData.file, {
+                    headers: { 'Authorization': headers['Authorization'] }
+                });
+                if (blobResponse.ok) {
+                    const blob = await blobResponse.blob();
+                    triggerDownload(blob, fileData.file_name || `file_${fileId}`);
+                } else {
+                    // Фоллбэк: открываем в новой вкладке (может не работать без токена)
+                    window.open(fileData.file, '_blank');
+                }
+            } else {
+                // Если прямой ссылки нет — скачиваем через blob
                 const blob = await response.blob();
-                const url = window.URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = fileData.file_name || `file_${fileId}`;
-                document.body.appendChild(a);
-                a.click();
-                window.URL.revokeObjectURL(url);
-                document.body.removeChild(a);
+                triggerDownload(blob, fileData.file_name || `file_${fileId}`);
             }
         } else if (response.status === 401 || response.status === 403) {
             alert('Ошибка авторизации. Пожалуйста, войдите снова.');
             clearAuth();
             showLoginModal();
-        } else alert('Ошибка скачивания файла');
-    } catch (error) { console.error('Download error:', error); alert('Ошибка подключения к серверу'); }
+        } else {
+            const error = await response.json().catch(() => ({}));
+            alert(`Ошибка: ${error.detail || 'Не удалось скачать файл'}`);
+        }
+    } catch (error) {
+        console.error('Download error:', error);
+        alert('Ошибка подключения к серверу');
+    }
+}
+
+// ✅ Вспомогательная функция для скачивания blob
+function triggerDownload(blob, filename) {
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
 }
 
 async function shareFile(fileId) {
