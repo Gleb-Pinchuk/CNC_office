@@ -31,39 +31,48 @@ jobs:
             git fetch origin develop
             git reset --hard origin/develop
             
-            # 2. Остановка и очистка
+            # 2. Полная остановка контейнеров
             echo "🛑 Остановка контейнеров..."
-            docker compose down --remove-orphans || true
+            docker compose down --remove-orphans
             
+            # 3. Очистка старых образов
             echo "🧹 Очистка кэша Docker..."
             docker image prune -f
             docker builder prune -f
             
-            # 3. 🔨 ПЕРЕСБОРКА ОБРАЗОВ (с --no-cache)
+            # 4. 🔨 ПЕРЕСБОРКА ОБРАЗОВ (ОБЯЗАТЕЛЬНО --no-cache!)
             echo "🔨 Пересборка образов (без кэша)..."
             docker compose build --no-cache --force-rm
             
-            # 4. ▶️ Запуск контейнеров
+            # 5. ▶️ Запуск контейнеров (БЕЗ фона, чтобы дождаться готовности)
             echo "▶️ Запуск проекта..."
             docker compose up -d --force-recreate
             
-            # 5. ⏳ Ожидание запуска (важно для БД!)
-            echo "⏳ Ожидание запуска сервисов (45 сек)..."
-            sleep 45
+            # 6. ⏳ Ожидание запуска БД и сервисов
+            echo "⏳ Ожидание запуска сервисов (40 сек)..."
+            sleep 40
             
-            # 6. 🏥 Проверка здоровья контейнеров
+            # 7. 🗄 ПРИМЕНЕНИЕ МИГРАЦИЙ (ОБЯЗАТЕЛЬНО до проверки!)
+            echo "🗄 Применение миграций..."
+            docker compose exec -T web python manage.py migrate --noinput
+            
+            # 8. 📁 СБОРКА СТАТИКИ (ОБЯЗАТЕЛЬНО!)
+            echo "📁 Сборка статики..."
+            docker compose exec -T web python manage.py collectstatic --noinput --clear
+            
+            # 9. 🔄 Перезапуск web контейнера (чтобы подхватил новую статику)
+            echo "🔄 Перезапуск web контейнера..."
+            docker compose restart web
+            
+            # 10. ⏳ Ожидание после перезапуска
+            echo "⏳ Ожидание после перезапуска (15 сек)..."
+            sleep 15
+            
+            # 11. 🏥 Проверка здоровья контейнеров
             echo "🏥 Проверка статуса контейнеров..."
             docker compose ps
             
-            # 7. 🗄 АВТОМАТИЧЕСКИЕ МИГРАЦИИ
-            echo "🗄 Применение миграций..."
-            docker compose exec -T web python manage.py migrate --noinput || echo "⚠️ Миграции: предупреждение"
-            
-            # 8. 📁 Сборка статики
-            echo "📁 Сборка статики..."
-            docker compose exec -T web python manage.py collectstatic --noinput --clear || echo "⚠️ Статика: предупреждение"
-            
-            # 9. 🔍 Проверка ответа приложения
+            # 12. 🔍 Проверка ответа Django
             echo "🔍 Проверка доступности API..."
             HTTP_CODE=$(docker compose exec -T web curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/ || echo "000")
             echo "📊 HTTP код от Django: $HTTP_CODE"
@@ -79,15 +88,21 @@ jobs:
               docker compose logs web --tail=50
             fi
             
-            # 10. 🌐 Проверка через Nginx
+            # 13. 🌐 Проверка через Nginx
             echo "🌐 Проверка через Nginx..."
             sleep 5
             EXTERNAL_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:80/api/ || echo "000")
             echo "📊 HTTP код от Nginx: $EXTERNAL_CODE"
             
-            # 11. 🧹 Финальная очистка
+            # 14. 🧹 Финальная очистка
             echo "🧹 Очистка старых образов..."
             docker image prune -f --filter="until=24h"
             
             echo "✅ Деплой завершён: $(date)"
             echo "🔗 Приложение доступно: http://${{ secrets.DEPLOY_HOST }}:8002/"
+            echo ""
+            echo "📋 Важно:"
+            echo "  - Миграции применены ✅"
+            echo "  - Статика собрана ✅"
+            echo "  - Контейнеры перезапущены ✅"
+            echo "  - Очистите кэш браузера: Ctrl+Shift+R"
