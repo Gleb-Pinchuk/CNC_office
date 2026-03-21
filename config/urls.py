@@ -13,12 +13,8 @@ urlpatterns = [
 ]
 
 if settings.DEBUG:
+    # Стандартные пути для staticfiles и media
     urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
-    frontend_dir = str(settings.BASE_DIR / 'frontend')
-    urlpatterns += [
-        path('style.css', static('style.css', document_root=frontend_dir)),
-        path('app.js', static('app.js', document_root=frontend_dir)),
-        path('landing.css', static('landing.css', document_root=frontend_dir)),
-        path('landing.js', static('landing.js', document_root=frontend_dir)),
-    ]
+    frontend_dir = settings.BASE_DIR / 'frontend'
+    urlpatterns += static('/static/', document_root=str(frontend_dir))
