@@ -1,18 +1,9 @@
 FROM python:3.12-slim
 
-# ✅ Настройка pip: зеркало + таймауты + отключение кэша
-RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple && \
-    pip config set global.timeout 1000 && \
-    pip config set global.retries 10
-
-# Установка системных пакетов с очисткой
+# Установка пакетов с очисткой
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    libpq-dev \
-    postgresql-client \
-    curl \
-    && rm -rf /var/lib/apt/lists/* \
-    && apt-get clean
+    build-essential libpq-dev postgresql-client curl \
+    && rm -rf /var/lib/apt/lists/* && apt-get clean
 
 WORKDIR /app
 
@@ -23,9 +14,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # ✅ Копируем код после установки зависимостей
 COPY . .
 
-# Создаём папки для media/static
+# Создаём папки
 RUN mkdir -p /app/media /app/staticfiles && chmod 755 /app/media /app/staticfiles
 
 EXPOSE 8000
-
 CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "3", "--timeout", "120"]
