@@ -1,29 +1,30 @@
 FROM python:3.12-slim
 
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-ENV PIP_NO_CACHE_DIR=1
+# ✅ Установка системных пакетов с кэшированием и очисткой
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libpq-dev \
+    postgresql-client \
+    curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y \
-    build-essential libpq-dev postgresql-client curl \
-    && rm -rf /var/lib/apt/lists/*
+# ✅ Копируем requirements первым для кэширования слоя
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-COPY requirements.txt /app/
-RUN pip install --upgrade pip && pip install -r requirements.txt && pip install gunicorn celery redis
+# ✅ Копируем остальной код
+COPY . .
 
-COPY . /app/
+# ✅ Создаём папки для media/static (если нет)
+RUN mkdir -p /app/media /app/staticfiles && chmod 755 /app/media /app/staticfiles
 
-RUN mkdir -p /app/staticfiles /app/media
-RUN python manage.py collectstatic --noinput --clear || true
-
-RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
-USER appuser
+# ✅ Запускаем от непривилегированного пользователя (опционально)
+# RUN useradd -m appuser && chown -R appuser /app
+# USER appuser
 
 EXPOSE 8000
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD curl -f http://localhost:8000/api/ || exit 1
-
-CMD ["python", "-m", "gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "3", "--timeout", "120"]
+CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "3", "--timeout", "120"]
