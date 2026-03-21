@@ -4,7 +4,7 @@ from django.utils import timezone
 from datetime import timedelta
 from django.db import models
 from django.contrib.auth import get_user_model
-from django.http import FileResponse
+from django.http import FileResponse, HttpResponse
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -64,7 +64,7 @@ class StorageFileViewSet(viewsets.ModelViewSet):
                 queryset = queryset.filter(folder__isnull=True)
             else:
                 queryset = queryset.filter(folder_id=folder_id)
-        return queryset
+        return queryset.order_by('-uploaded_at')  # ✅ Добавлено ordering
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
@@ -73,15 +73,18 @@ class StorageFileViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         instance = serializer.save(owner=self.request.user)
+        # ✅ ИСПРАВЛЕНО: используем os.path.basename вместо instance.file_name
+        file_name = os.path.basename(instance.file.name) if instance.file else f"File #{instance.id}"
         AuditLog.objects.create(
             user=self.request.user,
             action='upload',
             ip_address=self.get_request_ip(),
-            details=f"Загружен файл: {instance.file_name}"
+            details=f"Загружен файл: {file_name}"
         )
 
     def perform_destroy(self, instance):
-        file_name = instance.file_name
+        # ✅ ИСПРАВЛЕНО: используем os.path.basename вместо instance.file_name
+        file_name = os.path.basename(instance.file.name) if instance.file else f"File #{instance.id}"
         instance.delete()
         AuditLog.objects.create(
             user=self.request.user,
@@ -103,11 +106,12 @@ class StorageFileViewSet(viewsets.ModelViewSet):
         file_obj = self.get_object()  # ← Проверяет права через permission_classes
 
         # Логируем скачивание
+        file_name = os.path.basename(file_obj.file.name) if file_obj.file else f"File #{file_obj.id}"
         AuditLog.objects.create(
             user=request.user,
             action='download',
             ip_address=self.get_request_ip(),
-            details=f'Скачан файл: {file_obj.file_name}'
+            details=f'Скачан файл: {file_name}'
         )
 
         # Отдаём файл
@@ -115,7 +119,7 @@ class StorageFileViewSet(viewsets.ModelViewSet):
             response = FileResponse(
                 open(file_obj.file.path, 'rb'),
                 as_attachment=True,
-                filename=file_obj.file_name
+                filename=file_name  # ✅ Используем переменную file_name
             )
             # ✅ Добавляем заголовки для CORS
             response['Access-Control-Expose-Headers'] = 'Content-Disposition'
@@ -214,11 +218,13 @@ class StorageFileViewSet(viewsets.ModelViewSet):
         if not created:
             permission.permission = permission_type
             permission.save()
+        # ✅ ИСПРАВЛЕНО: используем os.path.basename вместо file.file_name
+        file_name = os.path.basename(file.file.name) if file.file else f"File #{file.id}"
         AuditLog.objects.create(
             user=request.user,
             action='share',
             ip_address=self.get_request_ip(),
-            details=f"Предоставлен доступ {permission_type} к файлу {file.file_name} пользователю {target_user.username}"
+            details=f"Предоставлен доступ {permission_type} к файлу {file_name} пользователю {target_user.username}"
         )
         return Response(
             FileAccessPermissionSerializer(permission, context={'request': request}).data,
@@ -235,7 +241,7 @@ class StorageFolderViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        return StorageFolder.objects.filter(owner=user)
+        return StorageFolder.objects.filter(owner=user).order_by('name')  # ✅ Добавлено ordering
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
@@ -281,11 +287,13 @@ class FileAccessPermissionViewSet(viewsets.ModelViewSet):
         instance = serializer.save()
         user = serializer.validated_data.get('user')
         username = user.username if user else 'unknown'
+        # ✅ ИСПРАВЛЕНО: используем os.path.basename вместо file.file_name
+        file_name = os.path.basename(file.file.name) if file and file.file else 'unknown'
         AuditLog.objects.create(
             user=self.request.user,
             action='share',
             ip_address=self.get_request_ip(),
-            details=f"Предоставлен доступ к файлу {file.file_name if file else 'unknown'} пользователю {username}"
+            details=f"Предоставлен доступ к файлу {file_name} пользователю {username}"
         )
 
     def get_request_ip(self):
