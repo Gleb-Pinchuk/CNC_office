@@ -16,5 +16,3 @@ if settings.DEBUG:
     # Стандартные пути для staticfiles и media
     urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
-    frontend_dir = settings.BASE_DIR / 'frontend'
-    urlpatterns += static('/static/', document_root=str(frontend_dir))
