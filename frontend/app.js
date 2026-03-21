@@ -1,6 +1,5 @@
 // ==================== CNC Office - Frontend App ====================
-const BASE_URL = window.location.origin;
-const API_BASE = `${BASE_URL}/api`;
+const API_BASE = '/api';
 const AUTH_BASE = `${API_BASE}/users`;
 
 let currentUser = null;
@@ -23,13 +22,15 @@ const loginForm = document.getElementById('loginForm');
 const registerForm = document.getElementById('registerForm');
 const navItems = document.querySelectorAll('.nav-item');
 
+// ✅ Инициализация
 document.addEventListener('DOMContentLoaded', () => {
+    console.log('🚀 App initialized');
     checkAuth();
     setupEventListeners();
     setupDragAndDrop();
 });
 
-// ✅ Заголовки с токеном авторизации
+// ✅ Заголовки с токеном
 function getAuthHeaders(isJson = true) {
     const headers = { 'Accept': 'application/json' };
     if (authToken) headers['Authorization'] = `Token ${authToken}`;
@@ -62,7 +63,7 @@ async function checkAuth() {
             document.getElementById('username').textContent = currentUser.username;
             loadView('files');
         } else { clearAuth(); showLoginModal(); }
-    } catch { clearAuth(); showLoginModal(); }
+    } catch (e) { console.error('Auth check failed:', e); clearAuth(); showLoginModal(); }
 }
 
 // ✅ Модалки
@@ -108,7 +109,7 @@ async function handleLogin(e) {
             document.getElementById('username').textContent = currentUser.username;
             hideModal('loginModal'); loadView('files');
         } else alert(`Ошибка: ${data.detail || 'Неверный логин или пароль'}`);
-    } catch { alert('Ошибка подключения к серверу'); }
+    } catch (e) { console.error('Login error:', e); alert('Ошибка подключения к серверу'); }
 }
 
 // ✅ Регистрация
@@ -140,7 +141,7 @@ async function handleRegister(e) {
                 if (loginForm) loginForm.classList.remove('hidden');
             }
         } else alert(`Ошибка: ${data.detail || JSON.stringify(data)}`);
-    } catch { alert('Ошибка подключения к серверу'); }
+    } catch (e) { console.error('Register error:', e); alert('Ошибка подключения к серверу'); }
 }
 
 async function logout() { clearAuth(); location.reload(); }
@@ -218,17 +219,21 @@ function setupDragAndDrop() {
     dz.addEventListener('drop', e => { if (currentView === 'files' && e.dataTransfer.files[0]) uploadFile(e.dataTransfer.files[0]); }, false);
 }
 
-// ✅ Загрузка файлов списка
+// ✅ Загрузка списка файлов
 async function loadFiles() {
     showLoading();
     try {
         let url = `${API_BASE}/files/?`;
         if (currentFolder) url += `folder=${currentFolder.id}`;
         const res = await fetch(url, { headers: getAuthHeaders() });
-        if (res.status === 200) renderFiles(await res.json());
-        else if (res.status === 401 || res.status === 403) { hideLoading(); clearAuth(); showLoginModal(); }
-        else showEmpty();
-    } catch { showEmpty(); }
+        console.log('📦 Files response status:', res.status);
+        if (res.status === 200) {
+            const data = await res.json();
+            console.log('📦 Files data:', data);
+            renderFiles(data);
+        } else if (res.status === 401 || res.status === 403) { hideLoading(); clearAuth(); showLoginModal(); }
+        else { const text = await res.text(); console.error('❌ Files error:', res.status, text); showEmpty(); }
+    } catch (e) { console.error('❌ Load files error:', e); showEmpty(); }
 }
 
 function renderFiles(files) {
@@ -267,23 +272,48 @@ function getFileIcon(mt) {
     return '📁';
 }
 
-// ✅ ЗАГРУЗКА ФАЙЛА
+// ✅ ЗАГРУЗКА ФАЙЛА (ИСПРАВЛЕНО!)
 async function uploadFile(file) {
+    console.log('📤 Uploading file:', file.name);
     const fd = new FormData(); fd.append('file', file);
     if (currentFolder) fd.append('folder', currentFolder.id);
     else { const fs = document.getElementById('folderSelect'); if (fs?.value) fd.append('folder', fs.value); }
     try {
-        const res = await fetch(`${API_BASE}/files/`, { method: 'POST', headers: getAuthHeaders(false), body: fd });
-        if (res.ok || res.status === 201) { hideModal('uploadModal'); if (uploadForm) uploadForm.reset(); await loadFiles(); }
-        else { const err = await res.json().catch(()=>({})); alert(`Ошибка: ${err.detail || err.file?.[0] || 'Неизвестная ошибка'}`); }
-    } catch { alert('Ошибка подключения к серверу'); }
+        console.log('📤 Sending request to', `${API_BASE}/files/`);
+        const res = await fetch(`${API_BASE}/files/`, {
+            method: 'POST',
+            headers: getAuthHeaders(false), // ❗ Не JSON для FormData
+            body: fd
+        });
+        console.log('📤 Response status:', res.status);
+        const data = await res.json().catch(() => ({}));
+        console.log('📤 Response data:', data);
+        if (res.ok || res.status === 201) {
+            hideModal('uploadModal');
+            if (uploadForm) uploadForm.reset();
+            await loadFiles(); // ✅ Перезагружаем список!
+        } else {
+            const errMsg = data.detail || data.file?.[0] || data.error || 'Неизвестная ошибка';
+            console.error('❌ Upload failed:', res.status, errMsg);
+            alert(`Ошибка загрузки: ${errMsg}`);
+        }
+    } catch (e) {
+        console.error('❌ Upload error:', e);
+        alert('Ошибка подключения к серверу: ' + e.message);
+    }
 }
-async function handleUpload(e) { e.preventDefault(); const fi = document.getElementById('fileInput'); if (!fi?.files[0]) { alert('Выберите файл'); return; } await uploadFile(fi.files[0]); }
 
-// ✅ СКАЧИВАНИЕ ФАЙЛА (ИСПРАВЛЕНО!)
+async function handleUpload(e) {
+    e.preventDefault();
+    console.log('📤 Form submitted');
+    const fi = document.getElementById('fileInput');
+    if (!fi?.files[0]) { alert('Выберите файл'); return; }
+    await uploadFile(fi.files[0]);
+}
+
+// ✅ СКАЧИВАНИЕ ФАЙЛА
 async function downloadFile(fileId) {
     try {
-        // ✅ Используем /download/ эндпоинт + токен
         const res = await fetch(`${API_BASE}/files/${fileId}/download/`, { headers: getAuthHeaders() });
         if (res.ok) {
             const blob = await res.blob();
@@ -292,7 +322,7 @@ async function downloadFile(fileId) {
             document.body.appendChild(a); a.click(); URL.revokeObjectURL(url); document.body.removeChild(a);
         } else if (res.status === 401 || res.status === 403) { alert('Ошибка авторизации. Войдите снова.'); clearAuth(); showLoginModal(); }
         else { const err = await res.json().catch(()=>({})); alert(`Ошибка: ${err.detail || 'Не удалось скачать'}`); }
-    } catch (e) { console.error(e); alert('Ошибка подключения к серверу'); }
+    } catch (e) { console.error('Download error:', e); alert('Ошибка подключения к серверу'); }
 }
 
 // ✅ Поделиться / Удалить
