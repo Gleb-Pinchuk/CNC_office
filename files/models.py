@@ -2,6 +2,7 @@ import os
 from django.db import models
 from django.contrib.auth import get_user_model
 from django.core.validators import FileExtensionValidator
+from django.utils import timezone
 
 User = get_user_model()
 
@@ -104,7 +105,7 @@ class FileLock(models.Model):
     file = models.ForeignKey(StorageFile, on_delete=models.CASCADE, related_name='locks')
     locked_by = models.ForeignKey(User, on_delete=models.CASCADE)
     locked_at = models.DateTimeField(auto_now_add=True)
-    expires_at = models.DateTimeField()
+    expires_at = models.DateTimeField(default=timezone.now)  # ← Добавьте default
 
     class Meta:
         verbose_name = 'Блокировка файла'
@@ -115,9 +116,7 @@ class FileLock(models.Model):
         return f'{self.file} locked by {self.locked_by}'
 
     def is_expired(self):
-        from django.utils import timezone
         return timezone.now() > self.expires_at
-
 
 class AuditLog(models.Model):
     """Журнал аудита действий"""
