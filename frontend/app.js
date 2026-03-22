@@ -214,7 +214,7 @@ async function loadFiles() {
 
         if (res.status === 200) {
             const data = await res.json();
-            console.log('📦 Files data:', data);
+            console.log('📦 Files ', data);
             const files = data.results || data || [];
             renderFiles(files);
         } else if (res.status === 401 || res.status === 403) {
@@ -244,6 +244,14 @@ function createFileCard(file, index) {
     const card = document.createElement('div');
     card.className = 'file-card';
     card.style.animationDelay = `${index * 0.1}s`;
+    card.style.cursor = 'pointer';
+
+    // ✅ Клик по карточке - скачивание
+    card.onclick = (e) => {
+        if (!e.target.closest('.file-actions')) {
+            downloadFile(file.id);
+        }
+    };
 
     const icon = getFileIcon(file.mime_type);
     let name = file.file_name || (file.file ? file.file.split('/').pop() : 'Без имени');
@@ -259,22 +267,49 @@ function createFileCard(file, index) {
         <div class="file-name" title="${escapeHtml(name)}">${escapeHtml(name)}</div>
         <div class="file-meta"><span>${size}</span><span>${date}</span></div>
         <div class="file-actions">
-            ${canAct ? `<button class="file-action-btn" onclick="downloadFile(${file.id})" title="Скачать">⬇️</button>` : ''}
-            ${canAct ? `<button class="file-action-btn" onclick="shareFile(${file.id})" title="Поделиться">🔗</button>` : ''}
-            ${canAct ? `<button class="file-action-btn" onclick="deleteFile(${file.id})" title="Удалить">🗑️</button>` : ''}
+            ${canAct ? `<button class="file-action-btn" onclick="downloadFile(${file.id}); event.stopPropagation();" title="Скачать">⬇️</button>` : ''}
+            ${canAct ? `<button class="file-action-btn" onclick="shareFile(${file.id}); event.stopPropagation();" title="Поделиться">🔗</button>` : ''}
+            ${canAct ? `<button class="file-action-btn" onclick="deleteFile(${file.id}); event.stopPropagation();" title="Удалить">🗑️</button>` : ''}
         </div>`;
     return card;
 }
 
-function getFileIcon(mt) {
-    if (!mt) return '📁';
-    if (mt.includes('image')) return '🖼️';
+// ✅ ИСПРАВЛЕНО: правильное определение типов файлов
+function getFileIcon(mimeType) {
+    if (!mimeType) return '📄';
+
+    const mt = mimeType.toLowerCase();
+
+    // Excel файлы
+    if (mt.includes('excel') || mt.includes('spreadsheet') ||
+        mt.includes('ms-excel') || mt.includes('.xls') || mt.includes('.xlsx')) {
+        return '📊';
+    }
+    // Word файлы
+    if (mt.includes('word') || mt.includes('.doc') || mt.includes('.docx')) {
+        return '📝';
+    }
+    // PowerPoint
+    if (mt.includes('powerpoint') || mt.includes('presentation') ||
+        mt.includes('.ppt') || mt.includes('.pptx')) {
+        return '📽️';
+    }
+    // PDF
     if (mt.includes('pdf')) return '📄';
+    // Изображения
+    if (mt.includes('image')) return '🖼️';
+    // Видео
     if (mt.includes('video')) return '🎬';
+    // Аудио
     if (mt.includes('audio')) return '🎵';
+    // Текст
     if (mt.includes('text')) return '📝';
-    if (mt.includes('zip') || mt.includes('archive')) return '📦';
-    return '📁';
+    // ZIP/архивы
+    if (mt.includes('zip') || mt.includes('archive') || mt.includes('compressed')) {
+        return '📦';
+    }
+
+    return '📄';
 }
 
 // ✅ Загрузка файла
@@ -343,7 +378,7 @@ async function downloadFile(fileId) {
     }
 }
 
-// ✅ Поделиться / Удалить
+// ✅ Поделиться файлом
 async function shareFile(fileId) {
     const username = prompt('Имя пользователя:');
     if (!username) return;
@@ -357,6 +392,7 @@ async function shareFile(fileId) {
     } catch { alert('Ошибка подключения'); }
 }
 
+// ✅ Удаление файла
 async function deleteFile(fileId) {
     if (!confirm('Удалить файл?')) return;
     try {
@@ -459,7 +495,7 @@ async function createFolder() {
             body: JSON.stringify({ name: name.trim() })
         });
         if (res.ok) {
-            await loadFolders(); // ✅ Только обновляем список, не открываем модалку
+            await loadFolders();
         } else {
             const err = await res.json().catch(() => ({}));
             alert(`Ошибка: ${err.detail || err.name?.[0] || 'Неизвестная ошибка'}`);
@@ -513,6 +549,14 @@ function createSharedCard(perm, index) {
     const card = document.createElement('div');
     card.className = 'file-card';
     card.style.animationDelay = `${index * 0.1}s`;
+    card.style.cursor = 'pointer';
+
+    // ✅ Клик по карточке - скачивание
+    card.onclick = (e) => {
+        if (!e.target.closest('.file-actions')) {
+            downloadFile(perm.file);
+        }
+    };
 
     const name = perm.file_name || `Файл #${perm.file}`;
     const user = perm.user?.username || 'Неизвестно';
@@ -525,7 +569,8 @@ function createSharedCard(perm, index) {
         <div class="file-name" title="${escapeHtml(name)}">${escapeHtml(name)}</div>
         <div class="file-meta">${badge}<span>${user}</span></div>
         <div class="file-actions">
-            <button class="file-action-btn" onclick="revokePermission(${perm.id})" title="Отозвать">❌</button>
+            <button class="file-action-btn" onclick="downloadFile(${perm.file}); event.stopPropagation();" title="Скачать">⬇️</button>
+            <button class="file-action-btn" onclick="revokePermission(${perm.id}); event.stopPropagation();" title="Отозвать">❌</button>
         </div>`;
     return card;
 }
@@ -613,8 +658,9 @@ function hideEmpty() {
 
 // ✅ Event Listeners
 function setupEventListeners() {
-    // Кнопки
+    // Кнопка загрузки - без дублирования
     if (uploadBtn) {
+        uploadBtn.onclick = null;
         uploadBtn.addEventListener('click', () => {
             if (currentView === 'files') {
                 loadFoldersForDropdown();
@@ -622,8 +668,9 @@ function setupEventListeners() {
             } else if (currentView === 'folders') {
                 createFolder();
             }
-        });
+        }, { once: false });
     }
+
     if (logoutBtn) logoutBtn.addEventListener('click', logout);
 
     // Формы

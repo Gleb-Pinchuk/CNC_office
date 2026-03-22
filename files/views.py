@@ -113,12 +113,9 @@ class StorageFileViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['get'], url_path='download')
     def download(self, request, pk=None):
-        """Скачивание файла с проверкой прав"""
         file_obj = self.get_object()
-
         file_name = self._get_file_name(file_obj.file)
 
-        # Логируем скачивание
         AuditLog.objects.create(
             user=request.user,
             action='download',
@@ -127,7 +124,6 @@ class StorageFileViewSet(viewsets.ModelViewSet):
         )
 
         if file_obj.file and os.path.exists(file_obj.file.path):
-            # Определяем MIME type
             mime_type, _ = mimetypes.guess_type(file_obj.file.path)
             mime_type = mime_type or 'application/octet-stream'
 
@@ -138,13 +134,13 @@ class StorageFileViewSet(viewsets.ModelViewSet):
                 content_type=mime_type
             )
             response['Content-Length'] = file_obj.size
-            response['Content-Disposition'] = f'attachment; filename*=UTF-8\'\'{file_name}'
+            # ✅ Правильное кодирование имени файла
+            from urllib.parse import quote
+            encoded_name = quote(file_name)
+            response['Content-Disposition'] = f'attachment; filename*=UTF-8\'\'{encoded_name}'
             return response
 
-        return Response(
-            {'detail': 'Файл не найден на сервере'},
-            status=status.HTTP_404_NOT_FOUND
-        )
+        return Response({'detail': 'Файл не найден'}, status=status.HTTP_404_NOT_FOUND)
 
     @action(detail=True, methods=['post'])
     def lock(self, request, pk=None):
