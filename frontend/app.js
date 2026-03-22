@@ -12,6 +12,7 @@ const emptyState = document.getElementById('emptyState');
 const pageTitle = document.getElementById('pageTitle');
 const uploadModal = document.getElementById('uploadModal');
 const loginModal = document.getElementById('loginModal');
+const previewModal = document.getElementById('previewModal');
 const uploadBtn = document.getElementById('uploadBtn');
 const logoutBtn = document.getElementById('logoutBtn');
 const uploadForm = document.getElementById('uploadForm');
@@ -89,6 +90,54 @@ function showRegisterModal() {
     if (registerForm) registerForm.classList.remove('hidden');
     if (loginForm) loginForm.classList.add('hidden');
     showModal(loginModal);
+}
+function showPreviewModal(file) {
+    if (!previewModal) {
+        alert('Предпросмотр недоступен');
+        return;
+    }
+
+    const previewContent = document.getElementById('previewContent');
+    const previewTitle = document.getElementById('previewTitle');
+
+    if (!previewContent || !previewTitle) return;
+
+    previewTitle.textContent = file.file_name || 'Файл';
+
+    // Определяем тип файла и показываем соответствующий превью
+    const mt = (file.mime_type || '').toLowerCase();
+    const fileUrl = file.file || `${API_BASE}/files/${file.id}/download/`;
+
+    if (mt.includes('image')) {
+        // Изображение
+        previewContent.innerHTML = `<img src="${fileUrl}" style="max-width:100%;max-height:80vh;border-radius:8px;" alt="${escapeHtml(file.file_name)}">`;
+    } else if (mt.includes('pdf')) {
+        // PDF
+        previewContent.innerHTML = `<iframe src="${fileUrl}" style="width:100%;height:80vh;border:none;border-radius:8px;"></iframe>`;
+    } else if (mt.includes('text') || mt.includes('json') || mt.includes('xml')) {
+        // Текст - загружаем и показываем
+        fetch(fileUrl, { headers: getAuthHeaders() })
+            .then(res => res.text())
+            .then(text => {
+                previewContent.innerHTML = `<pre style="background:#1a1a25;padding:1rem;border-radius:8px;overflow:auto;max-height:80vh;color:#fff;">${escapeHtml(text)}</pre>`;
+            })
+            .catch(() => {
+                previewContent.innerHTML = '<p style="color:#ff4466;">Не удалось загрузить файл</p>';
+            });
+    } else {
+        // Другие файлы - только кнопка скачать
+        previewContent.innerHTML = `
+            <div style="text-align:center;padding:2rem;">
+                <div style="font-size:4rem;margin-bottom:1rem;">📄</div>
+                <p style="color:var(--text-secondary);margin-bottom:1.5rem;">Предпросмотр недоступен для этого типа файла</p>
+                <button class="btn btn-primary" onclick="downloadFile(${file.id}); hideModal('previewModal');">
+                    ⬇️ Скачать файл
+                </button>
+            </div>
+        `;
+    }
+
+    showModal(previewModal);
 }
 
 // ✅ Вход
@@ -188,6 +237,7 @@ async function loadView(view) {
             uploadBtn.onclick = createFolder;
         } else {
             uploadBtn.style.display = 'none';
+            uploadBtn.onclick = null;
         }
     }
 
@@ -246,15 +296,26 @@ function createFileCard(file, index) {
     card.style.animationDelay = `${index * 0.1}s`;
     card.style.cursor = 'pointer';
 
-    // ✅ Клик по карточке - скачивание
+    // ✅ Клик по карточке - предпросмотр (если возможно) или скачивание
     card.onclick = (e) => {
         if (!e.target.closest('.file-actions')) {
-            downloadFile(file.id);
+            const mt = (file.mime_type || '').toLowerCase();
+            // Если файл можно просмотреть - показываем превью, иначе скачиваем
+            if (mt.includes('image') || mt.includes('pdf') || mt.includes('text') || mt.includes('json')) {
+                showPreviewModal(file);
+            } else {
+                downloadFile(file.id);
+            }
         }
     };
 
     const icon = getFileIcon(file.mime_type);
-    let name = file.file_name || (file.file ? file.file.split('/').pop() : 'Без имени');
+    // ✅ Берем имя из file_name (сериализатор уже обработал)
+    let name = file.file_name;
+    if (!name && file.file) {
+        name = file.file.split('/').pop();
+    }
+    if (!name) name = 'Без имени';
     try { name = decodeURIComponent(name); } catch {}
 
     const size = file.size_mb ? `${file.size_mb} MB` :
@@ -267,9 +328,9 @@ function createFileCard(file, index) {
         <div class="file-name" title="${escapeHtml(name)}">${escapeHtml(name)}</div>
         <div class="file-meta"><span>${size}</span><span>${date}</span></div>
         <div class="file-actions">
-            ${canAct ? `<button class="file-action-btn" onclick="downloadFile(${file.id}); event.stopPropagation();" title="Скачать">⬇️</button>` : ''}
-            ${canAct ? `<button class="file-action-btn" onclick="shareFile(${file.id}); event.stopPropagation();" title="Поделиться">🔗</button>` : ''}
-            ${canAct ? `<button class="file-action-btn" onclick="deleteFile(${file.id}); event.stopPropagation();" title="Удалить">🗑️</button>` : ''}
+            ${canAct ? `<button class="file-action-btn" onclick="event.stopPropagation(); downloadFile(${file.id});" title="Скачать">⬇️</button>` : ''}
+            ${canAct ? `<button class="file-action-btn" onclick="event.stopPropagation(); shareFile(${file.id});" title="Поделиться">🔗</button>` : ''}
+            ${canAct ? `<button class="file-action-btn" onclick="event.stopPropagation(); deleteFile(${file.id});" title="Удалить">🗑️</button>` : ''}
         </div>`;
     return card;
 }
@@ -349,23 +410,37 @@ async function handleUpload(e) {
     await uploadFile(fi.files[0]);
 }
 
-// ✅ Скачивание файла
+// ✅ Скачивание файла - ИСПРАВЛЕНО
 async function downloadFile(fileId) {
     try {
         const res = await fetch(`${API_BASE}/files/${fileId}/download/`, { headers: getAuthHeaders() });
         if (res.ok) {
             const blob = await res.blob();
+            // ✅ Пытаемся получить имя из заголовка Content-Disposition
             const disposition = res.headers.get('Content-Disposition');
             let filename = `file_${fileId}`;
-            if (disposition && disposition.includes('filename=')) {
-                const match = disposition.match(/filename\*=UTF-8''(.+)|filename="?(.+)"?/);
-                if (match) filename = decodeURIComponent(match[1] || match[2] || filename);
+
+            if (disposition) {
+                // Ищем filename*=UTF-8''... или filename="..."
+                const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+                const normalMatch = disposition.match(/filename="([^"]+)"/i);
+
+                if (utf8Match && utf8Match[1]) {
+                    filename = decodeURIComponent(utf8Match[1]);
+                } else if (normalMatch && normalMatch[1]) {
+                    filename = normalMatch[1];
+                }
             }
+
+            // ✅ Создаем ссылку для скачивания
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
-            a.href = url; a.download = filename;
-            document.body.appendChild(a); a.click();
-            window.URL.revokeObjectURL(url); document.body.removeChild(a);
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
         } else if (res.status === 401 || res.status === 403) {
             clearAuth(); showLoginModal();
         } else {
@@ -481,11 +556,12 @@ function createFolderCard(folder, index) {
         <div class="file-name" title="${escapeHtml(folder.name)}">${escapeHtml(folder.name)}</div>
         <div class="file-meta"><span>${folder.files_count || 0} файлов</span><span>${date}</span></div>
         <div class="file-actions">
-            <button class="file-action-btn" onclick="deleteFolder(${folder.id}); event.stopPropagation();" title="Удалить">🗑️</button>
+            <button class="file-action-btn" onclick="event.stopPropagation(); deleteFolder(${folder.id});" title="Удалить">🗑️</button>
         </div>`;
     return card;
 }
 
+// ✅ Создание папки - ИСПРАВЛЕНО (убираем все обработчики кроме одного)
 async function createFolder() {
     const name = prompt('Имя папки:');
     if (!name?.trim()) return;
@@ -551,9 +627,10 @@ function createSharedCard(perm, index) {
     card.style.animationDelay = `${index * 0.1}s`;
     card.style.cursor = 'pointer';
 
-    // ✅ Клик по карточке - скачивание
+    // ✅ Клик по карточке - предпросмотр или скачивание
     card.onclick = (e) => {
         if (!e.target.closest('.file-actions')) {
+            // Для общего доступа скачиваем сразу
             downloadFile(perm.file);
         }
     };
@@ -569,8 +646,8 @@ function createSharedCard(perm, index) {
         <div class="file-name" title="${escapeHtml(name)}">${escapeHtml(name)}</div>
         <div class="file-meta">${badge}<span>${user}</span></div>
         <div class="file-actions">
-            <button class="file-action-btn" onclick="downloadFile(${perm.file}); event.stopPropagation();" title="Скачать">⬇️</button>
-            <button class="file-action-btn" onclick="revokePermission(${perm.id}); event.stopPropagation();" title="Отозвать">❌</button>
+            <button class="file-action-btn" onclick="event.stopPropagation(); downloadFile(${perm.file});" title="Скачать">⬇️</button>
+            <button class="file-action-btn" onclick="event.stopPropagation(); revokePermission(${perm.id});" title="Отозвать">❌</button>
         </div>`;
     return card;
 }
@@ -656,51 +733,52 @@ function hideEmpty() {
     if (emptyState) { emptyState.classList.remove('show'); emptyState.style.display = 'none'; }
 }
 
-// ✅ Event Listeners
+// ✅ Event Listeners - ИСПРАВЛЕНО
 function setupEventListeners() {
-    // Кнопка загрузки - без дублирования
+    // Кнопка загрузки - ТОЛЬКО через onclick, без addEventListener
     if (uploadBtn) {
-        uploadBtn.onclick = null;
-        uploadBtn.addEventListener('click', () => {
+        uploadBtn.onclick = () => {
             if (currentView === 'files') {
                 loadFoldersForDropdown();
                 showModal(uploadModal);
             } else if (currentView === 'folders') {
                 createFolder();
             }
-        }, { once: false });
+        };
     }
 
-    if (logoutBtn) logoutBtn.addEventListener('click', logout);
+    if (logoutBtn) logoutBtn.onclick = logout;
 
     // Формы
-    if (uploadForm) uploadForm.addEventListener('submit', handleUpload);
-    if (loginForm) loginForm.addEventListener('submit', handleLogin);
-    if (registerForm) registerForm.addEventListener('submit', handleRegister);
+    if (uploadForm) uploadForm.onsubmit = handleUpload;
+    if (loginForm) loginForm.onsubmit = handleLogin;
+    if (registerForm) registerForm.onsubmit = handleRegister;
 
     // Переключение вход/регистрация
     const tR = document.getElementById('toggleToRegister');
-    if (tR) tR.addEventListener('click', e => { e.preventDefault(); showRegisterModal(); });
+    if (tR) tR.onclick = (e) => { e.preventDefault(); showRegisterModal(); };
     const tL = document.getElementById('toggleToLogin');
-    if (tL) tL.addEventListener('click', e => { e.preventDefault(); showLoginModal(); });
+    if (tL) tL.onclick = (e) => { e.preventDefault(); showLoginModal(); };
 
     // Навигация по вкладкам
     navItems.forEach(item => {
-        item.addEventListener('click', e => {
+        item.onclick = (e) => {
             e.preventDefault();
             const view = item.getAttribute('data-view');
             if (view) loadView(view);
-        });
+        };
     });
 
     // Закрытие модалок
-    [uploadModal, loginModal].forEach(modal => {
-        if (modal) modal.addEventListener('click', e => { if (e.target === modal) hideModal(modal); });
+    [uploadModal, loginModal, previewModal].forEach(modal => {
+        if (modal) {
+            modal.onclick = (e) => { if (e.target === modal) hideModal(modal); };
+        }
     });
 
     // Кнопка закрытия
     const closeBtn = document.getElementById('closeModal');
-    if (closeBtn) closeBtn.addEventListener('click', () => hideModal('uploadModal'));
+    if (closeBtn) closeBtn.onclick = () => hideModal('uploadModal');
 
     // Drag & Drop
     const dz = document.querySelector('.content-area') || document.body;

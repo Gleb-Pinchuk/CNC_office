@@ -12,6 +12,7 @@
     <style>
         .hidden { display: none !important; }
         .modal-form { transition: opacity 0.2s ease; }
+        #previewContent img, #previewContent iframe { border-radius: 8px; }
     </style>
 </head>
 <body>
@@ -276,6 +277,22 @@
             </div>
         </div>
     </div>
+
+    <!-- ✅ Preview Modal (добавлено) -->
+    <div class="modal" id="previewModal">
+        <div class="modal-backdrop" onclick="hideModal('previewModal')"></div>
+        <div class="modal-content" style="max-width:900px;width:90%;">
+            <button class="modal-close" onclick="hideModal('previewModal')">&times;</button>
+            <div class="modal-header">
+                <h2 id="previewTitle">Предпросмотр</h2>
+            </div>
+            <div id="previewContent" style="margin-top:1rem;min-height:200px;">
+                <!-- Контент загружается динамически -->
+            </div>
+        </div>
+    </div>
+
+    <!-- ✅ Скрипт приложения -->
     <script src="/static/app.js?v=3.0"></script>
 </body>
 </html>
