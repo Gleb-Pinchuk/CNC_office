@@ -111,7 +111,7 @@ async function handleLogin(e) {
             currentUser = data.user || { username };
             if (usernameSpan) usernameSpan.textContent = currentUser.username;
             hideModal('loginModal');
-            loadView('files'); // ✅ Загружаем файлы после входа
+            loadView('files');
         } else {
             alert(`Ошибка: ${data.detail || 'Неверный логин или пароль'}`);
         }
@@ -169,10 +169,8 @@ async function logout() { clearAuth(); location.reload(); }
 async function loadView(view) {
     currentView = view;
 
-    // Обновляем активный пункт меню
     navItems.forEach(n => n.classList.toggle('active', n.getAttribute('data-view') === view));
 
-    // Обновляем заголовок и кнопку загрузки
     const titles = { files: 'Мои файлы', folders: 'Папки', shared: 'Общий доступ', logs: 'Журнал аудита' };
     if (pageTitle) pageTitle.textContent = titles[view] || 'CNC Office';
 
@@ -180,7 +178,10 @@ async function loadView(view) {
         if (view === 'files') {
             uploadBtn.style.display = 'inline-flex';
             uploadBtn.innerHTML = '📤 Загрузить файл';
-            uploadBtn.onclick = () => showModal(uploadModal);
+            uploadBtn.onclick = () => {
+                loadFoldersForDropdown();
+                showModal(uploadModal);
+            };
         } else if (view === 'folders') {
             uploadBtn.style.display = 'inline-flex';
             uploadBtn.innerHTML = '📁 Создать папку';
@@ -319,7 +320,6 @@ async function downloadFile(fileId) {
         const res = await fetch(`${API_BASE}/files/${fileId}/download/`, { headers: getAuthHeaders() });
         if (res.ok) {
             const blob = await res.blob();
-            // Пытаемся получить имя файла из заголовка
             const disposition = res.headers.get('Content-Disposition');
             let filename = `file_${fileId}`;
             if (disposition && disposition.includes('filename=')) {
@@ -364,6 +364,35 @@ async function deleteFile(fileId) {
         if (res.ok || res.status === 204) await loadFiles();
         else alert('Ошибка удаления');
     } catch { alert('Ошибка подключения'); }
+}
+
+// ✅ Загрузка папок в dropdown
+async function loadFoldersForDropdown() {
+    if (!folderSelect) return;
+
+    folderSelect.innerHTML = '<option value="">Корневая папка</option>';
+
+    try {
+        const res = await fetch(`${API_BASE}/folders/`, {
+            headers: getAuthHeaders()
+        });
+
+        if (res.status === 200) {
+            const data = await res.json();
+            const folders = data.results || data || [];
+
+            folders.forEach(folder => {
+                const option = document.createElement('option');
+                option.value = folder.id;
+                option.textContent = folder.name;
+                folderSelect.appendChild(option);
+            });
+
+            console.log('📁 Folders loaded:', folders.length);
+        }
+    } catch (e) {
+        console.error('❌ Load folders for dropdown error:', e);
+    }
 }
 
 // ✅ Папки
@@ -429,8 +458,9 @@ async function createFolder() {
             method: 'POST', headers: getAuthHeaders(),
             body: JSON.stringify({ name: name.trim() })
         });
-        if (res.ok) await loadFolders();
-        else {
+        if (res.ok) {
+            await loadFolders(); // ✅ Только обновляем список, не открываем модалку
+        } else {
             const err = await res.json().catch(() => ({}));
             alert(`Ошибка: ${err.detail || err.name?.[0] || 'Неизвестная ошибка'}`);
         }
@@ -584,7 +614,16 @@ function hideEmpty() {
 // ✅ Event Listeners
 function setupEventListeners() {
     // Кнопки
-    if (uploadBtn) uploadBtn.addEventListener('click', () => showModal(uploadModal));
+    if (uploadBtn) {
+        uploadBtn.addEventListener('click', () => {
+            if (currentView === 'files') {
+                loadFoldersForDropdown();
+                showModal(uploadModal);
+            } else if (currentView === 'folders') {
+                createFolder();
+            }
+        });
+    }
     if (logoutBtn) logoutBtn.addEventListener('click', logout);
 
     // Формы
