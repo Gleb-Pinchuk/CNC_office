@@ -1,3 +1,4 @@
+import os
 from django.db import models
 from django.contrib.auth import get_user_model
 from django.core.validators import FileExtensionValidator
@@ -6,153 +7,148 @@ User = get_user_model()
 
 
 class StorageFolder(models.Model):
-    """Папка в хранилище (поддерживает вложенность, разделы как top-level)"""
-    TYPE_CHOICES = [
-        ('section', 'Раздел (Synology-like: home/public/shares)'),
-        ('folder', 'Обычная папка'),
-    ]
-
-    owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='owned_folders')
-    parent = models.ForeignKey('self', null=True, blank=True, on_delete=models.CASCADE, related_name='child_folders')
+    """Папка для хранения файлов"""
+    owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='folders')
+    parent = models.ForeignKey('self', on_delete=models.CASCADE, null=True, blank=True, related_name='subfolders')
     name = models.CharField(max_length=255)
-    folder_type = models.CharField(max_length=10, choices=TYPE_CHOICES,
-                                   default='folder')  # Новое: разделы (parent=None + type='section')
-    created_at = models.DateTimeField(auto_now_add=True)
-    permissions = models.JSONField(default=dict,
-                                   blank=True)  # {'read': [user_ids], 'write': [user_ids], 'public': bool}
-
-    class Meta:
-        verbose_name = 'Папка/Раздел'
-        verbose_name_plural = 'Папки/Разделы'
-        unique_together = ('parent', 'name')  # Уникальность в пределах родителя (owner не обязателен для shared)
-
-    def __str__(self):
-        level = self.get_path_depth()  # Рекурсивный путь для UI
-        return f"{'  ' * level}{self.name} ({self.get_folder_type_display()})"
-
-    def get_path_depth(self):
-        depth = 0
-        folder = self
-        while folder.parent:
-            depth += 1
-            folder = folder.parent
-        return depth
-
-
-class StorageFile(models.Model):
-    """Файл в хранилище (связь с папкой/разделом)"""
-    owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='owned_files')
-    folder = models.ForeignKey(StorageFolder, null=True, blank=True, on_delete=models.CASCADE, related_name='files')
-    file = models.FileField(
-        upload_to='user_files/%Y/%m/%d/',
-        validators=[FileExtensionValidator(allowed_extensions=['pdf', 'docx', 'xlsx', 'csv', 'txt', 'png', 'jpg'])]
-        # Ограничим типы
-    )
-    size = models.BigIntegerField(default=0)
-    mime_type = models.CharField(max_length=100, blank=True)
-    uploaded_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-    is_shared = models.BooleanField(default=False)
-    share_token = models.CharField(max_length=64, blank=True, unique=True)  # Для публичных ссылок
-
-    class Meta:
-        verbose_name = 'Файл'
-        verbose_name_plural = 'Файлы'
-        indexes = [
-            models.Index(fields=['owner', 'uploaded_at']),
-            models.Index(fields=['folder', 'is_shared']),
-        ]
-
-    def __str__(self):
-        return self.file.name
-
-
-class StorageSheet(models.Model):
-    """Real-time таблица (spreadsheet как Google Sheets/Synology Office)"""
-    owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='sheets')
-    folder = models.ForeignKey(StorageFolder, null=True, blank=True, on_delete=models.CASCADE, related_name='sheets')
-    name = models.CharField(max_length=255)
-    rows = models.IntegerField(default=10)
-    cols = models.IntegerField(default=10)
-    data = models.JSONField(default=list)  # [{'r':0,'c':0,'v':'value'}, ...] или grid: [[cells],...]
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    version = models.IntegerField(default=0)  # Для optimistic locking real-time
 
     class Meta:
-        verbose_name = 'Таблица (Sheet)'
-        verbose_name_plural = 'Таблицы (Sheets)'
+        verbose_name = 'Папка'
+        verbose_name_plural = 'Папки'
+        unique_together = ('owner', 'parent', 'name')
+        ordering = ['name']
 
     def __str__(self):
         return self.name
 
+    @property
+    def files_count(self):
+        return self.files.count()
+
+
+class StorageFile(models.Model):
+    """Файл в хранилище"""
+    owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='files')
+    folder = models.ForeignKey(StorageFolder, on_delete=models.SET_NULL, null=True, blank=True, related_name='files')
+    file = models.FileField(
+        upload_to='user_files/%Y/%m/%d/',
+        validators=[FileExtensionValidator(allowed_extensions=['*'])]
+    )
+    file_name = models.CharField(max_length=255, blank=True)
+    size = models.BigIntegerField(default=0)
+    size_mb = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    mime_type = models.CharField(max_length=255, blank=True)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    is_shared = models.BooleanField(default=False)
+    description = models.TextField(blank=True)
+
+    class Meta:
+        verbose_name = 'Файл'
+        verbose_name_plural = 'Файлы'
+        ordering = ['-uploaded_at']
+        indexes = [
+            models.Index(fields=['owner', 'uploaded_at']),
+            models.Index(fields=['is_shared']),
+        ]
+
+    def __str__(self):
+        return self.file_name or os.path.basename(self.file.name)
+
+    def save(self, *args, **kwargs):
+        # Автоматическое определение размера и MIME типа
+        if self.file:
+            try:
+                self.size = self.file.size
+                self.size_mb = round(self.size / (1024 * 1024), 2)
+            except:
+                pass
+
+        # Сохраняем имя файла
+        if self.file and not self.file_name:
+            self.file_name = os.path.basename(self.file.name)
+
+        # Определяем MIME type
+        if self.file and not self.mime_type:
+            import mimetypes
+            self.mime_type, _ = mimetypes.guess_type(self.file.path)
+
+        super().save(*args, **kwargs)
+
 
 class FileAccessPermission(models.Model):
-    """Права доступа к файлам/папкам/таблицам"""
-    PERMISSION_CHOICES = [
-        ('read', 'Только чтение'),
-        ('write', 'Чтение и запись'),
-        ('admin', 'Полный доступ'),
-    ]
-    # Расширим на folder/sheet
-    content_type = models.CharField(max_length=20, choices=[('file', 'File'), ('folder', 'Folder'), ('sheet', 'Sheet')])
-    content_id = models.PositiveIntegerField()  # ID content (file/folder/sheet)
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='permissions')
-    permission = models.CharField(max_length=10, choices=PERMISSION_CHOICES)
+    """Доступ к файлу для других пользователей"""
+    file = models.ForeignKey(StorageFile, on_delete=models.CASCADE, related_name='permissions')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='file_permissions')
+    permission = models.CharField(
+        max_length=10,
+        choices=[('read', 'Чтение'), ('write', 'Запись')],
+        default='read'
+    )
     granted_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        verbose_name = 'Право доступа'
-        verbose_name_plural = 'Права доступа'
-        unique_together = ('content_type', 'content_id', 'user')
+        verbose_name = 'Доступ к файлу'
+        verbose_name_plural = 'Доступы к файлам'
+        unique_together = ('file', 'user')
+        ordering = ['-granted_at']
 
     def __str__(self):
-        return f"{self.user.username} -> {self.content_type}:{self.content_id} ({self.permission})"
+        return f'{self.user.username} -> {self.file} ({self.permission})'
 
 
 class FileLock(models.Model):
-    """Блокировка для real-time (файлы/таблицы)"""
-    content_type = models.CharField(max_length=20, choices=[('file', 'File'), ('sheet', 'Sheet')])
-    content_id = models.PositiveIntegerField()
+    """Блокировка файла для редактирования"""
+    file = models.ForeignKey(StorageFile, on_delete=models.CASCADE, related_name='locks')
     locked_by = models.ForeignKey(User, on_delete=models.CASCADE)
     locked_at = models.DateTimeField(auto_now_add=True)
-    expires_at = models.DateTimeField(null=True, blank=True)  # TTL для unlock
+    expires_at = models.DateTimeField()
 
     class Meta:
-        verbose_name = 'Блокировка'
-        verbose_name_plural = 'Блокировки'
+        verbose_name = 'Блокировка файла'
+        verbose_name_plural = 'Блокировки файлов'
+        ordering = ['-locked_at']
 
     def __str__(self):
-        return f"{self.content_type}:{self.content_id} locked by {self.locked_by.username}"
+        return f'{self.file} locked by {self.locked_by}'
+
+    def is_expired(self):
+        from django.utils import timezone
+        return timezone.now() > self.expires_at
 
 
 class AuditLog(models.Model):
-    """Журнал действий"""
-    ACTION_CHOICES = [
+    """Журнал аудита действий"""
+    ACTIONS = [
         ('upload', 'Загрузка файла'),
-        ('download', 'Скачивание'),
-        ('delete', 'Удаление'),
+        ('download', 'Скачивание файла'),
+        ('delete', 'Удаление файла'),
+        ('share', 'Предоставление доступа'),
+        ('unshare', 'Отзыв доступа'),
+        ('login', 'Вход в систему'),
+        ('logout', 'Выход из системы'),
         ('create_folder', 'Создание папки'),
-        ('share', 'Доступ'),
-        ('edit_sheet', 'Редактирование таблицы'),
-        ('login', 'Вход'),
-        ('logout', 'Выход'),
+        ('delete_folder', 'Удаление папки'),
+        ('move', 'Перемещение файла'),
+        ('rename', 'Переименование'),
     ]
+
     user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='audit_logs')
-    action = models.CharField(max_length=20, choices=ACTION_CHOICES)
-    target_type = models.CharField(max_length=20, default='')  # file/folder/sheet
-    target_id = models.PositiveIntegerField(null=True, blank=True)
-    timestamp = models.DateTimeField(auto_now_add=True)
+    action = models.CharField(max_length=20, choices=ACTIONS)
     ip_address = models.GenericIPAddressField(null=True, blank=True)
     details = models.TextField(blank=True)
+    timestamp = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        verbose_name = 'Лог аудита'
-        verbose_name_plural = 'Логи аудита'
+        verbose_name = 'Журнал аудита'
+        verbose_name_plural = 'Журналы аудита'
+        ordering = ['-timestamp']
         indexes = [
             models.Index(fields=['user', 'timestamp']),
             models.Index(fields=['action', 'timestamp']),
         ]
 
     def __str__(self):
-        return f"{self.user.username if self.user else 'Anon'} - {self.action} - {self.timestamp}"
+        return f'{self.user} - {self.get_action_display()} - {self.timestamp}'
