@@ -92,52 +92,82 @@ function showRegisterModal() {
     showModal(loginModal);
 }
 function showPreviewModal(file) {
+    const mt = (file.mime_type || '').toLowerCase();
+
+    // ✅ PDF и другие файлы — просто скачиваем
+    if (mt.includes('pdf')) {
+        downloadFile(file.id);
+        return;
+    }
+
+    // Для изображений и текста показываем превью
     if (!previewModal) {
-        alert('Предпросмотр недоступен');
+        downloadFile(file.id);
         return;
     }
 
     const previewContent = document.getElementById('previewContent');
     const previewTitle = document.getElementById('previewTitle');
 
-    if (!previewContent || !previewTitle) return;
-
-    previewTitle.textContent = file.file_name || 'Файл';
-
-    // Определяем тип файла и показываем соответствующий превью
-    const mt = (file.mime_type || '').toLowerCase();
-    const fileUrl = file.file || `${API_BASE}/files/${file.id}/download/`;
-
-    if (mt.includes('image')) {
-        // Изображение
-        previewContent.innerHTML = `<img src="${fileUrl}" style="max-width:100%;max-height:80vh;border-radius:8px;" alt="${escapeHtml(file.file_name)}">`;
-    } else if (mt.includes('pdf')) {
-        // PDF
-        previewContent.innerHTML = `<iframe src="${fileUrl}" style="width:100%;height:80vh;border:none;border-radius:8px;"></iframe>`;
-    } else if (mt.includes('text') || mt.includes('json') || mt.includes('xml')) {
-        // Текст - загружаем и показываем
-        fetch(fileUrl, { headers: getAuthHeaders() })
-            .then(res => res.text())
-            .then(text => {
-                previewContent.innerHTML = `<pre style="background:#1a1a25;padding:1rem;border-radius:8px;overflow:auto;max-height:80vh;color:#fff;">${escapeHtml(text)}</pre>`;
-            })
-            .catch(() => {
-                previewContent.innerHTML = '<p style="color:#ff4466;">Не удалось загрузить файл</p>';
-            });
-    } else {
-        // Другие файлы - только кнопка скачать
-        previewContent.innerHTML = `
-            <div style="text-align:center;padding:2rem;">
-                <div style="font-size:4rem;margin-bottom:1rem;">📄</div>
-                <p style="color:var(--text-secondary);margin-bottom:1.5rem;">Предпросмотр недоступен для этого типа файла</p>
-                <button class="btn btn-primary" onclick="downloadFile(${file.id}); hideModal('previewModal');">
-                    ⬇️ Скачать файл
-                </button>
-            </div>
-        `;
+    if (!previewContent || !previewTitle) {
+        downloadFile(file.id);
+        return;
     }
 
-    showModal(previewModal);
+    previewTitle.textContent = file.file_name || 'Файл';
+    const downloadUrl = `${API_BASE}/files/${file.id}/download/`;
+
+    if (mt.includes('image')) {
+        // Изображение — загружаем через fetch с токеном и показываем
+        fetch(downloadUrl, { headers: getAuthHeaders() })
+            .then(res => res.blob())
+            .then(blob => {
+                const imgUrl = URL.createObjectURL(blob);
+                previewContent.innerHTML = `
+                    <div style="text-align:center;">
+                        <img src="${imgUrl}"
+                             style="max-width:100%;max-height:80vh;border-radius:8px;"
+                             alt="${escapeHtml(file.file_name)}">
+                    </div>
+                `;
+                showModal(previewModal);
+            })
+            .catch(() => {
+                previewContent.innerHTML = `
+                    <div style="text-align:center;padding:2rem;">
+                        <p style="color:#ff4466;">Не удалось загрузить изображение</p>
+                        <button class="btn btn-primary" onclick="downloadFile(${file.id}); hideModal('previewModal');" style="margin-top:1rem;">
+                            ⬇️ Скачать файл
+                        </button>
+                    </div>
+                `;
+                showModal(previewModal);
+            });
+    } else if (mt.includes('text') || mt.includes('json') || mt.includes('xml') || mt.includes('plain')) {
+        // Текст — загружаем и показываем
+        fetch(downloadUrl, { headers: getAuthHeaders() })
+            .then(res => res.text())
+            .then(text => {
+                previewContent.innerHTML = `
+                    <pre style="background:#1a1a25;padding:1rem;border-radius:8px;overflow:auto;max-height:80vh;color:#fff;white-space:pre-wrap;word-wrap:break-word;">${escapeHtml(text)}</pre>
+                `;
+                showModal(previewModal);
+            })
+            .catch(() => {
+                previewContent.innerHTML = `
+                    <div style="text-align:center;padding:2rem;">
+                        <p style="color:#ff4466;">Не удалось загрузить файл</p>
+                        <button class="btn btn-primary" onclick="downloadFile(${file.id}); hideModal('previewModal');" style="margin-top:1rem;">
+                            ⬇️ Скачать файл
+                        </button>
+                    </div>
+                `;
+                showModal(previewModal);
+            });
+    } else {
+        // Остальные файлы — скачиваем
+        downloadFile(file.id);
+    }
 }
 
 // ✅ Вход
@@ -252,7 +282,7 @@ async function loadView(view) {
     }
 }
 
-// ✅ Загрузка файлов
+// Загрузка файлов
 async function loadFiles() {
     console.log('🔄 Loading files...');
     try {
@@ -295,8 +325,6 @@ function createFileCard(file, index) {
     card.className = 'file-card';
     card.style.animationDelay = `${index * 0.1}s`;
     card.style.cursor = 'pointer';
-
-    // ✅ Клик по карточке - предпросмотр (если возможно) или скачивание
     card.onclick = (e) => {
         if (!e.target.closest('.file-actions')) {
             const mt = (file.mime_type || '').toLowerCase();
@@ -310,7 +338,6 @@ function createFileCard(file, index) {
     };
 
     const icon = getFileIcon(file.mime_type);
-    // ✅ Берем имя из file_name (сериализатор уже обработал)
     let name = file.file_name;
     if (!name && file.file) {
         name = file.file.split('/').pop();
@@ -335,7 +362,6 @@ function createFileCard(file, index) {
     return card;
 }
 
-// ✅ ИСПРАВЛЕНО: правильное определение типов файлов
 function getFileIcon(mimeType) {
     if (!mimeType) return '📄';
 
