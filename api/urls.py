@@ -16,4 +16,5 @@ urlpatterns = [
     path('', include(router.urls)),
     path('users/', include('users.urls')),
     path('health/', health_check, name='health'),
+    path('', include('documents.urls')),
 ]

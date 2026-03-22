@@ -4,24 +4,23 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CNC Office | Облачное хранилище</title>
-
-    <!-- ✅ Исправленная ссылка на шрифты (убраны пробелы) -->
     <link rel="stylesheet" href="/static/style.css">
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=Rajdhani:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-
     <style>
         .hidden { display: none !important; }
         .modal-form { transition: opacity 0.2s ease; }
-        #previewContent img, #previewContent iframe { border-radius: 8px; }
+        #previewContent img, #previewContent iframe, #documentEditor { border-radius: 8px; }
+        #docTable td { min-width: 100px; padding: 8px; border: 1px solid #ddd; }
+        #docTable td div { min-height: 20px; outline: none; }
+        #docTable td div:focus { background: #f0f4ff; }
+        #docText { width: 100%; height: 100%; padding: 1rem; font-family: monospace; font-size: 14px; border: 1px solid #ddd; border-radius: 4px; resize: none; }
     </style>
 </head>
 <body>
     <div class="app-container">
         <div class="bg-animation">
             <div class="grid-lines"></div>
-            <div class="floating-particles">
-                <span></span><span></span><span></span><span></span><span></span>
-            </div>
+            <div class="floating-particles"><span></span><span></span><span></span><span></span><span></span></div>
         </div>
 
         <aside class="sidebar">
@@ -32,8 +31,7 @@
                     <circle cx="24" cy="24" r="3" fill="url(#logo-gradient)"/>
                     <defs>
                         <linearGradient id="logo-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                            <stop offset="0%" style="stop-color:#00f5ff"/>
-                            <stop offset="100%" style="stop-color:#7b2cbf"/>
+                            <stop offset="0%" style="stop-color:#00f5ff"/><stop offset="100%" style="stop-color:#7b2cbf"/>
                         </linearGradient>
                     </defs>
                 </svg>
@@ -42,52 +40,35 @@
 
             <nav class="nav-menu">
                 <a href="#" class="nav-item active" data-view="files">
-                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-                    </svg>
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
                     <span>Файлы</span>
                 </a>
                 <a href="#" class="nav-item" data-view="folders">
-                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-                        <line x1="12" y1="11" x2="12" y2="19"/>
-                        <line x1="8" y1="15" x2="16" y2="15"/>
-                    </svg>
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="19"/><line x1="8" y1="15" x2="16" y2="15"/></svg>
                     <span>Папки</span>
                 </a>
+                <a href="#" class="nav-item" data-view="documents">
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                    <span>Документы</span>
+                </a>
                 <a href="#" class="nav-item" data-view="shared">
-                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                        <circle cx="18" cy="5" r="3"/>
-                        <circle cx="6" cy="12" r="3"/>
-                        <circle cx="18" cy="19" r="3"/>
-                        <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/>
-                        <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
-                    </svg>
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
                     <span>Общий доступ</span>
                 </a>
                 <a href="#" class="nav-item" data-view="logs">
-                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                        <line x1="18" y1="20" x2="18" y2="10"/>
-                        <line x1="12" y1="20" x2="12" y2="4"/>
-                        <line x1="6" y1="20" x2="6" y2="14"/>
-                    </svg>
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
                     <span>Логи</span>
                 </a>
             </nav>
 
             <div class="user-profile">
                 <div class="user-avatar">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-                        <circle cx="12" cy="7" r="4"/>
-                    </svg>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
                 </div>
                 <div class="user-info">
                     <span class="user-name" id="username">Пользователь</span>
                     <button class="logout-btn" id="logoutBtn">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>
-                        </svg>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
                         Выйти
                     </button>
                 </div>
@@ -99,9 +80,7 @@
                 <h1 class="page-title" id="pageTitle">Мои файлы</h1>
                 <div class="header-actions">
                     <button class="btn btn-primary" id="uploadBtn">
-                        <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
-                        </svg>
+                        <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
                         Загрузить файл
                     </button>
                 </div>
@@ -114,18 +93,10 @@
 
             <div class="content-area">
                 <div class="files-grid" id="filesGrid"></div>
-                <div class="loading-state" id="loadingState">
-                    <div class="spinner"></div>
-                    <p>Загрузка данных...</p>
-                </div>
+                <div class="loading-state" id="loadingState"><div class="spinner"></div><p>Загрузка данных...</p></div>
                 <div class="empty-state" id="emptyState">
-                    <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
-                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-                        <line x1="12" y1="11" x2="12" y2="17"/>
-                        <line x1="9" y1="14" x2="15" y2="14"/>
-                    </svg>
-                    <h3>Нет файлов</h3>
-                    <p>Загрузите первый файл, чтобы начать работу</p>
+                    <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
+                    <h3>Нет файлов</h3><p>Загрузите первый файл, чтобы начать работу</p>
                 </div>
             </div>
         </main>
@@ -137,38 +108,27 @@
         <div class="modal-content">
             <button class="modal-close" onclick="hideModal('uploadModal')">&times;</button>
             <div class="modal-header">
-                <svg class="modal-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
-                </svg>
-                <h2>Загрузка файла</h2>
-                <p>Выберите файл для загрузки в облако</p>
+                <svg class="modal-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+                <h2>Загрузка файла</h2><p>Выберите файл для загрузки в облако</p>
             </div>
             <div class="modal-body">
                 <form id="uploadForm" enctype="multipart/form-data" onsubmit="return false;" autocomplete="off">
                     <div class="form-group">
                         <label for="fileInput">Файл</label>
                         <div class="input-wrapper">
-                            <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
-                            </svg>
+                            <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
                             <input type="file" id="fileInput" name="file" required>
                         </div>
                     </div>
                     <div class="form-group">
                         <label for="folderSelect">Папка</label>
                         <div class="input-wrapper">
-                            <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-                            </svg>
-                            <select id="folderSelect" name="folder">
-                                <option value="">Корневая папка</option>
-                            </select>
+                            <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                            <select id="folderSelect" name="folder"><option value="">Корневая папка</option></select>
                         </div>
                     </div>
                     <button type="submit" class="btn btn-primary btn-full">
-                        <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
-                        </svg>
+                        <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
                         Загрузить
                     </button>
                 </form>
@@ -182,115 +142,118 @@
         <div class="modal-content modal-small">
             <button class="modal-close" onclick="hideModal('loginModal')">&times;</button>
             <div class="modal-header">
-                <svg class="modal-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                    <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M13.8 12H3"/>
-                </svg>
-                <h2 id="modalTitle">Вход в систему</h2>
-                <p id="modalSubtitle">Введите учётные данные для доступа</p>
+                <svg class="modal-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M13.8 12H3"/></svg>
+                <h2 id="modalTitle">Вход в систему</h2><p id="modalSubtitle">Введите учётные данные для доступа</p>
             </div>
             <div class="modal-body">
                 <form id="loginForm" class="modal-form" onsubmit="return false;" autocomplete="off">
                     <div class="form-group">
                         <label for="loginUsername">Имя пользователя</label>
                         <div class="input-wrapper">
-                            <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-                                <circle cx="12" cy="7" r="4"/>
-                            </svg>
+                            <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
                             <input type="text" id="loginUsername" name="username" required autocomplete="username" placeholder="admin">
                         </div>
                     </div>
                     <div class="form-group">
                         <label for="loginPassword">Пароль</label>
                         <div class="input-wrapper">
-                            <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-                                <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-                            </svg>
+                            <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
                             <input type="password" id="loginPassword" name="password" required autocomplete="current-password" placeholder="••••••••">
                         </div>
                     </div>
                     <button type="submit" class="btn btn-primary btn-full">
-                        <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M13.8 12H3"/>
-                        </svg>
+                        <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M13.8 12H3"/></svg>
                         Войти
                     </button>
-                    <p class="modal-switch">
-                        Нет аккаунта? <a href="#" id="toggleToRegister">Зарегистрироваться</a>
-                    </p>
+                    <p class="modal-switch">Нет аккаунта? <a href="#" id="toggleToRegister">Зарегистрироваться</a></p>
                 </form>
-
                 <form id="registerForm" class="modal-form hidden" onsubmit="return false;" autocomplete="off">
                     <div class="form-group">
                         <label for="registerUsername">Имя пользователя</label>
                         <div class="input-wrapper">
-                            <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-                                <circle cx="12" cy="7" r="4"/>
-                            </svg>
+                            <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
                             <input type="text" id="registerUsername" name="username" required autocomplete="username" placeholder="admin">
                         </div>
                     </div>
                     <div class="form-group">
                         <label for="registerEmail">Email</label>
                         <div class="input-wrapper">
-                            <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                                <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
-                                <polyline points="22,6 12,13 2,6"/>
-                            </svg>
+                            <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
                             <input type="email" id="registerEmail" name="email" required autocomplete="email" placeholder="user@example.com">
                         </div>
                     </div>
                     <div class="form-group">
                         <label for="registerPassword">Пароль</label>
                         <div class="input-wrapper">
-                            <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-                                <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-                            </svg>
+                            <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
                             <input type="password" id="registerPassword" name="password" required autocomplete="new-password" placeholder="Мин. 8 символов" minlength="8">
                         </div>
                     </div>
                     <div class="form-group">
                         <label for="registerPassword2">Повторите пароль</label>
                         <div class="input-wrapper">
-                            <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-                                <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-                            </svg>
+                            <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
                             <input type="password" id="registerPassword2" name="password2" required autocomplete="new-password" placeholder="Повторите пароль">
                         </div>
                     </div>
                     <button type="submit" class="btn btn-primary btn-full">
-                        <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-                            <circle cx="8.5" cy="7" r="4"/>
-                            <polyline points="17 11 19 13 23 9"/>
-                        </svg>
+                        <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><polyline points="17 11 19 13 23 9"/></svg>
                         Зарегистрироваться
                     </button>
-                    <p class="modal-switch">
-                        Уже есть аккаунт? <a href="#" id="toggleToLogin">Войти</a>
-                    </p>
+                    <p class="modal-switch">Уже есть аккаунт? <a href="#" id="toggleToLogin">Войти</a></p>
                 </form>
             </div>
         </div>
     </div>
 
+    <!-- Preview Modal -->
     <div class="modal" id="previewModal">
         <div class="modal-backdrop" onclick="hideModal('previewModal')"></div>
         <div class="modal-content" style="max-width:900px;width:90%;">
             <button class="modal-close" onclick="hideModal('previewModal')">&times;</button>
-            <div class="modal-header">
-                <h2 id="previewTitle">Предпросмотр</h2>
+            <div class="modal-header"><h2 id="previewTitle">Предпросмотр</h2></div>
+            <div id="previewContent" style="margin-top:1rem;min-height:200px;"></div>
+        </div>
+    </div>
+
+    <!-- ✅ Document Modal (новый) -->
+    <div class="modal" id="documentModal">
+        <div class="modal-backdrop" onclick="hideModal('documentModal')"></div>
+        <div class="modal-content" style="max-width:1200px;width:95%;height:90vh;display:flex;flex-direction:column;">
+            <button class="modal-close" onclick="hideModal('documentModal')">&times;</button>
+            <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;">
+                <h2 id="documentTitle" style="margin:0;">Редактор</h2>
+                <button class="btn btn-primary btn-sm" onclick="saveDocument()">💾 Сохранить</button>
             </div>
-            <div id="previewContent" style="margin-top:1rem;min-height:200px;">
-                <!-- Контент загружается динамически -->
+            <div class="modal-body" style="flex:1;overflow:auto;padding:1rem;">
+                <div id="documentEditor" style="height:100%;background:#fff;border-radius:8px;"></div>
             </div>
         </div>
     </div>
 
-    <script src="/static/app.js?v=3.0"></script>
+    <!-- ✅ Create Document Modal (новый) -->
+    <div class="modal" id="createDocumentModal">
+        <div class="modal-backdrop" onclick="hideModal('createDocumentModal')"></div>
+        <div class="modal-content modal-small">
+            <button class="modal-close" onclick="hideModal('createDocumentModal')">&times;</button>
+            <div class="modal-header"><h2>Создать документ</h2></div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Название</label>
+                    <input type="text" id="newDocTitle" class="form-control" placeholder="Без названия">
+                </div>
+                <div class="form-group">
+                    <label>Тип</label>
+                    <select id="newDocType" class="form-control">
+                        <option value="spreadsheet">Таблица</option>
+                        <option value="text">Текст</option>
+                    </select>
+                </div>
+                <button class="btn btn-primary btn-full" onclick="createDocument()">Создать</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js?v=4.0"></script>
 </body>
 </html>
