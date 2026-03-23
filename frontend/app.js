@@ -181,7 +181,56 @@ function createDocumentCard(doc, index) { const card = document.createElement('d
 
 async function openDocument(docId) { try { const res = await fetch(`${API_BASE}/documents/${docId}/`, { headers: getAuthHeaders() }); if (res.ok) { currentDocument = await res.json(); showDocumentEditor(currentDocument); } else { alert('Ошибка открытия документа'); } } catch (e) { console.error('Open document error:', e); alert('Ошибка подключения'); } }
 
-function showDocumentEditor(doc) { const editor = document.getElementById('documentEditor'); const title = document.getElementById('documentTitle'); if (!editor || !title) return; title.textContent = doc.title; if (doc.doc_type === 'spreadsheet') { editor.innerHTML = `<div style="overflow:auto;"><table id="docTable" style="border-collapse:collapse;width:100%;"><tbody>${renderTable(doc.content)}</tbody></table></div>`; makeTableEditable(); } else { editor.innerHTML = `<textarea id="docText" style="width:100%;height:100%;padding:1rem;font-family:monospace;font-size:14px;border:1px solid #ddd;border-radius:4px;">${doc.content?.text || ''}</textarea>`; } showModal('documentModal'); }
+let luckysheetInstance = null;
+
+function showDocumentEditor(doc) {
+    const editor = document.getElementById('luckysheet-container');
+    const title = document.getElementById('documentTitle');
+    if (!editor || !title) return;
+
+    title.textContent = doc.title;
+    currentDocument = doc;
+
+    // ✅ Если таблица - инициализируем Luckysheet
+    if (doc.doc_type === 'spreadsheet') {
+        // Уничтожаем старый инстанс если есть
+        if (luckysheetInstance) {
+            try { luckysheet.destroy(); } catch(e) {}
+        }
+
+        // Готовим данные
+        let sheets = [{ name: 'Лист 1', celldata: [] }];
+        if (doc.content?.luckysheet) {
+            sheets = doc.content.luckysheet;
+        }
+
+        // Инициализация
+        setTimeout(() => {
+            luckysheet.create({
+                container: 'luckysheet-container',
+                lang: 'ru',
+                data: sheets,
+                showtoolbarConfig: { image: true, print: true, exportXlsx: true },
+                allowCopy: true,
+                allowEdit: true,
+                forceCalculation: true,
+                rowHeaderWidth: 50,
+                columnHeaderHeight: 30
+            });
+
+            // Автосохранение при изменении
+            document.getElementById('luckysheet-container').addEventListener('luckysheetcellupdate', () => {
+                // Можно добавить дебаунс для автосохранения
+            });
+        }, 100);
+
+    } else {
+        // ✅ Текстовый документ
+        editor.innerHTML = `<textarea id="docText" style="width:100%;height:100%;padding:1rem;font-family:monospace;font-size:14px;border:none;resize:none;">${doc.content?.text || ''}</textarea>`;
+    }
+
+    showModal('documentModal');
+}
 
 function renderTable(content) { const data = content?.cells || [['', '', '', '', ''], ['', '', '', '', ''], ['', '', '', '', '']]; return data.map(row => `<tr>${row.map(cell => `<td style="border:1px solid #ddd;padding:8px;min-width:100px;"><div contenteditable="true">${cell || ''}</div></td>`).join('')}</tr>`).join(''); }
 
