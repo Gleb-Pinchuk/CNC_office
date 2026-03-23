@@ -1,4 +1,4 @@
-// ==================== CNC Office - Frontend App v8.0 (Univer) ====================
+// ==================== CNC Office - Frontend App v8.2 (Univer) ====================
 const API_BASE = '/api';
 let currentUser = null;
 let currentFolder = null;
@@ -26,7 +26,7 @@ const folderSelect = document.getElementById('folderSelect');
 const navItems = document.querySelectorAll('.nav-item');
 
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('🚀 App initialized v8.0 with Univer');
+    console.log('🚀 App initialized v8.2');
     setupEventListeners();
     checkAuth();
 });
@@ -62,11 +62,7 @@ function hideModal(modal) {
         if (el.id === 'documentModal') {
             if (currentDocument && univerInstance) { saveDocument(); }
             if (univerInstance) {
-                try {
-                    univerInstance.dispose();
-                    univerInstance = null;
-                    console.log('🧹 Univer destroyed');
-                } catch(e) { console.error('Destroy error:', e); }
+                try { univerInstance.dispose(); univerInstance = null; } catch(e) {}
             }
             currentDocument = null;
         }
@@ -120,7 +116,6 @@ async function handleRegister(e) {
 
 async function logout() { clearAuth(); location.reload(); }
 
-// ✅ НАВИГАЦИЯ
 async function loadView(view) {
     currentView = view;
     navItems.forEach(n => n.classList.toggle('active', n.getAttribute('data-view') === view));
@@ -148,7 +143,6 @@ async function loadView(view) {
 
 function showSectionPlaceholder(name) { hideLoading(); hideEmpty(); if (filesGrid) { filesGrid.innerHTML = `<div style="text-align:center;padding:3rem;color:#888;"><div style="font-size:4rem;margin-bottom:1rem;">🚧</div><h2 style="margin-bottom:1rem;">${name}</h2><p>Раздел в разработке</p></div>`; } }
 
-// ✅ ФАЙЛЫ
 async function loadFiles() {
     console.log('🔄 Loading files...');
     try {
@@ -186,7 +180,6 @@ async function deleteFile(fileId) { if (!confirm('Удалить файл?')) re
 
 function showPreviewModal(file) { const mt = (file.mime_type || '').toLowerCase(); if (mt.includes('pdf')) { downloadFile(file.id); return; } if (!previewModal) { downloadFile(file.id); return; } const previewContent = document.getElementById('previewContent'); const previewTitle = document.getElementById('previewTitle'); if (!previewContent || !previewTitle) { downloadFile(file.id); return; } previewTitle.textContent = file.file_name || 'Файл'; const downloadUrl = `${API_BASE}/files/${file.id}/download/`; if (mt.includes('image')) { fetch(downloadUrl, { headers: getAuthHeaders() }).then(res => res.blob()).then(blob => { const imgUrl = URL.createObjectURL(blob); previewContent.innerHTML = `<div style="text-align:center;"><img src="${imgUrl}" style="max-width:100%;max-height:80vh;border-radius:8px;"></div>`; showModal(previewModal); }).catch(() => { previewContent.innerHTML = `<p style="color:#ff4466;">Не удалось загрузить</p>`; showModal(previewModal); }); } else { downloadFile(file.id); } }
 
-// ПАПКИ
 async function loadFoldersForDropdown() { if (!folderSelect) return; folderSelect.innerHTML = '<option value="">Корневая папка</option>'; try { const res = await fetch(`${API_BASE}/folders/`, { headers: getAuthHeaders() }); if (res.status === 200) { const data = await res.json(); const folders = data.results || data || []; folders.forEach(folder => { const option = document.createElement('option'); option.value = folder.id; option.textContent = folder.name; folderSelect.appendChild(option); }); } } catch (e) {} }
 
 async function loadFolders() { console.log('📁 Loading folders...'); try { const res = await fetch(`${API_BASE}/folders/`, { headers: getAuthHeaders() }); if (res.status === 200) { const data = await res.json(); const folders = data.results || data || []; renderFolders(folders); } else { showEmpty('Не удалось загрузить папки'); } } catch (e) { console.error('❌ Load folders error:', e); showEmpty('Ошибка'); } }
@@ -199,7 +192,6 @@ async function createFolder() { const name = prompt('Имя папки:'); if (!
 
 async function deleteFolder(id) { if (!confirm('Удалить папку?')) return; try { const res = await fetch(`${API_BASE}/folders/${id}/`, { method: 'DELETE', headers: getAuthHeaders() }); if (res.ok || res.status === 204) await loadFolders(); else alert('Ошибка'); } catch { alert('Ошибка подключения'); } }
 
-// ✅ ДОКУМЕНТЫ С UNIVER
 async function loadDocuments() { console.log('📄 Loading documents...'); try { const res = await fetch(`${API_BASE}/documents/`, { headers: getAuthHeaders() }); if (res.status === 200) { const data = await res.json(); const docs = data.results || data || []; renderDocuments(docs); } else { showEmpty('Не удалось загрузить'); } } catch (e) { console.error('❌ Load documents error:', e); showEmpty('Ошибка'); } }
 
 function renderDocuments(docs) { hideLoading(); if (!docs?.length) { showEmpty('Нет документов'); return; } hideEmpty(); if (filesGrid) { filesGrid.innerHTML = ''; docs.forEach((d, i) => filesGrid.appendChild(createDocumentCard(d, i))); } }
@@ -231,17 +223,16 @@ function showDocumentEditor(doc) {
     setTimeout(() => {
         if (doc.doc_type === 'spreadsheet') { initUniver(doc); }
         else { initTextEditor(doc); }
-    }, 300);
+    }, 500);
 }
 
 function initUniver(doc) {
     const container = document.getElementById('univer-container');
     if (!container) { console.error('❌ Container not found'); return; }
 
-    // ✅ Проверка что Univer загружен
-    if (typeof Univer === 'undefined' || typeof Univer.Univer === 'undefined') {
-        console.error('❌ Univer library not loaded');
-        container.innerHTML = `<div style="padding:2rem;text-align:center;color:#fff;"><p>⚠️ Редактор не загружен</p><button class="btn btn-primary" onclick="location.reload()" style="margin-top:1rem;">Обновить</button></div>`;
+    if (typeof window.Univer === 'undefined') {
+        console.error('❌ Univer not loaded');
+        container.innerHTML = `<div style="padding:2rem;text-align:center;color:#000;"><p>⚠️ Univer не загружен</p><button class="btn btn-primary" onclick="location.reload()" style="margin-top:1rem;">Обновить</button></div>`;
         return;
     }
 
@@ -253,19 +244,14 @@ function initUniver(doc) {
     }
 
     try {
-        // ✅ Создаём экземпляр (используем глобальный Univer)
-        univerInstance = new Univer.Univer({
-            locale: Univer.LocaleType?.RU_RU || Univer.LocaleType?.ZH_CN || 'en',
+        univerInstance = new window.Univer.Univer({
+            locale: window.Univer.LocaleType?.RU_RU || 'en',
         });
 
-        // ✅ Регистрируем плагины
-        univerInstance.registerPlugin(UniverUI.UniverUIPlugin, {
-            container: container,
-        });
-        univerInstance.registerPlugin(UniverSheets.UniverSheetsPlugin);
-        univerInstance.registerPlugin(UniverSheetsUI.UniverSheetsUIPlugin);
+        univerInstance.registerPlugin(window.UniverUI.UniverUIPlugin, { container: container });
+        univerInstance.registerPlugin(window.UniverSheets.UniverSheetsPlugin);
+        univerInstance.registerPlugin(window.UniverSheetsUI.UniverSheetsUIPlugin);
 
-        // ✅ Данные
         let data = doc.content?.univer;
         if (!data) {
             data = {
@@ -283,17 +269,11 @@ function initUniver(doc) {
             };
         }
 
-        // ✅ Создаём таблицу
-        univerInstance.createUnit({
-            type: 'UNIVER_SHEET',
-            data: data,
-        });
-
+        univerInstance.createUnit({ type: window.Univer.UnitType?.UNIVER_SHEET || 'UNIVER_SHEET', data });
         console.log('✅ Univer initialized');
-
     } catch (e) {
         console.error('❌ Univer init error:', e);
-        container.innerHTML = `<div style="padding:2rem;text-align:center;color:#fff;"><p>⚠️ Ошибка: ${e.message}</p><button class="btn btn-primary" onclick="location.reload()" style="margin-top:1rem;">Обновить</button></div>`;
+        container.innerHTML = `<div style="padding:2rem;text-align:center;color:#000;"><p>⚠️ Ошибка: ${e.message}</p><button class="btn btn-primary" onclick="location.reload()" style="margin-top:1rem;">Обновить</button></div>`;
     }
 }
 
@@ -305,43 +285,22 @@ function initTextEditor(doc) {
 
 async function saveDocument() {
     if (!currentDocument || !univerInstance) return;
-
     let content = {};
-
     if (currentDocument.doc_type === 'spreadsheet') {
         try {
             const unit = univerInstance.getActiveUnit();
-            const data = unit.getSnapshot();
-            content = { univer: data };
-            console.log('💾 Saving spreadsheet');
-        } catch(e) {
-            console.error('❌ Univer save error:', e);
-            alert('Ошибка сохранения таблицы');
-            return;
-        }
+            const snapshot = unit?.getSnapshot?.() || {};
+            content = { univer: snapshot };
+        } catch(e) { console.error('❌ Save error:', e); alert('Ошибка сохранения'); return; }
     } else if (currentDocument.doc_type === 'text') {
         const textEl = document.getElementById('docText');
         if (textEl) content = { text: textEl.value };
     }
-
     try {
-        const res = await fetch(`${API_BASE}/documents/${currentDocument.id}/save_content/`, {
-            method: 'POST',
-            headers: getAuthHeaders(),
-            body: JSON.stringify({ content })
-        });
-        if (res.ok) {
-            console.log('✅ Saved successfully');
-            currentDocument.content = content;
-            alert('✅ Сохранено!');
-        } else {
-            const err = await res.json().catch(() => ({}));
-            alert(`Ошибка: ${err.detail || 'Не удалось сохранить'}`);
-        }
-    } catch (e) {
-        console.error('❌ Save error:', e);
-        alert('Ошибка подключения');
-    }
+        const res = await fetch(`${API_BASE}/documents/${currentDocument.id}/save_content/`, { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ content }) });
+        if (res.ok) { currentDocument.content = content; alert('✅ Сохранено!'); }
+        else { const err = await res.json().catch(() => ({})); alert(`Ошибка: ${err.detail || 'Не удалось сохранить'}`); }
+    } catch (e) { console.error('❌ Save error:', e); alert('Ошибка подключения'); }
 }
 
 function openCreateDocumentModal() {
@@ -356,22 +315,10 @@ async function createDocument() {
     const title = document.getElementById('newDocTitle')?.value || 'Без названия';
     const docType = document.getElementById('newDocType')?.value;
     try {
-        const res = await fetch(`${API_BASE}/documents/`, {
-            method: 'POST',
-            headers: getAuthHeaders(),
-            body: JSON.stringify({ title, doc_type: docType, content: {} })
-        });
-        if (res.ok) {
-            hideModal('createDocumentModal');
-            await loadDocuments();
-        } else {
-            const err = await res.json().catch(() => ({}));
-            alert(`Ошибка: ${err.detail || 'Неизвестная ошибка'}`);
-        }
-    } catch (e) {
-        console.error('Create document error:', e);
-        alert('Ошибка подключения');
-    }
+        const res = await fetch(`${API_BASE}/documents/`, { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ title, doc_type: docType, content: {} }) });
+        if (res.ok) { hideModal('createDocumentModal'); await loadDocuments(); }
+        else { const err = await res.json().catch(() => ({})); alert(`Ошибка: ${err.detail || 'Неизвестная ошибка'}`); }
+    } catch (e) { console.error('Create document error:', e); alert('Ошибка подключения'); }
 }
 
 async function deleteDocument(docId) {
@@ -388,33 +335,25 @@ async function shareCurrentDocument() {
     const username = prompt('Имя пользователя:');
     if (!username) return;
     try {
-        const res = await fetch(`${API_BASE}/documents/${currentDocument.id}/share/`, {
-            method: 'POST',
-            headers: getAuthHeaders(),
-            body: JSON.stringify({ username, permission: 'write' })
-        });
+        const res = await fetch(`${API_BASE}/documents/${currentDocument.id}/share/`, { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ username, permission: 'write' }) });
         const data = await res.json().catch(() => ({}));
         alert(res.ok ? `✅ Доступ предоставлен ${username}` : `❌ ${data.detail || 'Ошибка'}`);
     } catch { alert('Ошибка подключения'); }
 }
 
-// ОБЩИЙ ДОСТУП
 async function loadShared() { console.log('🔗 Loading shared...'); try { const res = await fetch(`${API_BASE}/permissions/`, { headers: getAuthHeaders() }); if (res.status === 200) { const data = await res.json(); const perms = data.results || data || []; renderShared(perms); } else { showEmpty('Не удалось загрузить'); } } catch (e) { console.error('❌ Load shared error:', e); showEmpty('Ошибка'); } }
 function renderShared(perms) { hideLoading(); if (!perms?.length) { showEmpty('Нет общего доступа'); return; } hideEmpty(); if (filesGrid) { filesGrid.innerHTML = ''; perms.forEach((p, i) => filesGrid.appendChild(createSharedCard(p, i))); } }
 function createSharedCard(perm, index) { const card = document.createElement('div'); card.className = 'file-card'; card.style.animationDelay = `${index * 0.1}s`; card.style.cursor = 'pointer'; card.onclick = (e) => { if (!e.target.closest('.file-actions')) downloadFile(perm.file); }; const name = perm.file_name || `Файл #${perm.file}`; const user = perm.user?.username || 'Неизвестно'; const badge = perm.permission === 'write' ? '<span style="background:#10B981;color:#fff;padding:2px 8px;border-radius:12px;font-size:0.75rem">✏️</span>' : '<span style="background:#6B7280;color:#fff;padding:2px 8px;border-radius:12px;font-size:0.75rem">👁️</span>'; card.innerHTML = `<div class="file-icon">🔗</div><div class="file-name" title="${escapeHtml(name)}">${escapeHtml(name)}</div><div class="file-meta">${badge}<span>${user}</span></div><div class="file-actions"><button class="file-action-btn" onclick="event.stopPropagation();downloadFile(${perm.file})">⬇️</button></div>`; return card; }
 
-// ЛОГИ
 async function loadLogs() { console.log('📋 Loading logs...'); try { const res = await fetch(`${API_BASE}/audit-logs/`, { headers: getAuthHeaders() }); if (res.status === 200) { const data = await res.json(); const logs = data.results || data || []; renderLogs(logs); } else { showEmpty('Не удалось загрузить'); } } catch (e) { console.error('❌ Load logs error:', e); showEmpty('Ошибка'); } }
 function renderLogs(logs) { hideLoading(); if (!logs?.length) { showEmpty('Нет записей'); return; } hideEmpty(); if (filesGrid) { filesGrid.innerHTML = ''; logs.forEach((l, i) => filesGrid.appendChild(createLogCard(l, i))); } }
 function createLogCard(log, index) { const card = document.createElement('div'); card.className = 'file-card'; card.style.animationDelay = `${index * 0.1}s`; const icons = { upload: '📤', download: '⬇️', delete: '🗑️', share: '🔗', login: '🔑', logout: '🚪' }; const icon = icons[log.action] || '📝'; const date = log.timestamp ? new Date(log.timestamp).toLocaleString('ru-RU') : ''; const user = log.user_username || log.user?.username || 'Система'; card.innerHTML = `<div class="file-icon">${icon}</div><div class="file-name">${escapeHtml(log.action)}</div><div class="file-meta"><span>${user}</span><span>${date}</span></div>${log.details ? `<div style="margin-top:0.5rem;font-size:0.75rem;color:var(--text-muted);">${escapeHtml(log.details)}</div>` : ''}`; return card; }
 
-// UI Helpers
 function showLoading() { if (loadingState) { loadingState.classList.add('show'); loadingState.style.display = 'flex'; } if (emptyState) emptyState.classList.remove('show'); if (filesGrid) filesGrid.style.display = 'none'; }
 function hideLoading() { if (loadingState) { loadingState.classList.remove('show'); loadingState.style.display = 'none'; } if (filesGrid) filesGrid.style.display = 'grid'; }
 function showEmpty(msg) { if (emptyState) { emptyState.classList.add('show'); emptyState.style.display = 'flex'; const p = emptyState.querySelector('p'); if (p && msg) p.textContent = msg; } if (filesGrid) filesGrid.style.display = 'none'; if (loadingState) loadingState.style.display = 'none'; }
 function hideEmpty() { if (emptyState) { emptyState.classList.remove('show'); emptyState.style.display = 'none'; } }
 
-// Event Listeners
 function setupEventListeners() {
     if (uploadBtn) { uploadBtn.onclick = () => { if (currentView === 'files') { loadFoldersForDropdown(); showModal(uploadModal); } else if (currentView === 'folders') { createFolder(); } else if (currentView === 'documents') { openCreateDocumentModal(); } }; }
     if (logoutBtn) logoutBtn.onclick = logout;
