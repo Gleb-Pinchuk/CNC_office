@@ -238,6 +238,13 @@ function initUniver(doc) {
     const container = document.getElementById('univer-container');
     if (!container) { console.error('❌ Container not found'); return; }
 
+    // ✅ Проверка что Univer загружен
+    if (typeof Univer === 'undefined' || typeof Univer.Univer === 'undefined') {
+        console.error('❌ Univer library not loaded');
+        container.innerHTML = `<div style="padding:2rem;text-align:center;color:#fff;"><p>⚠️ Редактор не загружен</p><button class="btn btn-primary" onclick="location.reload()" style="margin-top:1rem;">Обновить</button></div>`;
+        return;
+    }
+
     container.innerHTML = '';
 
     if (univerInstance) {
@@ -246,14 +253,9 @@ function initUniver(doc) {
     }
 
     try {
-        // ✅ Проверяем, что Univer загружен
-        if (typeof Univer === 'undefined') {
-            throw new Error('Univer library not loaded. Check CDN links.');
-        }
-
-        // ✅ Создаём экземпляр
+        // ✅ Создаём экземпляр (используем глобальный Univer)
         univerInstance = new Univer.Univer({
-            locale: Univer.LocaleType.RU_RU,
+            locale: Univer.LocaleType?.RU_RU || Univer.LocaleType?.ZH_CN || 'en',
         });
 
         // ✅ Регистрируем плагины
@@ -291,13 +293,7 @@ function initUniver(doc) {
 
     } catch (e) {
         console.error('❌ Univer init error:', e);
-        container.innerHTML = `
-            <div style="padding:2rem;text-align:center;color:#fff;">
-                <p>⚠️ Ошибка загрузки редактора</p>
-                <p style="font-size:0.9rem;color:#888;margin:1rem 0;">${e.message}</p>
-                <button class="btn btn-primary" onclick="location.reload()" style="margin-top:1rem;">Обновить</button>
-            </div>
-        `;
+        container.innerHTML = `<div style="padding:2rem;text-align:center;color:#fff;"><p>⚠️ Ошибка: ${e.message}</p><button class="btn btn-primary" onclick="location.reload()" style="margin-top:1rem;">Обновить</button></div>`;
     }
 }
 

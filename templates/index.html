@@ -277,14 +277,27 @@
         </div>
     </div>
 
-    <!-- ✅ Univer JS (CDN версии) -->
-    <script src="https://unpkg.com/@univerjs/core@0.1.0/lib/umd/core.umd.js"></script>
-    <script src="https://unpkg.com/@univerjs/ui@0.1.0/lib/umd/ui.umd.js"></script>
-    <script src="https://unpkg.com/@univerjs/engine-render@0.1.0/lib/umd/engine-render.umd.js"></script>
-    <script src="https://unpkg.com/@univerjs/sheets@0.1.0/lib/umd/sheets.umd.js"></script>
-    <script src="https://unpkg.com/@univerjs/sheets-ui@0.1.0/lib/umd/sheets-ui.umd.js"></script>
+    <!-- ✅ Univer JS (РАБОЧИЕ ссылки через jsdelivr) -->
+    <script src="https://cdn.jsdelivr.net/npm/@univerjs/core@0.1.12/dist/umd/core.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@univerjs/engine-render@0.1.12/dist/umd/engine-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@univerjs/ui@0.1.12/dist/umd/ui.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@univerjs/sheets@0.1.12/dist/umd/sheets.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@univerjs/sheets-ui@0.1.12/dist/umd/sheets-ui.min.js"></script>
+
+    <!-- ✅ Проверка загрузки Univer -->
+    <script>
+        window.addEventListener('load', function() {
+            if (typeof Univer === 'undefined') {
+                console.error('❌ Univer failed to load');
+                document.getElementById('univer-container').innerHTML =
+                    '<div style="color:#fff;padding:2rem;">⚠️ Не удалось загрузить редактор. Проверьте подключение к интернету.</div>';
+            } else {
+                console.log('✅ Univer loaded successfully');
+            }
+        });
+    </script>
 
     <!-- ✅ App JS -->
-    <script src="/static/app.js?v=8.0"></script>
+    <script src="/static/app.js?v=8.1"></script>
 </body>
 </html>
