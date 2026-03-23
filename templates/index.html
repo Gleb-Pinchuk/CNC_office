@@ -16,13 +16,11 @@
     <style>
         .hidden { display: none !important; }
         .modal-form { transition: opacity 0.2s ease; }
-        #previewContent img, #previewContent iframe { border-radius: 8px; }
-
-        /* ✅ Luckysheet full-screen */
+        #previewContent img { border-radius: 8px; }
+        .section-divider { margin: 1rem 0 0.5rem 0; padding: 0.5rem 1rem; font-size: 0.75rem; text-transform: uppercase; color: #666; font-weight: 600; }
         #luckysheet-container { width: 100%; height: 100%; }
         #documentModal .modal-content { max-width: 99vw !important; width: 99vw !important; height: 99vh !important; margin: 0.5vh 0.5vw; }
-        #documentModal .modal-body { padding: 0 !important; }
-        #documentEditor { height: 100% !important; }
+        #documentModal .modal-body { padding: 0 !important; overflow: hidden; }
     </style>
 </head>
 <body>
@@ -60,6 +58,22 @@
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
                     <span>Документы</span>
                 </a>
+
+                <div class="section-divider">📊 Разделы</div>
+
+                <a href="#" class="nav-item" data-view="section-attendance">
+                    <span style="margin-right:0.5rem;">📊</span>
+                    <span>Посещаемость</span>
+                </a>
+                <a href="#" class="nav-item" data-view="section-rangers">
+                    <span style="margin-right:0.5rem;">🤖</span>
+                    <span>Цифровые рейнджеры</span>
+                </a>
+                <a href="#" class="nav-item" data-view="section-statements">
+                    <span style="margin-right:0.5rem;">📋</span>
+                    <span>Ведомости</span>
+                </a>
+
                 <a href="#" class="nav-item" data-view="shared">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
                     <span>Общий доступ</span>
@@ -94,11 +108,6 @@
                     </button>
                 </div>
             </header>
-
-            <div class="breadcrumb" id="breadcrumb" style="display: none;">
-                <a href="#" onclick="navigateToFolder(null); return false;">📁 Корень</a>
-                <span id="breadcrumbPath"></span>
-            </div>
 
             <div class="content-area">
                 <div class="files-grid" id="filesGrid"></div>
@@ -243,7 +252,7 @@
         </div>
     </div>
 
-    <!-- ✅ Create Document Modal -->
+    <!-- Create Document Modal -->
     <div class="modal" id="createDocumentModal">
         <div class="modal-backdrop" onclick="hideModal('createDocumentModal')"></div>
         <div class="modal-content modal-small">
@@ -271,6 +280,6 @@
     <script src="https://cdn.jsdelivr.net/npm/luckysheet/dist/luckysheet.umd.js"></script>
 
     <!-- ✅ App JS -->
-    <script src="/static/app.js?v=5.0"></script>
+    <script src="/static/app.js?v=7.0"></script>
 </body>
 </html>
