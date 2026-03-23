@@ -1,11 +1,11 @@
-// ==================== CNC Office - Frontend App v9.0 (FortuneSheet) ====================
+// ==================== CNC Office - Frontend App v10.0 (Luckysheet) ====================
 const API_BASE = '/api';
 let currentUser = null;
 let currentFolder = null;
 let currentView = 'files';
 let currentDocument = null;
 let authToken = localStorage.getItem('cnc_auth_token');
-let fortuneInstance = null;
+let luckysheetInstance = null;
 
 const filesGrid = document.getElementById('filesGrid');
 const loadingState = document.getElementById('loadingState');
@@ -26,7 +26,8 @@ const folderSelect = document.getElementById('folderSelect');
 const navItems = document.querySelectorAll('.nav-item');
 
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('🚀 App initialized v9.0 with FortuneSheet');
+    console.log('🚀 App initialized v10.0 with Luckysheet');
+    console.log('🔍 Luckysheet loaded:', typeof window.luckysheet !== 'undefined');
     setupEventListeners();
     checkAuth();
 });
@@ -60,13 +61,9 @@ function hideModal(modal) {
     const el = typeof modal === 'string' ? document.getElementById(modal) : modal;
     if (el) {
         if (el.id === 'documentModal') {
-            if (currentDocument && fortuneInstance) { saveDocument(); }
-            if (fortuneInstance) {
-                try {
-                    // FortuneSheet не имеет destroy, просто очищаем
-                    document.getElementById('fortune-container').innerHTML = '';
-                    fortuneInstance = null;
-                } catch(e) {}
+            if (currentDocument && luckysheetInstance) { saveDocument(); }
+            if (typeof window.luckysheet !== 'undefined' && luckysheetInstance) {
+                try { window.luckysheet.destroy(); luckysheetInstance = null; console.log('🧹 Luckysheet destroyed'); } catch(e) {}
             }
             currentDocument = null;
         }
@@ -196,7 +193,7 @@ async function createFolder() { const name = prompt('Имя папки:'); if (!
 
 async function deleteFolder(id) { if (!confirm('Удалить папку?')) return; try { const res = await fetch(`${API_BASE}/folders/${id}/`, { method: 'DELETE', headers: getAuthHeaders() }); if (res.ok || res.status === 204) await loadFolders(); else alert('Ошибка'); } catch { alert('Ошибка подключения'); } }
 
-// ✅ ДОКУМЕНТЫ С FORTUNESHEET
+// ✅ ДОКУМЕНТЫ С LUCKYSHEET
 async function loadDocuments() { console.log('📄 Loading documents...'); try { const res = await fetch(`${API_BASE}/documents/`, { headers: getAuthHeaders() }); if (res.status === 200) { const data = await res.json(); const docs = data.results || data || []; renderDocuments(docs); } else { showEmpty('Не удалось загрузить'); } } catch (e) { console.error('❌ Load documents error:', e); showEmpty('Ошибка'); } }
 
 function renderDocuments(docs) { hideLoading(); if (!docs?.length) { showEmpty('Нет документов'); return; } hideEmpty(); if (filesGrid) { filesGrid.innerHTML = ''; docs.forEach((d, i) => filesGrid.appendChild(createDocumentCard(d, i))); } }
@@ -220,35 +217,44 @@ async function openDocument(docId) {
 }
 
 function showDocumentEditor(doc) {
+    console.log('📝 Opening document:', doc.title, doc.doc_type);
     const title = document.getElementById('documentTitle');
     if (!title) return;
     title.textContent = doc.title;
     currentDocument = doc;
     showModal('documentModal');
     setTimeout(() => {
-        if (doc.doc_type === 'spreadsheet') { initFortuneSheet(doc); }
+        if (doc.doc_type === 'spreadsheet') { initLuckysheet(doc); }
         else { initTextEditor(doc); }
-    }, 300);
+    }, 500);
 }
 
-function initFortuneSheet(doc) {
-    const container = document.getElementById('fortune-container');
-    if (!container) { console.error('❌ Container not found'); return; }
+function initLuckysheet(doc) {
+    console.log('🔍 initLuckysheet called');
 
-    // ✅ Проверяем что FortuneSheet загружен
-    if (typeof window.FortuneSheet === 'undefined') {
-        console.error('❌ FortuneSheet not loaded');
-        container.innerHTML = `<div style="padding:2rem;text-align:center;color:#000;"><p>⚠️ Редактор не загружен</p><button class="btn btn-primary" onclick="location.reload()" style="margin-top:1rem;">Обновить</button></div>`;
+    const container = document.getElementById('luckysheet-container');
+    if (!container) {
+        console.error('❌ Container not found');
+        alert('❌ Контейнер не найден');
+        return;
+    }
+
+    console.log('🔍 Luckysheet type:', typeof window.luckysheet);
+    console.log('🔍 Container:', container);
+
+    if (typeof window.luckysheet === 'undefined') {
+        console.error('❌ Luckysheet not loaded');
+        alert('❌ Luckysheet не загрузился! Проверь CDN.');
+        container.innerHTML = '<div style="padding:2rem;color:#000;"><h3>⚠️ Ошибка</h3><p>Редактор таблиц не загрузился</p><p style="font-size:0.9rem;color:#666;">Откройте консоль (F12) и проверьте ошибки</p></div>';
         return;
     }
 
     container.innerHTML = '';
 
     try {
-        // ✅ Данные для таблицы
-        let sheetData = doc.content?.fortune;
-        if (!sheetData) {
-            sheetData = [{
+        let data = doc.content?.luckysheet;
+        if (!data || !Array.isArray(data) || data.length === 0) {
+            data = [{
                 name: 'Лист 1',
                 celldata: [],
                 config: {},
@@ -260,46 +266,44 @@ function initFortuneSheet(doc) {
             }];
         }
 
-        // ✅ Инициализация FortuneSheet
-        fortuneInstance = window.FortuneSheet.luckysheet.create({
-            container: 'fortune-container',
+        console.log('📊 Creating with data:', data.length, 'sheets');
+
+        window.luckysheet.create({
+            container: 'luckysheet-container',
             lang: 'ru',
-            data: sheetData,
-            showtoolbarConfig: {
-                image: true,
-                print: true,
-                exportXlsx: true,
-            },
+            data: data,
+            showtoolbarConfig: { image: true, print: true, exportXlsx: true },
             allowCopy: true,
             allowEdit: true,
         });
 
-        console.log('✅ FortuneSheet initialized');
+        luckysheetInstance = true;
+        console.log('✅ Luckysheet created successfully');
 
     } catch (e) {
-        console.error('❌ FortuneSheet init error:', e);
-        container.innerHTML = `<div style="padding:2rem;text-align:center;color:#000;"><p>⚠️ Ошибка: ${e.message}</p><button class="btn btn-primary" onclick="location.reload()" style="margin-top:1rem;">Обновить</button></div>`;
+        console.error('❌ Error:', e);
+        alert('⚠️ Ошибка инициализации: ' + e.message);
+        container.innerHTML = '<div style="padding:2rem;color:#000;"><h3>⚠️ Ошибка</h3><p>' + e.message + '</p></div>';
     }
 }
 
 function initTextEditor(doc) {
-    const container = document.getElementById('fortune-container');
+    const container = document.getElementById('luckysheet-container');
     if (!container) return;
     container.innerHTML = `<textarea id="docText" style="width:100%;height:100%;padding:1rem;font-family:monospace;font-size:14px;border:none;resize:none;background:#1a1a25;color:#fff;">${doc.content?.text || ''}</textarea>`;
 }
 
 async function saveDocument() {
-    if (!currentDocument || !fortuneInstance) return;
+    if (!currentDocument || !luckysheetInstance) return;
     let content = {};
     if (currentDocument.doc_type === 'spreadsheet') {
         try {
-            // ✅ Получаем данные из FortuneSheet
-            const allSheets = window.FortuneSheet.luckysheet.getAllSheets();
-            content = { fortune: allSheets };
+            const allSheets = typeof window.luckysheet !== 'undefined' ? window.luckysheet.getAllSheets() : [];
+            content = { luckysheet: allSheets };
             console.log('💾 Saving spreadsheet');
         } catch(e) {
-            console.error('❌ FortuneSheet save error:', e);
-            alert('Ошибка сохранения таблицы');
+            console.error('❌ Save error:', e);
+            alert('Ошибка сохранения');
             return;
         }
     } else if (currentDocument.doc_type === 'text') {
@@ -307,23 +311,10 @@ async function saveDocument() {
         if (textEl) content = { text: textEl.value };
     }
     try {
-        const res = await fetch(`${API_BASE}/documents/${currentDocument.id}/save_content/`, {
-            method: 'POST',
-            headers: getAuthHeaders(),
-            body: JSON.stringify({ content })
-        });
-        if (res.ok) {
-            console.log('✅ Saved successfully');
-            currentDocument.content = content;
-            alert('✅ Сохранено!');
-        } else {
-            const err = await res.json().catch(() => ({}));
-            alert(`Ошибка: ${err.detail || 'Не удалось сохранить'}`);
-        }
-    } catch (e) {
-        console.error('❌ Save error:', e);
-        alert('Ошибка подключения');
-    }
+        const res = await fetch(`${API_BASE}/documents/${currentDocument.id}/save_content/`, { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ content }) });
+        if (res.ok) { currentDocument.content = content; alert('✅ Сохранено!'); }
+        else { const err = await res.json().catch(() => ({})); alert(`Ошибка: ${err.detail || 'Не удалось сохранить'}`); }
+    } catch (e) { console.error('❌ Save error:', e); alert('Ошибка подключения'); }
 }
 
 function openCreateDocumentModal() {
@@ -338,22 +329,10 @@ async function createDocument() {
     const title = document.getElementById('newDocTitle')?.value || 'Без названия';
     const docType = document.getElementById('newDocType')?.value;
     try {
-        const res = await fetch(`${API_BASE}/documents/`, {
-            method: 'POST',
-            headers: getAuthHeaders(),
-            body: JSON.stringify({ title, doc_type: docType, content: {} })
-        });
-        if (res.ok) {
-            hideModal('createDocumentModal');
-            await loadDocuments();
-        } else {
-            const err = await res.json().catch(() => ({}));
-            alert(`Ошибка: ${err.detail || 'Неизвестная ошибка'}`);
-        }
-    } catch (e) {
-        console.error('Create document error:', e);
-        alert('Ошибка подключения');
-    }
+        const res = await fetch(`${API_BASE}/documents/`, { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ title, doc_type: docType, content: {} }) });
+        if (res.ok) { hideModal('createDocumentModal'); await loadDocuments(); }
+        else { const err = await res.json().catch(() => ({})); alert(`Ошибка: ${err.detail || 'Неизвестная ошибка'}`); }
+    } catch (e) { console.error('Create document error:', e); alert('Ошибка подключения'); }
 }
 
 async function deleteDocument(docId) {
@@ -370,33 +349,25 @@ async function shareCurrentDocument() {
     const username = prompt('Имя пользователя:');
     if (!username) return;
     try {
-        const res = await fetch(`${API_BASE}/documents/${currentDocument.id}/share/`, {
-            method: 'POST',
-            headers: getAuthHeaders(),
-            body: JSON.stringify({ username, permission: 'write' })
-        });
+        const res = await fetch(`${API_BASE}/documents/${currentDocument.id}/share/`, { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ username, permission: 'write' }) });
         const data = await res.json().catch(() => ({}));
         alert(res.ok ? `✅ Доступ предоставлен ${username}` : `❌ ${data.detail || 'Ошибка'}`);
     } catch { alert('Ошибка подключения'); }
 }
 
-// ОБЩИЙ ДОСТУП
 async function loadShared() { console.log('🔗 Loading shared...'); try { const res = await fetch(`${API_BASE}/permissions/`, { headers: getAuthHeaders() }); if (res.status === 200) { const data = await res.json(); const perms = data.results || data || []; renderShared(perms); } else { showEmpty('Не удалось загрузить'); } } catch (e) { console.error('❌ Load shared error:', e); showEmpty('Ошибка'); } }
 function renderShared(perms) { hideLoading(); if (!perms?.length) { showEmpty('Нет общего доступа'); return; } hideEmpty(); if (filesGrid) { filesGrid.innerHTML = ''; perms.forEach((p, i) => filesGrid.appendChild(createSharedCard(p, i))); } }
 function createSharedCard(perm, index) { const card = document.createElement('div'); card.className = 'file-card'; card.style.animationDelay = `${index * 0.1}s`; card.style.cursor = 'pointer'; card.onclick = (e) => { if (!e.target.closest('.file-actions')) downloadFile(perm.file); }; const name = perm.file_name || `Файл #${perm.file}`; const user = perm.user?.username || 'Неизвестно'; const badge = perm.permission === 'write' ? '<span style="background:#10B981;color:#fff;padding:2px 8px;border-radius:12px;font-size:0.75rem">✏️</span>' : '<span style="background:#6B7280;color:#fff;padding:2px 8px;border-radius:12px;font-size:0.75rem">👁️</span>'; card.innerHTML = `<div class="file-icon">🔗</div><div class="file-name" title="${escapeHtml(name)}">${escapeHtml(name)}</div><div class="file-meta">${badge}<span>${user}</span></div><div class="file-actions"><button class="file-action-btn" onclick="event.stopPropagation();downloadFile(${perm.file})">⬇️</button></div>`; return card; }
 
-// ЛОГИ
 async function loadLogs() { console.log('📋 Loading logs...'); try { const res = await fetch(`${API_BASE}/audit-logs/`, { headers: getAuthHeaders() }); if (res.status === 200) { const data = await res.json(); const logs = data.results || data || []; renderLogs(logs); } else { showEmpty('Не удалось загрузить'); } } catch (e) { console.error('❌ Load logs error:', e); showEmpty('Ошибка'); } }
 function renderLogs(logs) { hideLoading(); if (!logs?.length) { showEmpty('Нет записей'); return; } hideEmpty(); if (filesGrid) { filesGrid.innerHTML = ''; logs.forEach((l, i) => filesGrid.appendChild(createLogCard(l, i))); } }
 function createLogCard(log, index) { const card = document.createElement('div'); card.className = 'file-card'; card.style.animationDelay = `${index * 0.1}s`; const icons = { upload: '📤', download: '⬇️', delete: '🗑️', share: '🔗', login: '🔑', logout: '🚪' }; const icon = icons[log.action] || '📝'; const date = log.timestamp ? new Date(log.timestamp).toLocaleString('ru-RU') : ''; const user = log.user_username || log.user?.username || 'Система'; card.innerHTML = `<div class="file-icon">${icon}</div><div class="file-name">${escapeHtml(log.action)}</div><div class="file-meta"><span>${user}</span><span>${date}</span></div>${log.details ? `<div style="margin-top:0.5rem;font-size:0.75rem;color:var(--text-muted);">${escapeHtml(log.details)}</div>` : ''}`; return card; }
 
-// UI Helpers
 function showLoading() { if (loadingState) { loadingState.classList.add('show'); loadingState.style.display = 'flex'; } if (emptyState) emptyState.classList.remove('show'); if (filesGrid) filesGrid.style.display = 'none'; }
 function hideLoading() { if (loadingState) { loadingState.classList.remove('show'); loadingState.style.display = 'none'; } if (filesGrid) filesGrid.style.display = 'grid'; }
 function showEmpty(msg) { if (emptyState) { emptyState.classList.add('show'); emptyState.style.display = 'flex'; const p = emptyState.querySelector('p'); if (p && msg) p.textContent = msg; } if (filesGrid) filesGrid.style.display = 'none'; if (loadingState) loadingState.style.display = 'none'; }
 function hideEmpty() { if (emptyState) { emptyState.classList.remove('show'); emptyState.style.display = 'none'; } }
 
-// Event Listeners
 function setupEventListeners() {
     if (uploadBtn) { uploadBtn.onclick = () => { if (currentView === 'files') { loadFoldersForDropdown(); showModal(uploadModal); } else if (currentView === 'folders') { createFolder(); } else if (currentView === 'documents') { openCreateDocumentModal(); } }; }
     if (logoutBtn) logoutBtn.onclick = logout;
