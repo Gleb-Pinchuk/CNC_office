@@ -7,17 +7,15 @@
     <link rel="stylesheet" href="/static/style.css">
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=Rajdhani:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 
-    <!-- ✅ Univer CSS -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@univerjs/core@0.2.5/dist/index.css" />
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@univerjs/ui@0.2.5/dist/index.css" />
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@univerjs/sheets-ui@0.2.5/dist/index.css" />
+    <!-- ✅ FortuneSheet CSS (современный редактор) -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortune-sheet/fortune-sheet@0.19.6/dist/index.css" />
 
     <style>
         .hidden { display: none !important; }
         .modal-form { transition: opacity 0.2s ease; }
         #previewContent img { border-radius: 8px; }
         .section-divider { margin: 1rem 0 0.5rem 0; padding: 0.5rem 1rem; font-size: 0.75rem; text-transform: uppercase; color: #666; font-weight: 600; }
-        #univer-container { width: 100%; height: 100%; min-height: 600px; background: #fff; }
+        #fortune-container { width: 100%; height: 100%; min-height: 600px; background: #fff; }
         #documentModal .modal-content { max-width: 99vw !important; width: 99vw !important; height: 99vh !important; margin: 0.5vh 0.5vw; }
         #documentModal .modal-body { padding: 0 !important; overflow: hidden; }
     </style>
@@ -233,7 +231,7 @@
         </div>
     </div>
 
-    <!-- ✅ Document Modal с Univer -->
+    <!-- ✅ Document Modal с FortuneSheet -->
     <div class="modal" id="documentModal">
         <div class="modal-backdrop" onclick="hideModal('documentModal')"></div>
         <div class="modal-content" style="max-width:99vw;width:99vw;height:99vh;margin:0.5vh 0.5vw;display:flex;flex-direction:column;">
@@ -246,7 +244,7 @@
                 </div>
             </div>
             <div class="modal-body" style="flex:1;overflow:hidden;padding:0;">
-                <div id="univer-container" style="width:100%;height:100%;min-height:600px;background:#fff;"></div>
+                <div id="fortune-container" style="width:100%;height:100%;min-height:600px;background:#fff;"></div>
             </div>
         </div>
     </div>
@@ -274,56 +272,8 @@
         </div>
     </div>
 
-    <!-- ✅ Univer JS с динамической загрузкой -->
-    <script>
-        window.univerLoaded = false;
+    <script src="https://cdn.jsdelivr.net/npm/@fortune-sheet/fortune-sheet@0.19.6/dist/index.umd.min.js"></script>
 
-        function loadScript(src, callback) {
-            const script = document.createElement('script');
-            script.src = src;
-            script.async = true;
-            script.onload = () => { console.log('✅ Loaded:', src); callback(null); };
-            script.onerror = () => { console.error('❌ Failed:', src); callback(new Error('Failed to load ' + src)); };
-            document.body.appendChild(script);
-        }
-
-        const scripts = [
-            'https://cdn.jsdelivr.net/npm/@univerjs/core@0.2.5/dist/umd/index.min.js',
-            'https://cdn.jsdelivr.net/npm/@univerjs/engine-render@0.2.5/dist/umd/index.min.js',
-            'https://cdn.jsdelivr.net/npm/@univerjs/ui@0.2.5/dist/umd/index.min.js',
-            'https://cdn.jsdelivr.net/npm/@univerjs/sheets@0.2.5/dist/umd/index.min.js',
-            'https://cdn.jsdelivr.net/npm/@univerjs/sheets-ui@0.2.5/dist/umd/index.min.js'
-        ];
-
-        let loaded = 0;
-        function loadNext() {
-            if (loaded >= scripts.length) {
-                window.univerLoaded = true;
-                console.log('✅ All Univer scripts loaded');
-                return;
-            }
-            loadScript(scripts[loaded], (err) => {
-                loaded++;
-                if (err) {
-                    console.error('❌ Critical error loading Univer');
-                    const container = document.getElementById('univer-container');
-                    if (container) {
-                        container.innerHTML = '<div style="padding:2rem;text-align:center;color:#000;"><p>⚠️ Не удалось загрузить редактор</p><p style="font-size:0.9rem;color:#666;">Проверьте подключение к интернету</p><button class="btn btn-primary" onclick="location.reload()" style="margin-top:1rem;">Обновить</button></div>';
-                    }
-                } else {
-                    loadNext();
-                }
-            });
-        }
-        // Начинаем загрузку после DOMContentLoaded
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', loadNext);
-        } else {
-            loadNext();
-        }
-    </script>
-
-    <!-- ✅ App JS -->
-    <script src="/static/app.js?v=8.3"></script>
+    <script src="/static/app.js?v=9.0"></script>
 </body>
 </html>
