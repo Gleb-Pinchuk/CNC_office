@@ -1,12 +1,11 @@
-// ==================== CNC Office - Frontend App v7.1 ====================
+// ==================== CNC Office - Frontend App v8.0 (Univer) ====================
 const API_BASE = '/api';
 let currentUser = null;
 let currentFolder = null;
 let currentView = 'files';
 let currentDocument = null;
 let authToken = localStorage.getItem('cnc_auth_token');
-let luckysheetInstance = null;
-let luckysheetInitTimeout = null;
+let univerInstance = null;
 
 const filesGrid = document.getElementById('filesGrid');
 const loadingState = document.getElementById('loadingState');
@@ -27,7 +26,7 @@ const folderSelect = document.getElementById('folderSelect');
 const navItems = document.querySelectorAll('.nav-item');
 
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('🚀 App initialized v7.1');
+    console.log('🚀 App initialized v8.0 with Univer');
     setupEventListeners();
     checkAuth();
 });
@@ -61,11 +60,14 @@ function hideModal(modal) {
     const el = typeof modal === 'string' ? document.getElementById(modal) : modal;
     if (el) {
         if (el.id === 'documentModal') {
-            if (currentDocument && luckysheetInstance) { saveDocument(); }
-            if (luckysheetInstance && typeof luckysheet !== 'undefined') {
-                try { luckysheet.destroy(); luckysheetInstance = null; } catch(e) {}
+            if (currentDocument && univerInstance) { saveDocument(); }
+            if (univerInstance) {
+                try {
+                    univerInstance.dispose();
+                    univerInstance = null;
+                    console.log('🧹 Univer destroyed');
+                } catch(e) { console.error('Destroy error:', e); }
             }
-            if (luckysheetInitTimeout) { clearTimeout(luckysheetInitTimeout); luckysheetInitTimeout = null; }
             currentDocument = null;
         }
         el.classList.remove('show');
@@ -197,7 +199,7 @@ async function createFolder() { const name = prompt('Имя папки:'); if (!
 
 async function deleteFolder(id) { if (!confirm('Удалить папку?')) return; try { const res = await fetch(`${API_BASE}/folders/${id}/`, { method: 'DELETE', headers: getAuthHeaders() }); if (res.ok || res.status === 204) await loadFolders(); else alert('Ошибка'); } catch { alert('Ошибка подключения'); } }
 
-// ✅ ДОКУМЕНТЫ С LUCKYSHEET
+// ✅ ДОКУМЕНТЫ С UNIVER
 async function loadDocuments() { console.log('📄 Loading documents...'); try { const res = await fetch(`${API_BASE}/documents/`, { headers: getAuthHeaders() }); if (res.status === 200) { const data = await res.json(); const docs = data.results || data || []; renderDocuments(docs); } else { showEmpty('Не удалось загрузить'); } } catch (e) { console.error('❌ Load documents error:', e); showEmpty('Ошибка'); } }
 
 function renderDocuments(docs) { hideLoading(); if (!docs?.length) { showEmpty('Нет документов'); return; } hideEmpty(); if (filesGrid) { filesGrid.innerHTML = ''; docs.forEach((d, i) => filesGrid.appendChild(createDocumentCard(d, i))); } }
@@ -226,68 +228,124 @@ function showDocumentEditor(doc) {
     title.textContent = doc.title;
     currentDocument = doc;
     showModal('documentModal');
-    if (luckysheetInitTimeout) clearTimeout(luckysheetInitTimeout);
-    luckysheetInitTimeout = setTimeout(() => {
-        if (doc.doc_type === 'spreadsheet') { initLuckysheet(doc); }
+    setTimeout(() => {
+        if (doc.doc_type === 'spreadsheet') { initUniver(doc); }
         else { initTextEditor(doc); }
-    }, 500);
+    }, 300);
 }
 
-function initLuckysheet(doc) {
-    const container = document.getElementById('luckysheet-container');
+function initUniver(doc) {
+    const container = document.getElementById('univer-container');
     if (!container) { console.error('❌ Container not found'); return; }
+
     container.innerHTML = '';
-    container.style.cssText = 'width:100%;height:100%;position:relative;';
-    const rect = container.getBoundingClientRect();
-    if (rect.width === 0 || rect.height === 0) {
-        console.warn('⚠️ Container not visible, retrying...');
-        setTimeout(() => initLuckysheet(doc), 300);
-        return;
+
+    if (univerInstance) {
+        try { univerInstance.dispose(); } catch (e) {}
+        univerInstance = null;
     }
-    let data = doc.content?.luckysheet;
-    if (!data || !Array.isArray(data) || data.length === 0) {
-        data = [{ name: 'Лист 1', celldata: [], row: 50, column: 20, defaultRowHeight: 19, defaultColWidth: 73 }];
-    }
+
     try {
-        if (typeof luckysheet === 'undefined') { throw new Error('Luckysheet library not loaded'); }
-        luckysheet.create({
-            container: 'luckysheet-container', lang: 'en', data: data,
-            showtoolbarConfig: { image: false, print: false, exportXlsx: true, download: true },
-            allowCopy: true, allowEdit: true, forceCalculation: false,
-            rowHeaderWidth: 45, columnHeaderHeight: 25, defaultRowHeight: 19, defaultColWidth: 73,
-            enableAddRow: false, enableAddBackTop: false, plugins: []
+        // ✅ Проверяем, что Univer загружен
+        if (typeof Univer === 'undefined') {
+            throw new Error('Univer library not loaded. Check CDN links.');
+        }
+
+        // ✅ Создаём экземпляр
+        univerInstance = new Univer.Univer({
+            locale: Univer.LocaleType.RU_RU,
         });
-        luckysheetInstance = window.luckysheet;
-        console.log('✅ Luckysheet initialized');
+
+        // ✅ Регистрируем плагины
+        univerInstance.registerPlugin(UniverUI.UniverUIPlugin, {
+            container: container,
+        });
+        univerInstance.registerPlugin(UniverSheets.UniverSheetsPlugin);
+        univerInstance.registerPlugin(UniverSheetsUI.UniverSheetsUIPlugin);
+
+        // ✅ Данные
+        let data = doc.content?.univer;
+        if (!data) {
+            data = {
+                id: 'sheet-1',
+                name: 'Таблица 1',
+                sheets: {
+                    'sheet1': {
+                        id: 'sheet1',
+                        name: 'Лист 1',
+                        cellData: {},
+                        rowCount: 50,
+                        columnCount: 20,
+                    }
+                }
+            };
+        }
+
+        // ✅ Создаём таблицу
+        univerInstance.createUnit({
+            type: 'UNIVER_SHEET',
+            data: data,
+        });
+
+        console.log('✅ Univer initialized');
+
     } catch (e) {
-        console.error('❌ Luckysheet init error:', e);
-        container.innerHTML = `<div style="padding:2rem;text-align:center;color:#fff;"><p>⚠️ Ошибка загрузки</p><button class="btn btn-primary" onclick="location.reload()" style="margin-top:1rem;">Обновить</button></div>`;
+        console.error('❌ Univer init error:', e);
+        container.innerHTML = `
+            <div style="padding:2rem;text-align:center;color:#fff;">
+                <p>⚠️ Ошибка загрузки редактора</p>
+                <p style="font-size:0.9rem;color:#888;margin:1rem 0;">${e.message}</p>
+                <button class="btn btn-primary" onclick="location.reload()" style="margin-top:1rem;">Обновить</button>
+            </div>
+        `;
     }
 }
 
 function initTextEditor(doc) {
-    const container = document.getElementById('luckysheet-container');
+    const container = document.getElementById('univer-container');
     if (!container) return;
     container.innerHTML = `<textarea id="docText" style="width:100%;height:100%;padding:1rem;font-family:monospace;font-size:14px;border:none;resize:none;background:#1a1a25;color:#fff;">${doc.content?.text || ''}</textarea>`;
 }
 
 async function saveDocument() {
-    if (!currentDocument) return;
+    if (!currentDocument || !univerInstance) return;
+
     let content = {};
-    if (currentDocument.doc_type === 'spreadsheet' && luckysheetInstance) {
+
+    if (currentDocument.doc_type === 'spreadsheet') {
         try {
-            const allSheets = (typeof luckysheet !== 'undefined' && luckysheet.getAllSheets) ? luckysheet.getAllSheets() || [] : [];
-            content = { luckysheet: allSheets };
-        } catch(e) { console.error('❌ Luckysheet save error:', e); alert('Ошибка сохранения'); return; }
+            const unit = univerInstance.getActiveUnit();
+            const data = unit.getSnapshot();
+            content = { univer: data };
+            console.log('💾 Saving spreadsheet');
+        } catch(e) {
+            console.error('❌ Univer save error:', e);
+            alert('Ошибка сохранения таблицы');
+            return;
+        }
     } else if (currentDocument.doc_type === 'text') {
         const textEl = document.getElementById('docText');
         if (textEl) content = { text: textEl.value };
     }
+
     try {
-        const res = await fetch(`${API_BASE}/documents/${currentDocument.id}/save_content/`, { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ content }) });
-        if (res.ok) { console.log('✅ Saved'); currentDocument.content = content; alert('✅ Сохранено!'); }
-        else { const err = await res.json().catch(() => ({})); alert(`Ошибка: ${err.detail || 'Не удалось сохранить'}`); }
-    } catch (e) { console.error('❌ Save error:', e); alert('Ошибка подключения'); }
+        const res = await fetch(`${API_BASE}/documents/${currentDocument.id}/save_content/`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ content })
+        });
+        if (res.ok) {
+            console.log('✅ Saved successfully');
+            currentDocument.content = content;
+            alert('✅ Сохранено!');
+        } else {
+            const err = await res.json().catch(() => ({}));
+            alert(`Ошибка: ${err.detail || 'Не удалось сохранить'}`);
+        }
+    } catch (e) {
+        console.error('❌ Save error:', e);
+        alert('Ошибка подключения');
+    }
 }
 
 function openCreateDocumentModal() {
@@ -302,10 +360,22 @@ async function createDocument() {
     const title = document.getElementById('newDocTitle')?.value || 'Без названия';
     const docType = document.getElementById('newDocType')?.value;
     try {
-        const res = await fetch(`${API_BASE}/documents/`, { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ title, doc_type: docType, content: {} }) });
-        if (res.ok) { hideModal('createDocumentModal'); await loadDocuments(); }
-        else { const err = await res.json().catch(() => ({})); alert(`Ошибка: ${err.detail || 'Неизвестная ошибка'}`); }
-    } catch (e) { console.error('Create document error:', e); alert('Ошибка подключения'); }
+        const res = await fetch(`${API_BASE}/documents/`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ title, doc_type: docType, content: {} })
+        });
+        if (res.ok) {
+            hideModal('createDocumentModal');
+            await loadDocuments();
+        } else {
+            const err = await res.json().catch(() => ({}));
+            alert(`Ошибка: ${err.detail || 'Неизвестная ошибка'}`);
+        }
+    } catch (e) {
+        console.error('Create document error:', e);
+        alert('Ошибка подключения');
+    }
 }
 
 async function deleteDocument(docId) {
@@ -322,7 +392,11 @@ async function shareCurrentDocument() {
     const username = prompt('Имя пользователя:');
     if (!username) return;
     try {
-        const res = await fetch(`${API_BASE}/documents/${currentDocument.id}/share/`, { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ username, permission: 'write' }) });
+        const res = await fetch(`${API_BASE}/documents/${currentDocument.id}/share/`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ username, permission: 'write' })
+        });
         const data = await res.json().catch(() => ({}));
         alert(res.ok ? `✅ Доступ предоставлен ${username}` : `❌ ${data.detail || 'Ошибка'}`);
     } catch { alert('Ошибка подключения'); }

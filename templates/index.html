@@ -7,18 +7,19 @@
     <link rel="stylesheet" href="/static/style.css">
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=Rajdhani:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 
-    <!-- ✅ Luckysheet CSS -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/luckysheet/dist/plugins/css/pluginsCss.css" />
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/luckysheet/dist/plugins/plugins.css" />
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/luckysheet/dist/css/luckysheet.css" />
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/luckysheet/dist/assets/iconfont/iconfont.css" />
+    <!-- ✅ Univer CSS (обязательно для отображения) -->
+    <link rel="stylesheet" href="https://unpkg.com/@univerjs/core@0.1.0/lib/index.css" />
+    <link rel="stylesheet" href="https://unpkg.com/@univerjs/ui@0.1.0/lib/index.css" />
+    <link rel="stylesheet" href="https://unpkg.com/@univerjs/sheets-ui@0.1.0/lib/index.css" />
 
     <style>
         .hidden { display: none !important; }
         .modal-form { transition: opacity 0.2s ease; }
         #previewContent img { border-radius: 8px; }
         .section-divider { margin: 1rem 0 0.5rem 0; padding: 0.5rem 1rem; font-size: 0.75rem; text-transform: uppercase; color: #666; font-weight: 600; }
-        #luckysheet-container { width: 100%; height: 100%; }
+
+        /* ✅ Univer контейнер */
+        #univer-container { width: 100%; height: 100%; min-height: 600px; }
         #documentModal .modal-content { max-width: 99vw !important; width: 99vw !important; height: 99vh !important; margin: 0.5vh 0.5vw; }
         #documentModal .modal-body { padding: 0 !important; overflow: hidden; }
     </style>
@@ -234,7 +235,7 @@
         </div>
     </div>
 
-    <!-- ✅ Document Modal с Luckysheet -->
+    <!-- ✅ Document Modal с Univer -->
     <div class="modal" id="documentModal">
         <div class="modal-backdrop" onclick="hideModal('documentModal')"></div>
         <div class="modal-content" style="max-width:99vw;width:99vw;height:99vh;margin:0.5vh 0.5vw;display:flex;flex-direction:column;">
@@ -247,7 +248,8 @@
                 </div>
             </div>
             <div class="modal-body" style="flex:1;overflow:hidden;padding:0;">
-                <div id="luckysheet-container" style="width:100%;height:100%;"></div>
+                <!-- ✅ Univer контейнер (заменил luckysheet-container) -->
+                <div id="univer-container" style="width:100%;height:100%;min-height:600px;"></div>
             </div>
         </div>
     </div>
@@ -275,11 +277,14 @@
         </div>
     </div>
 
-    <!-- ✅ Luckysheet JS -->
-    <script src="https://cdn.jsdelivr.net/npm/luckysheet/dist/plugins/js/plugin.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/luckysheet/dist/luckysheet.umd.js"></script>
+    <!-- ✅ Univer JS (CDN версии) -->
+    <script src="https://unpkg.com/@univerjs/core@0.1.0/lib/umd/core.umd.js"></script>
+    <script src="https://unpkg.com/@univerjs/ui@0.1.0/lib/umd/ui.umd.js"></script>
+    <script src="https://unpkg.com/@univerjs/engine-render@0.1.0/lib/umd/engine-render.umd.js"></script>
+    <script src="https://unpkg.com/@univerjs/sheets@0.1.0/lib/umd/sheets.umd.js"></script>
+    <script src="https://unpkg.com/@univerjs/sheets-ui@0.1.0/lib/umd/sheets-ui.umd.js"></script>
 
     <!-- ✅ App JS -->
-    <script src="/static/app.js?v=7.0"></script>
+    <script src="/static/app.js?v=8.0"></script>
 </body>
 </html>
