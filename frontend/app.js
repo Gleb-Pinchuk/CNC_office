@@ -1,4 +1,4 @@
-// ==================== CNC Office - Frontend App v8.2 (Univer) ====================
+// ==================== CNC Office - Frontend App v8.3 (Univer) ====================
 const API_BASE = '/api';
 let currentUser = null;
 let currentFolder = null;
@@ -26,7 +26,7 @@ const folderSelect = document.getElementById('folderSelect');
 const navItems = document.querySelectorAll('.nav-item');
 
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('🚀 App initialized v8.2');
+    console.log('🚀 App initialized v8.3');
     setupEventListeners();
     checkAuth();
 });
@@ -220,19 +220,38 @@ function showDocumentEditor(doc) {
     title.textContent = doc.title;
     currentDocument = doc;
     showModal('documentModal');
-    setTimeout(() => {
-        if (doc.doc_type === 'spreadsheet') { initUniver(doc); }
-        else { initTextEditor(doc); }
-    }, 500);
+
+    if (doc.doc_type === 'spreadsheet') {
+        if (!window.univerLoaded) {
+            document.getElementById('univer-container').innerHTML = '<div style="padding:2rem;text-align:center;color:#000;">⏳ Загрузка редактора...</div>';
+            const checkInterval = setInterval(() => {
+                if (window.univerLoaded) {
+                    clearInterval(checkInterval);
+                    initUniver(doc);
+                }
+            }, 500);
+        } else {
+            initUniver(doc);
+        }
+    } else {
+        initTextEditor(doc);
+    }
 }
 
 function initUniver(doc) {
     const container = document.getElementById('univer-container');
     if (!container) { console.error('❌ Container not found'); return; }
 
-    if (typeof window.Univer === 'undefined') {
-        console.error('❌ Univer not loaded');
-        container.innerHTML = `<div style="padding:2rem;text-align:center;color:#000;"><p>⚠️ Univer не загружен</p><button class="btn btn-primary" onclick="location.reload()" style="margin-top:1rem;">Обновить</button></div>`;
+    if (!window.univerLoaded) {
+        console.log('⏳ Waiting for Univer to load...');
+        container.innerHTML = '<div style="padding:2rem;text-align:center;color:#000;">⏳ Загрузка редактора...</div>';
+        setTimeout(() => initUniver(doc), 1000);
+        return;
+    }
+
+    if (typeof window.Univer === 'undefined' || !window.Univer.Univer) {
+        console.error('❌ Univer global not available:', window.Univer);
+        container.innerHTML = `<div style="padding:2rem;text-align:center;color:#000;"><p>⚠️ Ошибка инициализации</p><button class="btn btn-primary" onclick="location.reload()" style="margin-top:1rem;">Обновить</button></div>`;
         return;
     }
 
@@ -247,6 +266,10 @@ function initUniver(doc) {
         univerInstance = new window.Univer.Univer({
             locale: window.Univer.LocaleType?.RU_RU || 'en',
         });
+
+        if (!window.UniverUI?.UniverUIPlugin || !window.UniverSheets?.UniverSheetsPlugin) {
+            throw new Error('Plugins not loaded');
+        }
 
         univerInstance.registerPlugin(window.UniverUI.UniverUIPlugin, { container: container });
         univerInstance.registerPlugin(window.UniverSheets.UniverSheetsPlugin);
@@ -269,11 +292,16 @@ function initUniver(doc) {
             };
         }
 
-        univerInstance.createUnit({ type: window.Univer.UnitType?.UNIVER_SHEET || 'UNIVER_SHEET', data });
+        univerInstance.createUnit({
+            type: window.Univer.UnitType?.UNIVER_SHEET || 'UNIVER_SHEET',
+            data
+        });
+
         console.log('✅ Univer initialized');
+
     } catch (e) {
         console.error('❌ Univer init error:', e);
-        container.innerHTML = `<div style="padding:2rem;text-align:center;color:#000;"><p>⚠️ Ошибка: ${e.message}</p><button class="btn btn-primary" onclick="location.reload()" style="margin-top:1rem;">Обновить</button></div>`;
+        container.innerHTML = `<div style="padding:2rem;text-align:center;color:#000;"><p>⚠️ ${e.message}</p><button class="btn btn-primary" onclick="location.reload()" style="margin-top:1rem;">Обновить</button></div>`;
     }
 }
 

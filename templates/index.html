@@ -274,14 +274,56 @@
         </div>
     </div>
 
-    <!-- ✅ Univer JS -->
-    <script src="https://cdn.jsdelivr.net/npm/@univerjs/core@0.2.5/dist/umd/index.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@univerjs/engine-render@0.2.5/dist/umd/index.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@univerjs/ui@0.2.5/dist/umd/index.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@univerjs/sheets@0.2.5/dist/umd/index.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@univerjs/sheets-ui@0.2.5/dist/umd/index.min.js"></script>
+    <!-- ✅ Univer JS с динамической загрузкой -->
+    <script>
+        window.univerLoaded = false;
+
+        function loadScript(src, callback) {
+            const script = document.createElement('script');
+            script.src = src;
+            script.async = true;
+            script.onload = () => { console.log('✅ Loaded:', src); callback(null); };
+            script.onerror = () => { console.error('❌ Failed:', src); callback(new Error('Failed to load ' + src)); };
+            document.body.appendChild(script);
+        }
+
+        const scripts = [
+            'https://cdn.jsdelivr.net/npm/@univerjs/core@0.2.5/dist/umd/index.min.js',
+            'https://cdn.jsdelivr.net/npm/@univerjs/engine-render@0.2.5/dist/umd/index.min.js',
+            'https://cdn.jsdelivr.net/npm/@univerjs/ui@0.2.5/dist/umd/index.min.js',
+            'https://cdn.jsdelivr.net/npm/@univerjs/sheets@0.2.5/dist/umd/index.min.js',
+            'https://cdn.jsdelivr.net/npm/@univerjs/sheets-ui@0.2.5/dist/umd/index.min.js'
+        ];
+
+        let loaded = 0;
+        function loadNext() {
+            if (loaded >= scripts.length) {
+                window.univerLoaded = true;
+                console.log('✅ All Univer scripts loaded');
+                return;
+            }
+            loadScript(scripts[loaded], (err) => {
+                loaded++;
+                if (err) {
+                    console.error('❌ Critical error loading Univer');
+                    const container = document.getElementById('univer-container');
+                    if (container) {
+                        container.innerHTML = '<div style="padding:2rem;text-align:center;color:#000;"><p>⚠️ Не удалось загрузить редактор</p><p style="font-size:0.9rem;color:#666;">Проверьте подключение к интернету</p><button class="btn btn-primary" onclick="location.reload()" style="margin-top:1rem;">Обновить</button></div>';
+                    }
+                } else {
+                    loadNext();
+                }
+            });
+        }
+        // Начинаем загрузку после DOMContentLoaded
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', loadNext);
+        } else {
+            loadNext();
+        }
+    </script>
 
     <!-- ✅ App JS -->
-    <script src="/static/app.js?v=8.2"></script>
+    <script src="/static/app.js?v=8.3"></script>
 </body>
 </html>
