@@ -6,14 +6,23 @@
     <title>CNC Office | Облачное хранилище</title>
     <link rel="stylesheet" href="/static/style.css">
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=Rajdhani:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- ✅ Luckysheet CSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/luckysheet/dist/plugins/css/pluginsCss.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/luckysheet/dist/plugins/plugins.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/luckysheet/dist/css/luckysheet.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/luckysheet/dist/assets/iconfont/iconfont.css" />
+
     <style>
         .hidden { display: none !important; }
         .modal-form { transition: opacity 0.2s ease; }
-        #previewContent img, #previewContent iframe, #documentEditor { border-radius: 8px; }
-        #docTable td { min-width: 100px; padding: 8px; border: 1px solid #ddd; }
-        #docTable td div { min-height: 20px; outline: none; }
-        #docTable td div:focus { background: #f0f4ff; }
-        #docText { width: 100%; height: 100%; padding: 1rem; font-family: monospace; font-size: 14px; border: 1px solid #ddd; border-radius: 4px; resize: none; }
+        #previewContent img, #previewContent iframe { border-radius: 8px; }
+
+        /* ✅ Luckysheet full-screen */
+        #luckysheet-container { width: 100%; height: 100%; }
+        #documentModal .modal-content { max-width: 99vw !important; width: 99vw !important; height: 99vh !important; margin: 0.5vh 0.5vw; }
+        #documentModal .modal-body { padding: 0 !important; }
+        #documentEditor { height: 100% !important; }
     </style>
 </head>
 <body>
@@ -216,22 +225,25 @@
         </div>
     </div>
 
-    <!-- ✅ Document Modal (новый) -->
+    <!-- ✅ Document Modal с Luckysheet -->
     <div class="modal" id="documentModal">
         <div class="modal-backdrop" onclick="hideModal('documentModal')"></div>
-        <div class="modal-content" style="max-width:1200px;width:95%;height:90vh;display:flex;flex-direction:column;">
+        <div class="modal-content" style="max-width:99vw;width:99vw;height:99vh;margin:0.5vh 0.5vw;display:flex;flex-direction:column;">
             <button class="modal-close" onclick="hideModal('documentModal')">&times;</button>
-            <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;">
-                <h2 id="documentTitle" style="margin:0;">Редактор</h2>
-                <button class="btn btn-primary btn-sm" onclick="saveDocument()">💾 Сохранить</button>
+            <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;padding:0.5rem 1rem;">
+                <h2 id="documentTitle" style="margin:0;font-size:1.1rem;">Редактор</h2>
+                <div>
+                    <button class="btn btn-secondary btn-sm" onclick="shareCurrentDocument()" style="margin-right:8px;">🔗 Поделиться</button>
+                    <button class="btn btn-primary btn-sm" onclick="saveDocument()">💾 Сохранить</button>
+                </div>
             </div>
-            <div class="modal-body" style="flex:1;overflow:auto;padding:1rem;">
-                <div id="documentEditor" style="height:100%;background:#fff;border-radius:8px;"></div>
+            <div class="modal-body" style="flex:1;overflow:hidden;padding:0;">
+                <div id="luckysheet-container" style="width:100%;height:100%;"></div>
             </div>
         </div>
     </div>
 
-    <!-- ✅ Create Document Modal (новый) -->
+    <!-- ✅ Create Document Modal -->
     <div class="modal" id="createDocumentModal">
         <div class="modal-backdrop" onclick="hideModal('createDocumentModal')"></div>
         <div class="modal-content modal-small">
@@ -254,6 +266,11 @@
         </div>
     </div>
 
-    <script src="/static/app.js?v=4.0"></script>
+    <!-- ✅ Luckysheet JS -->
+    <script src="https://cdn.jsdelivr.net/npm/luckysheet/dist/plugins/js/plugin.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/luckysheet/dist/luckysheet.umd.js"></script>
+
+    <!-- ✅ App JS -->
+    <script src="/static/app.js?v=5.0"></script>
 </body>
 </html>
