@@ -50,7 +50,10 @@ async function checkAuth() {
     } catch (e) { console.error('Auth check failed:', e); clearAuth(); showLoginModal(); }
 }
 
-function showModal(modal) { if (modal) { modal.classList.add('show'); modal.style.display = 'flex'; document.body.style.overflow = 'hidden'; } }
+function showModal(modal) {
+    const el = typeof modal === 'string' ? document.getElementById(modal) : modal;
+    if (el) { el.classList.add('show'); el.style.display = 'flex'; document.body.style.overflow = 'hidden'; }
+}
 function hideModal(modal) { const el = typeof modal === 'string' ? document.getElementById(modal) : modal; if (el) { el.classList.remove('show'); setTimeout(() => { el.style.display = 'none'; }, 200); document.body.style.overflow = ''; const form = el.querySelector('form'); if (form) form.reset(); } }
 function showLoginModal() { if (loginForm) loginForm.classList.remove('hidden'); if (registerForm) registerForm.classList.add('hidden'); showModal(loginModal); }
 function showRegisterModal() { if (registerForm) registerForm.classList.remove('hidden'); if (loginForm) loginForm.classList.add('hidden'); showModal(loginModal); }
