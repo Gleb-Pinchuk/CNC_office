@@ -1,11 +1,11 @@
-// ==================== CNC Office - Frontend App v10.0 (Luckysheet) ====================
+// ==================== CNC Office - Frontend App v11.0 (Jspreadsheet) ====================
 const API_BASE = '/api';
 let currentUser = null;
 let currentFolder = null;
 let currentView = 'files';
 let currentDocument = null;
 let authToken = localStorage.getItem('cnc_auth_token');
-let luckysheetInstance = null;
+let jspreadsheetInstance = null;
 
 const filesGrid = document.getElementById('filesGrid');
 const loadingState = document.getElementById('loadingState');
@@ -26,8 +26,7 @@ const folderSelect = document.getElementById('folderSelect');
 const navItems = document.querySelectorAll('.nav-item');
 
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('🚀 App initialized v10.0 with Luckysheet');
-    console.log('🔍 Luckysheet loaded:', typeof window.luckysheet !== 'undefined');
+    console.log('🚀 App initialized v11.0 with Jspreadsheet');
     setupEventListeners();
     checkAuth();
 });
@@ -61,10 +60,8 @@ function hideModal(modal) {
     const el = typeof modal === 'string' ? document.getElementById(modal) : modal;
     if (el) {
         if (el.id === 'documentModal') {
-            if (currentDocument && luckysheetInstance) { saveDocument(); }
-            if (typeof window.luckysheet !== 'undefined' && luckysheetInstance) {
-                try { window.luckysheet.destroy(); luckysheetInstance = null; console.log('🧹 Luckysheet destroyed'); } catch(e) {}
-            }
+            if (currentDocument && jspreadsheetInstance) { saveDocument(); }
+            jspreadsheetInstance = null;
             currentDocument = null;
         }
         el.classList.remove('show');
@@ -193,7 +190,7 @@ async function createFolder() { const name = prompt('Имя папки:'); if (!
 
 async function deleteFolder(id) { if (!confirm('Удалить папку?')) return; try { const res = await fetch(`${API_BASE}/folders/${id}/`, { method: 'DELETE', headers: getAuthHeaders() }); if (res.ok || res.status === 204) await loadFolders(); else alert('Ошибка'); } catch { alert('Ошибка подключения'); } }
 
-// ✅ ДОКУМЕНТЫ С LUCKYSHEET
+// ✅ ДОКУМЕНТЫ С JSPREADSHEET
 async function loadDocuments() { console.log('📄 Loading documents...'); try { const res = await fetch(`${API_BASE}/documents/`, { headers: getAuthHeaders() }); if (res.status === 200) { const data = await res.json(); const docs = data.results || data || []; renderDocuments(docs); } else { showEmpty('Не удалось загрузить'); } } catch (e) { console.error('❌ Load documents error:', e); showEmpty('Ошибка'); } }
 
 function renderDocuments(docs) { hideLoading(); if (!docs?.length) { showEmpty('Нет документов'); return; } hideEmpty(); if (filesGrid) { filesGrid.innerHTML = ''; docs.forEach((d, i) => filesGrid.appendChild(createDocumentCard(d, i))); } }
@@ -224,19 +221,19 @@ function showDocumentEditor(doc) {
     currentDocument = doc;
     showModal('documentModal');
     setTimeout(() => {
-        if (doc.doc_type === 'spreadsheet') { initLuckysheet(doc); }
+        if (doc.doc_type === 'spreadsheet') { initJspreadsheet(doc); }
         else { initTextEditor(doc); }
-    }, 500);
+    }, 300);
 }
 
-function initLuckysheet(doc) {
-    console.log('🔍 initLuckysheet called');
+function initJspreadsheet(doc) {
+    console.log('🔍 initJspreadsheet called');
 
-    const container = document.getElementById('luckysheet-container');
+    const container = document.getElementById('jspreadsheet-container');
     if (!container) { console.error('❌ Container not found'); return; }
 
-    if (typeof window.luckysheet === 'undefined') {
-        console.error('❌ Luckysheet not loaded');
+    if (typeof jspreadsheet === 'undefined') {
+        console.error('❌ Jspreadsheet not loaded');
         container.innerHTML = '<div style="padding:2rem;color:#000;">⚠️ Редактор не загрузился</div>';
         return;
     }
@@ -244,22 +241,27 @@ function initLuckysheet(doc) {
     container.innerHTML = '';
 
     try {
-        let data = doc.content?.luckysheet;
-        if (!data || !Array.isArray(data) || data.length === 0) {
-            data = [{ name: 'Лист 1', celldata: [], index: 0, status: '1', order: 0, rows: 50, columns: 20 }];
+        let data = doc.content?.jspreadsheet;
+        if (!data || !Array.isArray(data)) {
+            data = [
+                ['A1', 'B1', 'C1'],
+                ['A2', 'B2', 'C2'],
+                ['A3', 'B3', 'C3'],
+            ];
         }
 
-        window.luckysheet.create({
-            container: 'luckysheet-container',
-            lang: 'ru',
+        jspreadsheetInstance = jspreadsheet(container, {
             data: data,
-            showtoolbarConfig: { image: false, print: false, exportXlsx: true },
-            allowCopy: true,
-            allowEdit: true,
+            columns: [
+                { type: 'text', width: 120 },
+                { type: 'text', width: 120 },
+                { type: 'text', width: 120 },
+            ],
+            language: 'ru',
+            minDimensions: [3, 10],
         });
 
-        luckysheetInstance = true;
-        console.log('✅ Luckysheet created');
+        console.log('✅ Jspreadsheet created');
 
     } catch (e) {
         console.error('❌ Error:', e);
@@ -268,18 +270,19 @@ function initLuckysheet(doc) {
 }
 
 function initTextEditor(doc) {
-    const container = document.getElementById('luckysheet-container');
+    const container = document.getElementById('jspreadsheet-container');
     if (!container) return;
     container.innerHTML = `<textarea id="docText" style="width:100%;height:100%;padding:1rem;font-family:monospace;font-size:14px;border:none;resize:none;background:#1a1a25;color:#fff;">${doc.content?.text || ''}</textarea>`;
 }
 
 async function saveDocument() {
-    if (!currentDocument || !luckysheetInstance) return;
+    if (!currentDocument) return;
     let content = {};
-    if (currentDocument.doc_type === 'spreadsheet') {
+
+    if (currentDocument.doc_type === 'spreadsheet' && jspreadsheetInstance) {
         try {
-            const allSheets = typeof window.luckysheet !== 'undefined' ? window.luckysheet.getAllSheets() : [];
-            content = { luckysheet: allSheets };
+            const data = jspreadsheetInstance.getData();
+            content = { jspreadsheet: data };
             console.log('💾 Saving spreadsheet');
         } catch(e) {
             console.error('❌ Save error:', e);
@@ -290,11 +293,24 @@ async function saveDocument() {
         const textEl = document.getElementById('docText');
         if (textEl) content = { text: textEl.value };
     }
+
     try {
-        const res = await fetch(`${API_BASE}/documents/${currentDocument.id}/save_content/`, { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ content }) });
-        if (res.ok) { currentDocument.content = content; alert('✅ Сохранено!'); }
-        else { const err = await res.json().catch(() => ({})); alert(`Ошибка: ${err.detail || 'Не удалось сохранить'}`); }
-    } catch (e) { console.error('❌ Save error:', e); alert('Ошибка подключения'); }
+        const res = await fetch(`${API_BASE}/documents/${currentDocument.id}/save_content/`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ content })
+        });
+        if (res.ok) {
+            currentDocument.content = content;
+            alert('✅ Сохранено!');
+        } else {
+            const err = await res.json().catch(() => ({}));
+            alert(`Ошибка: ${err.detail || 'Не удалось сохранить'}`);
+        }
+    } catch (e) {
+        console.error('❌ Save error:', e);
+        alert('Ошибка подключения');
+    }
 }
 
 function openCreateDocumentModal() {
