@@ -1,3 +1,4 @@
+# files/views.py
 import os
 import mimetypes
 from django.shortcuts import get_object_or_404
@@ -5,8 +6,8 @@ from django.utils import timezone
 from datetime import timedelta
 from django.db import models
 from django.contrib.auth import get_user_model
-from django.http import FileResponse
-from rest_framework import viewsets, permissions, status
+from django.http import FileResponse, HttpResponseBadRequest
+from rest_framework import viewsets, permissions, status, parsers
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
@@ -44,6 +45,8 @@ class StorageFileViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, IsOwnerOrShared]
     filter_backends = [DjangoFilterBackend]
     filterset_class = StorageFileFilter
+    # ✅ Разрешаем multipart/form-data для загрузки файлов
+    parser_classes = [parsers.MultiPartParser, parsers.FormParser, parsers.JSONParser]
 
     def get_queryset(self):
         user = self.request.user
@@ -78,11 +81,13 @@ class StorageFileViewSet(viewsets.ModelViewSet):
             return os.path.basename(file_field.name)
 
     def perform_create(self, serializer):
+        """✅ Сохранение файла БЕЗ блокировки по MIME-типу"""
         instance = serializer.save(owner=self.request.user)
-        # Обновляем размер файла после сохранения
+
+        # Обновляем метаданные файла
         if instance.file and os.path.exists(instance.file.path):
             instance.size = os.path.getsize(instance.file.path)
-            # Определяем MIME type
+            # Определяем MIME type (не блокируем, только определяем)
             mime_type, _ = mimetypes.guess_type(instance.file.path)
             instance.mime_type = mime_type or 'application/octet-stream'
             instance.save(update_fields=['size', 'mime_type'])
@@ -113,6 +118,7 @@ class StorageFileViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['get'], url_path='download')
     def download(self, request, pk=None):
+        """✅ Скачивание файла с правильными заголовками"""
         file_obj = self.get_object()
         file_name = self._get_file_name(file_obj.file)
 
@@ -134,7 +140,7 @@ class StorageFileViewSet(viewsets.ModelViewSet):
                 content_type=mime_type
             )
             response['Content-Length'] = file_obj.size
-            # ✅ Правильное кодирование имени файла
+            # ✅ Правильное кодирование имени файла для скачивания
             from urllib.parse import quote
             encoded_name = quote(file_name)
             response['Content-Disposition'] = f'attachment; filename*=UTF-8\'\'{encoded_name}'
@@ -250,90 +256,60 @@ class StorageFileViewSet(viewsets.ModelViewSet):
 class StorageFolderViewSet(viewsets.ModelViewSet):
     """ViewSet для папок"""
     serializer_class = StorageFolderSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsOwnerOrShared]
     filter_backends = [DjangoFilterBackend]
     filterset_class = StorageFolderFilter
 
     def get_queryset(self):
         user = self.request.user
-        return StorageFolder.objects.filter(owner=user).order_by('name')
-
-    def get_serializer_context(self):
-        context = super().get_serializer_context()
-        context['request'] = self.request
-        return context
+        return StorageFolder.objects.filter(
+            models.Q(owner=user) |
+            models.Q(permissions__user=user)
+        ).distinct().select_related('owner').prefetch_related(
+            'permissions', 'permissions__user'
+        ).order_by('-created_at')
 
     def perform_create(self, serializer):
-        instance = serializer.save(owner=self.request.user)
-        AuditLog.objects.create(
-            user=self.request.user,
-            action='create_folder',
-            ip_address=self.get_request_ip(),
-            details=f"Создана папка: {instance.name}"
-        )
-
-    def get_request_ip(self):
-        x_forwarded_for = self.request.META.get('HTTP_X_FORWARDED_FOR')
-        if x_forwarded_for:
-            return x_forwarded_for.split(',')[0]
-        return self.request.META.get('REMOTE_ADDR')
+        serializer.save(owner=self.request.user)
 
 
 class FileAccessPermissionViewSet(viewsets.ModelViewSet):
-    """ViewSet для управления правами доступа"""
+    """ViewSet для прав доступа"""
     serializer_class = FileAccessPermissionSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        user = self.request.user
         return FileAccessPermission.objects.filter(
-            models.Q(file__owner=user) | models.Q(user=user)
-        ).select_related('file', 'user').order_by('-granted_at')
-
-    def get_serializer_context(self):
-        context = super().get_serializer_context()
-        context['request'] = self.request
-        return context
-
-    def perform_create(self, serializer):
-        file = serializer.validated_data.get('file')
-        if file and file.owner != self.request.user:
-            raise permissions.PermissionDenied('Только владелец может предоставлять доступ')
-        instance = serializer.save()
-        user = serializer.validated_data.get('user')
-        username = user.username if user else 'unknown'
-        file_name = self._get_file_name(file.file) if file else 'unknown'
-        AuditLog.objects.create(
-            user=self.request.user,
-            action='share',
-            ip_address=self.get_request_ip(),
-            details=f"Предоставлен доступ к файлу {file_name} пользователю {username}"
-        )
-
-    def get_request_ip(self):
-        x_forwarded_for = self.request.META.get('HTTP_X_FORWARDED_FOR')
-        if x_forwarded_for:
-            return x_forwarded_for.split(',')[0]
-        return self.request.META.get('REMOTE_ADDR')
-
-    @action(detail=False, methods=['get'])
-    def search_users(self, request):
-        """Поиск пользователей для предоставления доступа"""
-        query = request.query_params.get('q', '')
-        if len(query) < 2:
-            return Response([])
-        users = User.objects.filter(
-            username__icontains=query
-        ).exclude(id=request.user.id)[:10]
-        serializer = UserSerializer(users, many=True)
-        return Response(serializer.data)
+            models.Q(file__owner=self.request.user) |
+            models.Q(user=self.request.user)
+        ).select_related('file', 'user')
 
 
 class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
-    """ViewSet для просмотра логов (только чтение)"""
+    """ViewSet для логов (только чтение)"""
     serializer_class = AuditLogSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['action', 'user']
+
+    def get_queryset(self):
+        return AuditLog.objects.filter(
+            models.Q(user=self.request.user) |
+            models.Q(file__owner=self.request.user) |
+            models.Q(file__permissions__user=self.request.user)
+        ).distinct().select_related('user').order_by('-timestamp')
+
+
+class UserSearchViewSet(viewsets.ReadOnlyModelViewSet):
+    """Поиск пользователей для предоставления доступа"""
+    serializer_class = UserSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        user = self.request.user
-        return AuditLog.objects.filter(user=user).order_by('-timestamp')
+        query = self.request.query_params.get('q', '')
+        if query:
+            return User.objects.filter(
+                models.Q(username__icontains=query) |
+                models.Q(email__icontains=query)
+            ).exclude(id=self.request.user.id)[:10]
+        return User.objects.none()
