@@ -1,9 +1,10 @@
-// ==================== CNC Office - Frontend App v16.0 (Full Fixed) ====================
+// ==================== CNC Office - Frontend App v17.0 (Full Fixed) ====================
 const API_BASE = '/api';
 let currentUser = null;
 let currentFolder = null;
 let currentView = 'files';
 let currentDocument = null;
+let currentSectionType = null;
 let authToken = localStorage.getItem('cnc_auth_token');
 let hotInstance = null;
 
@@ -26,7 +27,7 @@ const folderSelect = document.getElementById('folderSelect');
 const navItems = document.querySelectorAll('.nav-item');
 
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('🚀 App initialized v16.0');
+    console.log('🚀 App initialized v17.0');
     setupEventListeners();
     checkAuth();
 });
@@ -129,25 +130,49 @@ async function handleRegister(e) {
 
 async function logout() { clearAuth(); location.reload(); }
 
+// ✅ ОБНОВЛЁННЫЙ loadView для новых разделов
 async function loadView(view) {
     currentView = view;
     navItems.forEach(n => n.classList.toggle('active', n.getAttribute('data-view') === view));
-    const titles = { 'files': 'Мои файлы', 'folders': 'Папки', 'documents': 'Документы', 'section-attendance': '📊 Посещаемость', 'section-rangers': '🤖 Цифровые рейнджеры', 'section-statements': '📋 Ведомости', 'shared': 'Общий доступ', 'logs': 'Журнал аудита' };
+    const titles = {
+        'files': 'Мои файлы', 'folders': 'Папки', 'documents': 'Документы',
+        'section-attendance': '📊 Посещаемость',
+        'section-rangers': '🤖 Цифровые рейнджеры',
+        'section-statements': '📋 Ведомости',
+        'shared': 'Общий доступ', 'logs': 'Журнал аудита'
+    };
     if (pageTitle) pageTitle.textContent = titles[view] || 'CNC Office';
+
     if (uploadBtn) {
-        if (view === 'files') { uploadBtn.style.display = 'inline-flex'; uploadBtn.innerHTML = '📤 Загрузить файл'; uploadBtn.onclick = () => { loadFoldersForDropdown(); showModal(uploadModal); }; }
-        else if (view === 'folders') { uploadBtn.style.display = 'inline-flex'; uploadBtn.innerHTML = '📁 Создать папку'; uploadBtn.onclick = createFolder; }
-        else if (view === 'documents') { uploadBtn.style.display = 'inline-flex'; uploadBtn.innerHTML = '📄 Создать документ'; uploadBtn.onclick = openCreateDocumentModal; }
-        else { uploadBtn.style.display = 'none'; uploadBtn.onclick = null; }
+        if (view === 'files') {
+            uploadBtn.style.display = 'inline-flex';
+            uploadBtn.innerHTML = '📤 Загрузить файл';
+            uploadBtn.onclick = () => { loadFoldersForDropdown(); showModal(uploadModal); };
+        } else if (view === 'folders') {
+            uploadBtn.style.display = 'inline-flex';
+            uploadBtn.innerHTML = '📁 Создать папку';
+            uploadBtn.onclick = createFolder;
+        } else if (view === 'documents' || view?.startsWith('section-')) {
+            uploadBtn.style.display = 'inline-flex';
+            uploadBtn.innerHTML = '📄 Создать таблицу';
+            uploadBtn.onclick = view === 'documents' ? openCreateDocumentModal :
+                               () => openCreateSectionTableModal(view?.replace('section-', ''));
+        } else {
+            uploadBtn.style.display = 'none';
+            uploadBtn.onclick = null;
+        }
     }
+
     showLoading();
     switch(view) {
         case 'files': await loadFiles(); break;
         case 'folders': await loadFolders(); break;
         case 'documents': await loadDocuments(); break;
-        case 'section-attendance': showSectionPlaceholder('Посещаемость'); break;
-        case 'section-rangers': showSectionPlaceholder('Цифровые рейнджеры'); break;
-        case 'section-statements': showSectionPlaceholder('Ведомости'); break;
+        case 'section-attendance':
+        case 'section-rangers':
+        case 'section-statements':
+            await loadSectionTable(view?.replace('section-', ''));
+            break;
         case 'shared': await loadShared(); break;
         case 'logs': await loadLogs(); break;
         default: await loadFiles();
@@ -233,10 +258,17 @@ async function shareFile(fileId) { const username = prompt('Имя пользо�
 
 async function deleteFile(fileId) { if (!confirm('Удалить файл?')) return; try { const res = await fetch(`${API_BASE}/files/${fileId}/`, { method: 'DELETE', headers: getAuthHeaders() }); if (res.ok || res.status === 204) await loadFiles(); else alert('Ошибка удаления'); } catch { alert('Ошибка подключения'); } }
 
-// ✅ ПРЕДПРОСМОТР ВСЕХ ФОРМАТОВ ФАЙЛОВ
+// ✅ ПРЕДПРОСМОТР ФАЙЛОВ (все форматы + PDF в новой вкладке)
 function showPreviewModal(file) {
     const mt = (file.mime_type || '').toLowerCase();
     const fileExt = (file.file_name || '').split('.').pop().toLowerCase();
+    const downloadUrl = `${API_BASE}/files/${file.id}/download/`;
+
+    // ✅ PDF - открываем в новой вкладке
+    if (mt.includes('pdf') || fileExt === 'pdf') {
+        window.open(downloadUrl, '_blank');
+        return;
+    }
 
     if (!previewModal) { downloadFile(file.id); return; }
     const previewContent = document.getElementById('previewContent');
@@ -244,15 +276,9 @@ function showPreviewModal(file) {
     if (!previewContent || !previewTitle) { downloadFile(file.id); return; }
 
     previewTitle.textContent = file.file_name || 'Файл';
-    const downloadUrl = `${API_BASE}/files/${file.id}/download/`;
 
-    // ✅ PDF
-    if (mt.includes('pdf') || fileExt === 'pdf') {
-        previewContent.innerHTML = `<div style="width:100%;height:80vh;"><iframe src="${downloadUrl}#toolbar=0" style="width:100%;height:100%;border:none;" title="PDF"></iframe></div>`;
-        showModal(previewModal);
-    }
     // ✅ Изображения
-    else if (mt.includes('image') || ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'svg', 'webp'].includes(fileExt)) {
+    if (mt.includes('image') || ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'svg', 'webp'].includes(fileExt)) {
         fetch(downloadUrl, { headers: getAuthHeaders() })
             .then(res => res.blob())
             .then(blob => {
@@ -265,7 +291,7 @@ function showPreviewModal(file) {
                 showModal(previewModal);
             });
     }
-    // ✅ Текст, JSON, CSV, XML, код
+    // ✅ Текст, код, данные
     else if (mt.includes('text') || ['txt', 'json', 'csv', 'xml', 'md', 'log', 'py', 'js', 'html', 'css', 'sql'].includes(fileExt)) {
         fetch(downloadUrl, { headers: getAuthHeaders() })
             .then(res => res.text())
@@ -288,14 +314,14 @@ function showPreviewModal(file) {
         previewContent.innerHTML = `<div style="text-align:center;padding:2rem;"><audio controls style="width:100%;max-width:600px;"><source src="${downloadUrl}" type="${mt || 'audio/mp3'}">Ваш браузер не поддерживает аудио</audio></div>`;
         showModal(previewModal);
     }
-    // ✅ Excel - предпросмотр + кнопка скачать
+    // ✅ Excel - кнопка скачать
     else if (mt.includes('excel') || mt.includes('spreadsheet') || ['xls', 'xlsx', 'csv'].includes(fileExt)) {
         previewContent.innerHTML = `
             <div style="text-align:center;padding:2rem;">
                 <div style="font-size:4rem;margin-bottom:1rem;">📊</div>
                 <h3>Excel файл</h3>
                 <p style="color:#888;margin:1rem 0;">${file.file_name || 'Файл'}</p>
-                <button class="btn btn-primary" onclick="downloadFile(${file.id})">⬇️ Скачать Excel</button>
+                <button class="btn btn-primary" onclick="downloadFile(${file.id})">⬇️ Скачать</button>
             </div>
         `;
         showModal(previewModal);
@@ -306,33 +332,25 @@ function showPreviewModal(file) {
     }
 }
 
-// ✅ ЭКСПОРТ ТАБЛИЦЫ В EXCEL (CSV)
+// ✅ ЭКСПОРТ В EXCEL (CSV)
 async function exportToExcel() {
     if (!hotInstance || !currentDocument) {
         alert('Нет данных для экспорта');
         return;
     }
-
     try {
         const data = hotInstance.getData();
         const headers = hotInstance.getColHeader();
-
         let csv = [];
-
-        // Заголовки
         if (headers && headers.length > 0) {
             csv.push(headers.map(h => `"${h || ''}"`).join(';'));
         }
-
-        // Данные
         data.forEach(row => {
             csv.push(row.map(cell => `"${cell || ''}"`).join(';'));
         });
-
         const csvContent = csv.join('\n');
         const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
         const url = URL.createObjectURL(blob);
-
         const link = document.createElement('a');
         link.href = url;
         link.download = `${currentDocument.title || 'table'}.csv`;
@@ -340,9 +358,7 @@ async function exportToExcel() {
         link.click();
         document.body.removeChild(link);
         URL.revokeObjectURL(url);
-
         console.log('✅ Exported to Excel (CSV)');
-
     } catch (e) {
         console.error('❌ Export error:', e);
         alert('Ошибка экспорта: ' + e.message);
@@ -397,27 +413,22 @@ function showDocumentEditor(doc) {
     }, 400);
 }
 
-// ✅ ТАБЛИЦА С МЫШЬЮ
+// ✅ ТАБЛИЦА С МЫШЬЮ И ФИЛЬТРАМИ
 function initHandsontable(doc) {
     console.log('🔍 initHandsontable called');
-
     const container = document.getElementById('handsontable-container');
     if (!container) { console.error('❌ Container not found'); return; }
-
     if (typeof Handsontable === 'undefined') {
         console.error('❌ Handsontable not loaded');
         container.innerHTML = '<div style="padding:2rem;color:#000;">⚠️ Редактор не загрузился</div>';
         return;
     }
-
     container.innerHTML = '';
-
     try {
         let data = doc.content?.handsontable;
         if (!data || !Array.isArray(data)) {
             data = Array(20).fill(null).map(() => Array(10).fill(''));
         }
-
         hotInstance = new Handsontable(container, {
             data,
             colHeaders: true,
@@ -455,7 +466,6 @@ function initHandsontable(doc) {
             preventOverflow: 'horizontal',
             afterRender: () => { console.log('✅ Handsontable rendered'); }
         });
-
         setTimeout(() => {
             if (hotInstance) {
                 hotInstance.render();
@@ -463,9 +473,7 @@ function initHandsontable(doc) {
                 console.log('✅ Handsontable dimensions refreshed');
             }
         }, 200);
-
         console.log('✅ Handsontable initialized');
-
     } catch (e) {
         console.error('❌ Error:', e);
         container.innerHTML = `<div style="padding:2rem;color:#000;">⚠️ ${e.message}</div>`;
@@ -482,70 +490,45 @@ function initTextEditor(doc) {
 async function saveDocumentSilent() {
     if (!currentDocument) return;
     let content = {};
-
     if (currentDocument.doc_type === 'spreadsheet' && hotInstance) {
         try {
             const data = hotInstance.getData();
             content = { handsontable: data };
-        } catch(e) {
-            console.error('❌ Silent save error:', e);
-            return;
-        }
+        } catch(e) { console.error('❌ Silent save error:', e); return; }
     } else if (currentDocument.doc_type === 'text') {
         const textEl = document.getElementById('docText');
         if (textEl) content = { text: textEl.value };
     }
-
     try {
         await fetch(`${API_BASE}/documents/${currentDocument.id}/save_content/`, {
-            method: 'POST',
-            headers: getAuthHeaders(),
-            body: JSON.stringify({ content })
+            method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ content })
         });
         currentDocument.content = content;
         console.log('✅ Auto-saved silently');
-    } catch (e) {
-        console.error('❌ Silent save failed:', e);
-    }
+    } catch (e) { console.error('❌ Silent save failed:', e); }
 }
 
 // ✅ СОХРАНЕНИЕ ПО КНОПКЕ
 async function saveDocument() {
     if (!currentDocument) return;
     let content = {};
-
     if (currentDocument.doc_type === 'spreadsheet' && hotInstance) {
         try {
             const data = hotInstance.getData();
             content = { handsontable: data };
             console.log('💾 Saving spreadsheet');
-        } catch(e) {
-            console.error('❌ Save error:', e);
-            alert('Ошибка сохранения');
-            return;
-        }
+        } catch(e) { console.error('❌ Save error:', e); alert('Ошибка сохранения'); return; }
     } else if (currentDocument.doc_type === 'text') {
         const textEl = document.getElementById('docText');
         if (textEl) content = { text: textEl.value };
     }
-
     try {
         const res = await fetch(`${API_BASE}/documents/${currentDocument.id}/save_content/`, {
-            method: 'POST',
-            headers: getAuthHeaders(),
-            body: JSON.stringify({ content })
+            method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ content })
         });
-        if (res.ok) {
-            currentDocument.content = content;
-            alert('✅ Сохранено!');
-        } else {
-            const err = await res.json().catch(() => ({}));
-            alert(`Ошибка: ${err.detail || 'Не удалось сохранить'}`);
-        }
-    } catch (e) {
-        console.error('❌ Save error:', e);
-        alert('Ошибка подключения');
-    }
+        if (res.ok) { currentDocument.content = content; alert('✅ Сохранено!'); }
+        else { const err = await res.json().catch(() => ({})); alert(`Ошибка: ${err.detail || 'Не удалось сохранить'}`); }
+    } catch (e) { console.error('❌ Save error:', e); alert('Ошибка подключения'); }
 }
 
 function openCreateDocumentModal() {
@@ -586,6 +569,102 @@ async function shareCurrentDocument() {
     } catch { alert('Ошибка подключения'); }
 }
 
+// ✅ НОВЫЕ РАЗДЕЛЫ С ТАБЛИЦАМИ
+async function loadSectionTable(sectionType) {
+    console.log(`📊 Loading ${sectionType} tables...`);
+    try {
+        const res = await fetch(`${API_BASE}/section-tables/?section_type=${sectionType}`, { headers: getAuthHeaders() });
+        if (res.status === 200) {
+            const data = await res.json();
+            const tables = data.results || data || [];
+            renderSectionTables(tables, sectionType);
+        } else { showEmpty('Не удалось загрузить таблицы'); }
+    } catch (e) { console.error('❌ Load section tables error:', e); showEmpty('Ошибка подключения'); }
+}
+
+function renderSectionTables(tables, sectionType) {
+    hideLoading();
+    if (!tables?.length) {
+        showEmpty(`Нет таблиц в разделе. Создайте первую!`);
+        return;
+    }
+    hideEmpty();
+    if (filesGrid) {
+        filesGrid.innerHTML = '';
+        tables.forEach((t, i) => filesGrid.appendChild(createSectionTableCard(t, i, sectionType)));
+    }
+}
+
+function createSectionTableCard(table, index, sectionType) {
+    const card = document.createElement('div');
+    card.className = 'file-card';
+    card.style.animationDelay = `${index * 0.1}s`;
+    card.style.cursor = 'pointer';
+    card.onclick = (e) => { if (!e.target.closest('.file-actions')) openSectionTable(table.id); };
+    const date = table.updated_at ? new Date(table.updated_at).toLocaleString('ru-RU') : '';
+    card.innerHTML = `
+        <div class="file-icon">📊</div>
+        <div class="file-name" title="${escapeHtml(table.title)}">${escapeHtml(table.title)}</div>
+        <div class="file-meta"><span>${sectionType}</span><span>${date}</span></div>
+        <div class="file-actions">
+            <button class="file-action-btn" onclick="event.stopPropagation();openSectionTable(${table.id})">✏️</button>
+            <button class="file-action-btn" onclick="event.stopPropagation();deleteSectionTable(${table.id})">🗑️</button>
+        </div>
+    `;
+    return card;
+}
+
+function openCreateSectionTableModal(sectionType) {
+    const titleInput = document.getElementById('newDocTitle');
+    if (titleInput) titleInput.value = '';
+    currentSectionType = sectionType;
+    showModal('createDocumentModal');
+}
+
+async function createSectionTable() {
+    const title = document.getElementById('newDocTitle')?.value || 'Без названия';
+    const sectionType = currentSectionType || 'attendance';
+    try {
+        const res = await fetch(`${API_BASE}/section-tables/`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({
+                title,
+                section_type: sectionType,
+                content: { handsontable: Array(20).fill(null).map(() => Array(10).fill('')) }
+            })
+        });
+        if (res.ok) {
+            hideModal('createDocumentModal');
+            await loadSectionTable(sectionType);
+        } else {
+            const err = await res.json().catch(() => ({}));
+            alert(`Ошибка: ${err.detail || 'Неизвестная ошибка'}`);
+        }
+    } catch (e) { console.error('Create section table error:', e); alert('Ошибка подключения'); }
+}
+
+async function openSectionTable(tableId) {
+    try {
+        const res = await fetch(`${API_BASE}/section-tables/${tableId}/`, { headers: getAuthHeaders() });
+        if (res.ok) {
+            currentDocument = await res.json();
+            currentDocument.doc_type = 'spreadsheet';
+            showDocumentEditor(currentDocument);
+        } else { alert('Ошибка открытия'); }
+    } catch (e) { console.error('Open section table error:', e); alert('Ошибка'); }
+}
+
+async function deleteSectionTable(tableId) {
+    if (!confirm('Удалить таблицу?')) return;
+    try {
+        const res = await fetch(`${API_BASE}/section-tables/${tableId}/`, { method: 'DELETE', headers: getAuthHeaders() });
+        if (res.ok || res.status === 204) {
+            await loadSectionTable(currentSectionType || 'attendance');
+        } else { alert('Ошибка'); }
+    } catch { alert('Ошибка подключения'); }
+}
+
 async function loadShared() { console.log('🔗 Loading shared...'); try { const res = await fetch(`${API_BASE}/permissions/`, { headers: getAuthHeaders() }); if (res.status === 200) { const data = await res.json(); const perms = data.results || data || []; renderShared(perms); } else { showEmpty('Не удалось загрузить'); } } catch (e) { console.error('❌ Load shared error:', e); showEmpty('Ошибка'); } }
 function renderShared(perms) { hideLoading(); if (!perms?.length) { showEmpty('Нет общего доступа'); return; } hideEmpty(); if (filesGrid) { filesGrid.innerHTML = ''; perms.forEach((p, i) => filesGrid.appendChild(createSharedCard(p, i))); } }
 function createSharedCard(perm, index) { const card = document.createElement('div'); card.className = 'file-card'; card.style.animationDelay = `${index * 0.1}s`; card.style.cursor = 'pointer'; card.onclick = (e) => { if (!e.target.closest('.file-actions')) downloadFile(perm.file); }; const name = perm.file_name || `Файл #${perm.file}`; const user = perm.user?.username || 'Неизвестно'; const badge = perm.permission === 'write' ? '<span style="background:#10B981;color:#fff;padding:2px 8px;border-radius:12px;font-size:0.75rem">✏️</span>' : '<span style="background:#6B7280;color:#fff;padding:2px 8px;border-radius:12px;font-size:0.75rem">👁️</span>'; card.innerHTML = `<div class="file-icon">🔗</div><div class="file-name" title="${escapeHtml(name)}">${escapeHtml(name)}</div><div class="file-meta">${badge}<span>${user}</span></div><div class="file-actions"><button class="file-action-btn" onclick="event.stopPropagation();downloadFile(${perm.file})">⬇️</button></div>`; return card; }
@@ -600,7 +679,7 @@ function showEmpty(msg) { if (emptyState) { emptyState.classList.add('show'); em
 function hideEmpty() { if (emptyState) { emptyState.classList.remove('show'); emptyState.style.display = 'none'; } }
 
 function setupEventListeners() {
-    if (uploadBtn) { uploadBtn.onclick = () => { if (currentView === 'files') { loadFoldersForDropdown(); showModal(uploadModal); } else if (currentView === 'folders') { createFolder(); } else if (currentView === 'documents') { openCreateDocumentModal(); } }; }
+    if (uploadBtn) { uploadBtn.onclick = () => { if (currentView === 'files') { loadFoldersForDropdown(); showModal(uploadModal); } else if (currentView === 'folders') { createFolder(); } else if (currentView === 'documents' || currentView?.startsWith('section-')) { currentView === 'documents' ? openCreateDocumentModal() : openCreateSectionTableModal(currentView.replace('section-', '')); } }; }
     if (logoutBtn) logoutBtn.onclick = logout;
     if (uploadForm) uploadForm.onsubmit = handleUpload;
     if (loginForm) loginForm.onsubmit = handleLogin;

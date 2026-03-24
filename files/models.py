@@ -30,10 +30,13 @@ class StorageFolder(models.Model):
 
 
 class StorageFile(models.Model):
-    """Файл в хранилище"""
+    """
+    Файл в хранилище
+    ✅ БЕЗ FileExtensionValidator — принимаем ВСЕ типы файлов
+    """
     owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='files')
     folder = models.ForeignKey(StorageFolder, on_delete=models.SET_NULL, null=True, blank=True, related_name='files')
-    # ✅ УБРАЛИ FileExtensionValidator — теперь принимаем ВСЕ файлы
+    # ✅ УБРАЛИ validators=[FileExtensionValidator(...)] — теперь любые файлы
     file = models.FileField(upload_to='user_files/%Y/%m/%d/')
     file_name = models.CharField(max_length=255, blank=True)
     size = models.BigIntegerField(default=0)

@@ -1,3 +1,4 @@
+# files/serializers.py
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from .models import StorageFolder, StorageFile, FileAccessPermission, FileLock, AuditLog
@@ -32,10 +33,29 @@ class StorageFolderSerializer(serializers.ModelSerializer):
     class Meta:
         model = StorageFolder
         fields = ['id', 'name', 'owner', 'parent', 'created_at', 'files_count']
+        # ✅ parent НЕ в read_only — можно создавать вложенные папки
         read_only_fields = ['id', 'owner', 'created_at', 'files_count']
 
     def get_files_count(self, obj):
         return obj.files.count()
+
+    def validate_name(self, value):
+        """Проверка имени папки"""
+        if not value or not value.strip():
+            raise serializers.ValidationError('Имя папки не может быть пустым')
+        return value.strip()
+
+    def validate_parent(self, value):
+        """Проверка родительской папки"""
+        request = self.context.get('request')
+        if value and request:
+            # Нельзя создать папку в чужой папке
+            if value.owner != request.user:
+                raise serializers.ValidationError('Нельзя создать папку в чужой папке')
+            # Нельзя создать папку в самой себе
+            if self.instance and value == self.instance:
+                raise serializers.ValidationError('Нельзя переместить папку в саму себя')
+        return value
 
 
 class StorageFileSerializer(serializers.ModelSerializer):
@@ -112,18 +132,23 @@ class StorageFileSerializer(serializers.ModelSerializer):
             return []
 
     def validate_file(self, value):
-        """Валидация файла: проверка размера и определение mime_type"""
+        """
+        ✅ Валидация файла: проверка размера
+        БЕЗ блокировки по типу файла — принимаем ВСЕ файлы
+        """
         if not value:
             raise serializers.ValidationError('Файл не выбран')
 
-        max_size = 100 * 1024 * 1024  # 100MB
+        # ✅ Максимальный размер 100MB
+        max_size = 100 * 1024 * 1024
         if value.size > max_size:
-            raise serializers.ValidationError('Файл слишком большой (макс 100MB)')
+            raise serializers.ValidationError('Файл слишком большой (максимум 100MB)')
 
+        # ✅ Запрещаем пустые файлы
         if value.size == 0:
             raise serializers.ValidationError('Пустой файл не может быть загружен')
 
-        # Определяем mime_type по расширению файла
+        # ✅ Определяем mime_type по расширению (не блокируем, только определяем)
         mime_type = mimetypes.guess_type(value.name)[0] or 'application/octet-stream'
 
         # Сохраняем во временные атрибуты для использования в create()
@@ -132,8 +157,20 @@ class StorageFileSerializer(serializers.ModelSerializer):
 
         return value
 
+    def validate_folder(self, value):
+        """Проверка папки"""
+        request = self.context.get('request')
+        if value and request:
+            # Нельзя загрузить в чужую папку
+            if value.owner != request.user:
+                raise serializers.ValidationError('Нельзя загрузить файл в чужую папку')
+        return value
+
     def create(self, validated_data):
-        """Создание файла с авто-заполнением размера и mime_type"""
+        """
+        ✅ Создание файла с авто-заполнением размера и mime_type
+        БЕЗ блокировки по типу файла
+        """
         file = validated_data.pop('file', None)
         instance = super().create(validated_data)
 
@@ -146,7 +183,9 @@ class StorageFileSerializer(serializers.ModelSerializer):
         return instance
 
     def update(self, instance, validated_data):
-        """Обновление файла с авто-заполнением размера и mime_type"""
+        """
+        ✅ Обновление файла с авто-заполнением размера и mime_type
+        """
         file = validated_data.pop('file', None)
         instance = super().update(instance, validated_data)
 
@@ -163,7 +202,6 @@ class FileAccessPermissionSerializer(serializers.ModelSerializer):
     """Сериализатор прав доступа"""
     # Для отображения (read-only)
     user = UserShortSerializer(read_only=True)
-    # ИСПРАВЛЕНИЕ: используем SerializerMethodField вместо ReadOnlyField
     file_name = serializers.SerializerMethodField(read_only=True)
 
     # Для записи (write-only) - принимаем ID пользователя или username
@@ -266,9 +304,7 @@ class FileAccessPermissionSerializer(serializers.ModelSerializer):
             # Логируем действие
             if request and file:
                 try:
-                    # ИСПРАВЛЕНИЕ: используем os.path.basename вместо file.file_name
                     file_name = os.path.basename(file.file.name) if file.file else f"File #{file.id}"
-
                     AuditLog.objects.create(
                         user=request.user,
                         action='share',

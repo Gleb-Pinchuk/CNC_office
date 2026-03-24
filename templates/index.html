@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="/static/style.css">
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=Rajdhani:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 
-    <!-- ✅ Handsontable CSS (локально) -->
+    <!-- ✅ Handsontable CSS -->
     <link rel="stylesheet" href="/static/vendor/univer/handsontable.css" />
 
     <style>
@@ -16,7 +16,6 @@
         #previewContent img { border-radius: 8px; }
         .section-divider { margin: 1rem 0 0.5rem 0; padding: 0.5rem 1rem; font-size: 0.75rem; text-transform: uppercase; color: #666; font-weight: 600; }
 
-        /* ✅ Handsontable контейнер */
         #handsontable-container {
             width: 100%;
             height: calc(100vh - 120px);
@@ -33,25 +32,26 @@
             display: flex;
             flex-direction: column;
         }
-        #documentModal .modal-header {
-            flex-shrink: 0;
-        }
+        #documentModal .modal-header { flex-shrink: 0; }
         #documentModal .modal-body {
             flex: 1;
             overflow: hidden;
             padding: 0 !important;
             position: relative;
         }
-        .handsontable {
-            height: 100% !important;
-            overflow: auto !important;
-        }
+        .handsontable { height: 100% !important; overflow: auto !important; }
 
-        /* ✅ ИСПРАВЛЕНИЕ МЫШИ В HANDSONTABLE */
+        /* ✅ ИСПРАВЛЕНИЕ МЫШИ */
+        #documentModal { pointer-events: none !important; }
+        #documentModal.show { pointer-events: auto !important; }
+        #documentModal .modal-backdrop { pointer-events: none !important; }
+        #documentModal .modal-content { pointer-events: auto !important; z-index: 1050 !important; }
+        #documentModal .modal-body { pointer-events: auto !important; z-index: 10 !important; }
+        #handsontable-container { pointer-events: auto !important; z-index: 20 !important; }
         #handsontable-container .handsontable {
             pointer-events: auto !important;
             touch-action: none !important;
-            z-index: 100 !important;
+            z-index: 30 !important;
         }
         #handsontable-container .handsontable table,
         #handsontable-container .handsontable td,
@@ -59,12 +59,7 @@
             pointer-events: auto !important;
             cursor: text !important;
             user-select: text !important;
-        }
-        #documentModal.show .modal-body {
-            pointer-events: auto !important;
-        }
-        #documentModal.show {
-            pointer-events: auto !important;
+            z-index: 40 !important;
         }
     </style>
 </head>
@@ -180,9 +175,8 @@
                         <label for="fileInput">Файл</label>
                         <div class="input-wrapper">
                             <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
-                            <!-- ✅ Принимает ВСЕ популярные форматы -->
                             <input type="file" id="fileInput" name="file" required
-                                   accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.rtf,.odt,.ods,.odp,.jpg,.jpeg,.png,.gif,.bmp,.svg,.webp,.mp4,.avi,.mkv,.mov,.mp3,.wav,.ogg,.zip,.rar,.7z,.tar,.gz,.json,.xml,.csv,.py,.js,.html,.css,.sql,.md,.log,.dwg,.dxf,.step,.stl,.obj,.fbx">
+                                   accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.rtf,.odt,.ods,.odp,.jpg,.jpeg,.png,.gif,.bmp,.svg,.webp,.mp4,.avi,.mkv,.mov,.mp3,.wav,.ogg,.zip,.rar,.7z,.tar,.gz,.json,.xml,.csv,.py,.js,.html,.css,.sql,.md,.log">
                         </div>
                     </div>
                     <div class="form-group">
@@ -281,7 +275,7 @@
         </div>
     </div>
 
-    <!-- ✅ Document Modal с Handsontable -->
+    <!-- Document Modal с Handsontable -->
     <div class="modal" id="documentModal">
         <div class="modal-backdrop" onclick="hideModal('documentModal')"></div>
         <div class="modal-content" style="max-width:99vw;width:99vw;height:99vh;margin:0.5vh 0.5vw;display:flex;flex-direction:column;">
@@ -323,10 +317,10 @@
         </div>
     </div>
 
-    <!-- ✅ Handsontable JS (локально) -->
+    <!-- ✅ Handsontable JS -->
     <script src="/static/vendor/univer/handsontable.js"></script>
 
     <!-- ✅ App JS -->
-    <script src="/static/app.js?v=16.0"></script>
+    <script src="/static/app.js?v=17.0"></script>
 </body>
 </html>
