@@ -1,7 +1,7 @@
+# files/models.py
 import os
 from django.db import models
 from django.contrib.auth import get_user_model
-from django.core.validators import FileExtensionValidator
 from django.utils import timezone
 
 User = get_user_model()
@@ -33,10 +33,8 @@ class StorageFile(models.Model):
     """Файл в хранилище"""
     owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='files')
     folder = models.ForeignKey(StorageFolder, on_delete=models.SET_NULL, null=True, blank=True, related_name='files')
-    file = models.FileField(
-        upload_to='user_files/%Y/%m/%d/',
-        validators=[FileExtensionValidator(allowed_extensions=['*'])]
-    )
+    # ✅ УБРАЛИ FileExtensionValidator — теперь принимаем ВСЕ файлы
+    file = models.FileField(upload_to='user_files/%Y/%m/%d/')
     file_name = models.CharField(max_length=255, blank=True)
     size = models.BigIntegerField(default=0)
     size_mb = models.DecimalField(max_digits=10, decimal_places=2, default=0)
@@ -105,7 +103,7 @@ class FileLock(models.Model):
     file = models.ForeignKey(StorageFile, on_delete=models.CASCADE, related_name='locks')
     locked_by = models.ForeignKey(User, on_delete=models.CASCADE)
     locked_at = models.DateTimeField(auto_now_add=True)
-    expires_at = models.DateTimeField(default=timezone.now)  # ← Добавьте default
+    expires_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
         verbose_name = 'Блокировка файла'
@@ -117,6 +115,7 @@ class FileLock(models.Model):
 
     def is_expired(self):
         return timezone.now() > self.expires_at
+
 
 class AuditLog(models.Model):
     """Журнал аудита действий"""

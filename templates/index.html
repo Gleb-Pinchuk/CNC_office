@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="/static/style.css">
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=Rajdhani:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 
-    <!-- ✅ Handsontable CSS -->
+    <!-- ✅ Handsontable CSS (локально) -->
     <link rel="stylesheet" href="/static/vendor/univer/handsontable.css" />
 
     <style>
@@ -51,24 +51,19 @@
         #handsontable-container .handsontable {
             pointer-events: auto !important;
             touch-action: none !important;
-            z-index: 10 !important;
+            z-index: 100 !important;
         }
-        #handsontable-container .handsontable .wtHider,
-        #handsontable-container .handsontable .wtHolder {
-            pointer-events: auto !important;
-            z-index: 20 !important;
-        }
-        #handsontable-container .handsontable table {
-            pointer-events: auto !important;
-        }
+        #handsontable-container .handsontable table,
         #handsontable-container .handsontable td,
         #handsontable-container .handsontable th {
             pointer-events: auto !important;
             cursor: text !important;
             user-select: text !important;
         }
-        /* Убираем блокировку событий от модального окна */
         #documentModal.show .modal-body {
+            pointer-events: auto !important;
+        }
+        #documentModal.show {
             pointer-events: auto !important;
         }
     </style>
@@ -185,9 +180,9 @@
                         <label for="fileInput">Файл</label>
                         <div class="input-wrapper">
                             <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
-                            <!-- ✅ Принимает все популярные форматы -->
+                            <!-- ✅ Принимает ВСЕ популярные форматы -->
                             <input type="file" id="fileInput" name="file" required
-                                   accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.rtf,.odt,.ods,.odp,.jpg,.jpeg,.png,.gif,.bmp,.svg,.webp,.mp4,.avi,.mkv,.mov,.mp3,.wav,.ogg,.zip,.rar,.7z,.tar,.gz,.json,.xml,.csv,.py,.js,.html,.css,.sql,.md,.log">
+                                   accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.rtf,.odt,.ods,.odp,.jpg,.jpeg,.png,.gif,.bmp,.svg,.webp,.mp4,.avi,.mkv,.mov,.mp3,.wav,.ogg,.zip,.rar,.7z,.tar,.gz,.json,.xml,.csv,.py,.js,.html,.css,.sql,.md,.log,.dwg,.dxf,.step,.stl,.obj,.fbx">
                         </div>
                     </div>
                     <div class="form-group">
@@ -328,7 +323,7 @@
         </div>
     </div>
 
-    <!-- ✅ Handsontable JS -->
+    <!-- ✅ Handsontable JS (локально) -->
     <script src="/static/vendor/univer/handsontable.js"></script>
 
     <!-- ✅ App JS -->
