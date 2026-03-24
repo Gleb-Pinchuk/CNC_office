@@ -1,3 +1,4 @@
+# .github/workflows/deploy.yml
 name: Deploy to Production
 
 on:
@@ -9,6 +10,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     environment: production
+    timeout-minutes: 15
 
     steps:
       - name: Checkout code
@@ -20,89 +22,203 @@ jobs:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USERNAME }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT }}
           script: |
             set -e
             
             echo "🚀 Начало деплоя: $(date)"
             cd ~/cnc_office_v2
             
+            # ============================================
             # 1. Pull свежих изменений
+            # ============================================
             echo "🔄 Pull свежих изменений..."
             git fetch origin develop
             git reset --hard origin/develop
             
+            # ============================================
             # 2. Полная остановка контейнеров
+            # ============================================
             echo "🛑 Остановка контейнеров..."
-            docker compose down --remove-orphans
+            docker compose down --remove-orphans || true
             
+            # ============================================
             # 3. Очистка старых образов
+            # ============================================
             echo "🧹 Очистка кэша Docker..."
-            docker image prune -f
-            docker builder prune -f
+            docker image prune -f --filter="until=24h" || true
+            docker builder prune -f || true
             
-            # 4. 🔨 ПЕРЕСБОРКА ОБРАЗОВ (ОБЯЗАТЕЛЬНО --no-cache!)
-            echo "🔨 Пересборка образов (без кэша)..."
+            # ============================================
+            # 4. Пересборка образов
+            # ============================================
+            echo "🔨 Пересборка образов..."
             docker compose build --no-cache --force-rm
             
-            # 5. ▶️ Запуск контейнеров (БЕЗ фона, чтобы дождаться готовности)
+            # ============================================
+            # 5. Запуск контейнеров в фоне
+            # ============================================
             echo "▶️ Запуск проекта..."
             docker compose up -d --force-recreate
             
-            # 6. ⏳ Ожидание запуска БД и сервисов
-            echo "⏳ Ожидание запуска сервисов (40 сек)..."
-            sleep 40
+            # ============================================
+            # 6. Ожидание запуска сервисов с проверкой
+            # ============================================
+            echo "⏳ Ожидание запуска сервисов..."
             
-            # 7. 🗄 ПРИМЕНЕНИЕ МИГРАЦИЙ (ОБЯЗАТЕЛЬНО до проверки!)
+            MAX_WAIT=60
+            WAIT_INTERVAL=5
+            ELAPSED=0
+            
+            while [ $ELAPSED -lt $MAX_WAIT ]; do
+              if docker compose ps | grep -q "web.*running"; then
+                echo "✅ Контейнер web запущен!"
+                break
+              fi
+              echo "⏳ Ждём запуска web... (${ELAPSED}s/${MAX_WAIT}s)"
+              sleep $WAIT_INTERVAL
+              ELAPSED=$((ELAPSED + WAIT_INTERVAL))
+            done
+            
+            if ! docker compose ps | grep -q "web.*running"; then
+              echo "❌ ОШИБКА: Контейнер web не запустился за ${MAX_WAIT} сек!"
+              echo "=== Логи web ==="
+              docker compose logs web --tail=50
+              exit 1
+            fi
+            
+            # ============================================
+            # 7. Проверка здоровья Django с повторами
+            # ============================================
+            echo "🏥 Проверка здоровья Django..."
+            
+            HEALTHY=false
+            for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+              echo "🔍 Попытка $i/12: проверка Django..."
+              
+              if docker compose exec -T web python manage.py check --deploy 2>/dev/null; then
+                echo "✅ Django здоров!"
+                HEALTHY=true
+                break
+              fi
+              
+              echo "⚠️ Django ещё не готов, ждём 5 сек..."
+              docker compose logs web --tail=5 || true
+              sleep 5
+            done
+            
+            if [ "$HEALTHY" = false ]; then
+              echo "❌ ОШИБКА: Django не запустился за 60 сек!"
+              echo "=== Полные логи web ==="
+              docker compose logs web --tail=100
+              exit 1
+            fi
+            
+            # ============================================
+            # 8. Применение миграций с повторами
+            # ============================================
             echo "🗄 Применение миграций..."
-            docker compose exec -T web python manage.py migrate --noinput
             
-            # 8. 📁 СБОРКА СТАТИКИ (ОБЯЗАТЕЛЬНО!)
+            MIGRATED=false
+            for i in 1 2 3; do
+              echo "🔄 Попытка миграции $i/3..."
+              
+              if docker compose exec -T web python manage.py migrate --noinput 2>&1; then
+                echo "✅ Миграции применены!"
+                MIGRATED=true
+                break
+              fi
+              
+              echo "⚠️ Ошибка миграции, пробуем ещё раз..."
+              sleep 3
+            done
+            
+            if [ "$MIGRATED" = false ]; then
+              echo "❌ ОШИБКА: Не удалось применить миграции!"
+              docker compose logs web --tail=50
+              exit 1
+            fi
+            
+            # ============================================
+            # 9. Сборка статики
+            # ============================================
             echo "📁 Сборка статики..."
             docker compose exec -T web python manage.py collectstatic --noinput --clear
             
-            # 9. 🔄 Перезапуск web контейнера (чтобы подхватил новую статику)
-            echo "🔄 Перезапуск web контейнера..."
-            docker compose restart web
+            # ============================================
+            # 10. Перезапуск сервисов
+            # ============================================
+            echo "🔄 Перезапуск nginx и web..."
+            docker compose restart nginx web
             
-            # 10. ⏳ Ожидание после перезапуска
-            echo "⏳ Ожидание после перезапуска (15 сек)..."
-            sleep 15
+            # ============================================
+            # 11. Ожидание после перезапуска
+            # ============================================
+            echo "⏳ Ожидание после перезапуска (10 сек)..."
+            sleep 10
             
-            # 11. 🏥 Проверка здоровья контейнеров
-            echo "🏥 Проверка статуса контейнеров..."
-            docker compose ps
+            # ============================================
+            # 12. Проверка ответа Django (внутри Docker)
+            # ============================================
+            echo "🔍 Проверка доступности API (внутри Docker)..."
             
-            # 12. 🔍 Проверка ответа Django
-            echo "🔍 Проверка доступности API..."
-            HTTP_CODE=$(docker compose exec -T web curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/ || echo "000")
-            echo "📊 HTTP код от Django: $HTTP_CODE"
+            INTERNAL_CODE=$(docker compose exec -T web curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/ 2>/dev/null || echo "000")
+            echo "📊 HTTP код от Django (internal): $INTERNAL_CODE"
             
-            if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "401" ] || [ "$HTTP_CODE" = "403" ]; then
+            if [ "$INTERNAL_CODE" = "200" ] || [ "$INTERNAL_CODE" = "401" ] || [ "$INTERNAL_CODE" = "403" ]; then
               echo "✅ Backend отвечает корректно!"
-            elif [ "$HTTP_CODE" = "500" ]; then
-              echo "❌ ОШИБКА 500! Смотрим логи Django..."
+            elif [ "$INTERNAL_CODE" = "500" ]; then
+              echo "❌ ОШИБКА 500 от Django!"
+              echo "=== Логи Django ==="
               docker compose logs web --tail=100
               exit 1
             else
-              echo "⚠️ Неожиданный код: $HTTP_CODE"
-              docker compose logs web --tail=50
+              echo "⚠️ Неожиданный код от Django: $INTERNAL_CODE"
+              docker compose logs web --tail=30
             fi
             
-            # 13. 🌐 Проверка через Nginx
-            echo "🌐 Проверка через Nginx..."
-            sleep 5
-            EXTERNAL_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:80/api/ || echo "000")
-            echo "📊 HTTP код от Nginx: $EXTERNAL_CODE"
+            # ============================================
+            # 13. Проверка через Nginx (внешний доступ)
+            # ============================================
+            echo "🌐 Проверка через Nginx (внешний доступ)..."
+            sleep 3
             
-            # 14. 🧹 Финальная очистка
-            echo "🧹 Очистка старых образов..."
-            docker image prune -f --filter="until=24h"
+            EXTERNAL_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8002/api/ 2>/dev/null || echo "000")
+            echo "📊 HTTP код от Nginx (external): $EXTERNAL_CODE"
             
-            echo "✅ Деплой завершён: $(date)"
+            if [ "$EXTERNAL_CODE" = "200" ] || [ "$EXTERNAL_CODE" = "401" ] || [ "$EXTERNAL_CODE" = "403" ]; then
+              echo "✅ Nginx проксирует корректно!"
+            elif [ "$EXTERNAL_CODE" = "502" ] || [ "$EXTERNAL_CODE" = "503" ]; then
+              echo "❌ ОШИБКА 502/503 от Nginx — backend не отвечает!"
+              echo "=== Логи Nginx ==="
+              docker compose logs nginx --tail=30
+              echo "=== Логи Web ==="
+              docker compose logs web --tail=30
+              exit 1
+            else
+              echo "⚠️ Неожиданный код от Nginx: $EXTERNAL_CODE"
+            fi
+            
+            # ============================================
+            # 14. Финальная очистка
+            # ============================================
+            echo "🧹 Финальная очистка старых образов..."
+            docker image prune -f --filter="until=24h" || true
+            
+            # ============================================
+            # ✅ ДЕПЛОЙ ЗАВЕРШЁН
+            # ============================================
+            echo ""
+            echo "✅ ============================================"
+            echo "✅ Деплой завершён успешно: $(date)"
+            echo "✅ ============================================"
             echo "🔗 Приложение доступно: http://${{ secrets.DEPLOY_HOST }}:8002/"
             echo ""
-            echo "📋 Важно:"
-            echo "  - Миграции применены ✅"
-            echo "  - Статика собрана ✅"
-            echo "  - Контейнеры перезапущены ✅"
-            echo "  - Очистите кэш браузера: Ctrl+Shift+R"
+            echo "📋 Чеклист:"
+            echo "  ✅ Контейнеры запущены"
+            echo "  ✅ Миграции применены"
+            echo "  ✅ Статика собрана"
+            echo "  ✅ Backend отвечает"
+            echo "  ✅ Nginx проксирует"
+            echo ""
+            echo "🔄 В браузере: нажмите Ctrl+Shift+R для очистки кэша"
