@@ -1,8 +1,7 @@
-# docker-compose.yml
+---
 version: '3.8'
 
 services:
-  # ✅ PostgreSQL Database
   db:
     image: postgres:15-alpine
     container_name: cnc_office_db
@@ -14,7 +13,12 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cnc_user} -d ${POSTGRES_DB:-cnc_office}"]
+      test:
+        - CMD-SHELL
+        - >-
+          pg_isready
+          -U ${POSTGRES_USER:-cnc_user}
+          -d ${POSTGRES_DB:-cnc_office}
       interval: 5s
       timeout: 5s
       retries: 5
@@ -22,12 +26,11 @@ services:
     networks:
       - app-network
     logging:
-      driver: "json-file"
+      driver: json-file
       options:
-        max-size: "10m"
-        max-file: "3"
+        max-size: '10m'
+        max-file: '3'
 
-  # ✅ Django Web Application
   web:
     build:
       context: .
@@ -41,7 +44,7 @@ services:
       - media_volume:/app/media
       - logs_volume:/app/logs
     expose:
-      - "8000"
+      - '8000'
     env_file:
       - .env
     environment:
@@ -53,7 +56,12 @@ services:
       db:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "manage.py", "check", "--deploy"]
+      test:
+        - CMD
+        - python
+        - manage.py
+        - check
+        - --deploy
       interval: 10s
       timeout: 5s
       retries: 5
@@ -61,12 +69,11 @@ services:
     networks:
       - app-network
     logging:
-      driver: "json-file"
+      driver: json-file
       options:
-        max-size: "20m"
-        max-file: "5"
+        max-size: '20m'
+        max-file: '5'
 
-  # ✅ Nginx Reverse Proxy
   nginx:
     build:
       context: ./nginx
@@ -74,7 +81,7 @@ services:
     container_name: cnc_office_nginx
     restart: unless-stopped
     ports:
-      - "8002:80"
+      - '8002:80'
     volumes:
       - static_volume:/app/staticfiles:ro
       - media_volume:/app/media:ro
@@ -84,19 +91,17 @@ services:
     networks:
       - app-network
     logging:
-      driver: "json-file"
+      driver: json-file
       options:
-        max-size: "10m"
-        max-file: "3"
+        max-size: '10m'
+        max-file: '3'
 
-# ✅ Volumes
 volumes:
-  postgres_
+  postgres_data:
   static_volume:
   media_volume:
   logs_volume:
 
-# ✅ Networks
 networks:
   app-network:
     driver: bridge
