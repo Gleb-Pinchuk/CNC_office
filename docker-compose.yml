@@ -15,7 +15,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 15
-      start_period: 210s
+      start_period: 220s
     networks:
       - app-network
     logging:
