@@ -13,7 +13,7 @@ DEBUG = os.getenv('DEBUG', 'False').lower() in ('true', '1', 'yes')
 ALLOWED_HOSTS_ENV = os.getenv('ALLOWED_HOSTS', '*')
 ALLOWED_HOSTS = [h.strip() for h in ALLOWED_HOSTS_ENV.split(',') if h.strip()] if ALLOWED_HOSTS_ENV else ['*']
 
-# Application definition
+# ✅ Application definition
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
@@ -21,13 +21,18 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+
+    # ✅ Third-party
     'rest_framework',
     'rest_framework.authtoken',
     'corsheaders',
-    'api',
+    'django_filters',
+
+    # ✅ Твои приложения (исправлено: добавлен sections)
     'files',
     'users',
     'documents',
+    'sections',  # ✅ ДОБАВЛЕНО: для таблиц в разделах
 ]
 
 MIDDLEWARE = [
@@ -61,7 +66,7 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'config.wsgi.application'
 
-# Database
+# ✅ Database
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
@@ -73,7 +78,7 @@ DATABASES = {
     }
 }
 
-# Password validation
+# ✅ Password validation
 AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
     {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator'},
@@ -81,25 +86,30 @@ AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
 ]
 
-# Internationalization
+# ✅ Internationalization
 LANGUAGE_CODE = 'ru-ru'
 TIME_ZONE = 'Europe/Moscow'
 USE_I18N = True
 USE_TZ = True
 
-# Static files
-STATICFILES_DIRS = [BASE_DIR / 'frontend']
+# ✅ Static files
+# ✅ Добавлен vendor для handsontable.css/js
+STATICFILES_DIRS = [
+    BASE_DIR / 'frontend',
+    BASE_DIR / 'frontend/vendor',
+]
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 STATIC_URL = '/static/'
 
-# Media files
+# ✅ Media files
 MEDIA_URL = '/media/'
-MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+MEDIA_ROOT = BASE_DIR / 'media'
 
-# CORS
+# ✅ CORS
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
 
+# ✅ REST Framework
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework.authentication.TokenAuthentication',
@@ -110,21 +120,34 @@ REST_FRAMEWORK = {
     ],
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 20,
+    # ✅ Увеличим лимиты для загрузки файлов
+    'DEFAULT_PARSER_CLASSES': [
+        'rest_framework.parsers.JSONParser',
+        'rest_framework.parsers.FormParser',
+        'rest_framework.parsers.MultiPartParser',  # ✅ Для multipart/form-data
+    ],
 }
+
+# ✅ File upload settings
+FILE_UPLOAD_MAX_MEMORY_SIZE = 100 * 1024 * 1024  # 100MB
+DATA_UPLOAD_MAX_MEMORY_SIZE = 100 * 1024 * 1024  # 100MB
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# Redirects
+# ✅ Redirects
 LOGIN_REDIRECT_URL = '/api/'
 LOGOUT_REDIRECT_URL = '/api/'
 
+# ✅ CSRF trusted origins
 CSRF_TRUSTED_ORIGINS = [
     'http://localhost:8000',
     'http://127.0.0.1:8000',
     'http://192.168.0.104:8000',
     'http://83.166.236.188:8002',
+    'http://83.166.236.188',  # ✅ Без порта
 ]
 
+# ✅ Улучшенное логирование для отладки 500 ошибок
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
@@ -139,34 +162,51 @@ LOGGING = {
             'class': 'logging.StreamHandler',
             'formatter': 'verbose',
         },
+        'file': {
+            'class': 'logging.FileHandler',
+            'filename': BASE_DIR / 'logs' / 'django.log',
+            'formatter': 'verbose',
+        },
     },
     'root': {
-        'handlers': ['console'],
-        'level': 'INFO',
+        'handlers': ['console', 'file'],
+        'level': 'DEBUG' if DEBUG else 'INFO',
     },
     'loggers': {
         'django': {
-            'handlers': ['console'],
+            'handlers': ['console', 'file'],
             'level': 'INFO',
             'propagate': False,
         },
         'django.request': {
-            'handlers': ['console'],
+            'handlers': ['console', 'file'],
             'level': 'ERROR',
             'propagate': False,
         },
-        'files': {
+        'django.db.backends': {
             'handlers': ['console'],
+            'level': 'DEBUG' if DEBUG else 'WARNING',
+            'propagate': False,
+        },
+        'files': {
+            'handlers': ['console', 'file'],
+            'level': 'DEBUG' if DEBUG else 'INFO',
+            'propagate': False,
+        },
+        'sections': {
+            'handlers': ['console', 'file'],
             'level': 'DEBUG' if DEBUG else 'INFO',
             'propagate': False,
         },
     },
 }
 
-# Content Security Policy
 CSP_DEFAULT_SRC = ("'self'", 'https:', 'http:', "'unsafe-inline'", "'unsafe-eval'")
-CSP_SCRIPT_SRC = ("'self'", 'https:', 'http:', "'unsafe-inline'", "'unsafe-eval'")
-CSP_STYLE_SRC = ("'self'", 'https:', 'http:', "'unsafe-inline'")
+CSP_SCRIPT_SRC = ("'self'", 'https:', 'http:', "'unsafe-inline'", "'unsafe-eval'", 'cdnjs.cloudflare.com', 'cdn.jsdelivr.net')
+CSP_STYLE_SRC = ("'self'", 'https:', 'http:', "'unsafe-inline'", 'cdnjs.cloudflare.com', 'cdn.jsdelivr.net', 'fonts.googleapis.com')
 CSP_CONNECT_SRC = ("'self'", 'https:', 'http:')
-CSP_IMG_SRC = ("'self'", 'https:', 'http:', 'data:')
-CSP_FONT_SRC = ("'self'", 'https:', 'http:', 'data:')
+CSP_IMG_SRC = ("'self'", 'https:', 'http:', 'data:', 'blob:')
+CSP_FONT_SRC = ("'self'", 'https:', 'http:', 'data:', 'fonts.gstatic.com')
+CSP_FRAME_SRC = ("'self'", 'https:', 'http:')
+
+X_FRAME_OPTIONS = 'SAMEORIGIN'
