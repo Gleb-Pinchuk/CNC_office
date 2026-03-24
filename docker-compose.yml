@@ -1,6 +1,4 @@
 ---
-version: '3.8'
-
 services:
   db:
     image: postgres:15-alpine
@@ -14,10 +12,10 @@ services:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U postgres']
-      interval: 10s
+      interval: 5s
       timeout: 5s
-      retries: 10
-      start_period: 30s
+      retries: 15
+      start_period: 60s
     networks:
       - app-network
     logging:
