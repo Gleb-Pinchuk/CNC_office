@@ -1,4 +1,4 @@
-// ==================== CNC Office - Frontend App v14.0 (Handsontable Full) ====================
+// ==================== CNC Office - Frontend App v15.0 (Handsontable Fixed) ====================
 const API_BASE = '/api';
 let currentUser = null;
 let currentFolder = null;
@@ -26,7 +26,7 @@ const folderSelect = document.getElementById('folderSelect');
 const navItems = document.querySelectorAll('.nav-item');
 
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('🚀 App initialized v14.0 with Handsontable Full');
+    console.log('🚀 App initialized v15.0 with Handsontable Fixed');
     setupEventListeners();
     checkAuth();
 });
@@ -53,7 +53,18 @@ async function checkAuth() {
 
 function showModal(modal) {
     const el = typeof modal === 'string' ? document.getElementById(modal) : modal;
-    if (el) { el.classList.add('show'); el.style.display = 'flex'; document.body.style.overflow = 'hidden'; }
+    if (el) {
+        el.classList.add('show');
+        el.style.display = 'flex';
+        document.body.style.overflow = 'hidden';
+        // ✅ Пересчитываем размеры таблицы после показа модалки
+        setTimeout(() => {
+            if (hotInstance) {
+                hotInstance.render();
+                hotInstance.refreshDimensions();
+            }
+        }, 100);
+    }
 }
 
 function hideModal(modal) {
@@ -224,7 +235,7 @@ async function shareFile(fileId) { const username = prompt('Имя пользо�
 
 async function deleteFile(fileId) { if (!confirm('Удалить файл?')) return; try { const res = await fetch(`${API_BASE}/files/${fileId}/`, { method: 'DELETE', headers: getAuthHeaders() }); if (res.ok || res.status === 204) await loadFiles(); else alert('Ошибка удаления'); } catch { alert('Ошибка подключения'); } }
 
-// ✅ УЛУЧШЕННЫЙ ПРЕДПРОСМОТР С ПОДДЕРЖКОЙ PDF И ДРУГИХ ФОРМАТОВ
+// ✅ УЛУЧШЕННЫЙ ПРЕДПРОСМОТР С ПОДДЕРЖКОЙ ВСЕХ ФОРМАТОВ
 function showPreviewModal(file) {
     const mt = (file.mime_type || '').toLowerCase();
     const fileExt = (file.file_name || '').split('.').pop().toLowerCase();
@@ -241,7 +252,7 @@ function showPreviewModal(file) {
     if (mt.includes('pdf') || fileExt === 'pdf') {
         previewContent.innerHTML = `
             <div style="width:100%;height:80vh;">
-                <iframe src="${downloadUrl}" style="width:100%;height:100%;border:none;" title="PDF Preview"></iframe>
+                <iframe src="${downloadUrl}#toolbar=0" style="width:100%;height:100%;border:none;" title="PDF Preview"></iframe>
             </div>
         `;
         showModal(previewModal);
@@ -260,8 +271,8 @@ function showPreviewModal(file) {
                 showModal(previewModal);
             });
     }
-    // ✅ Текст, JSON, CSV, XML, MD
-    else if (mt.includes('text') || ['txt', 'json', 'csv', 'xml', 'md', 'log'].includes(fileExt)) {
+    // ✅ Текст, JSON, CSV, XML, MD, LOG
+    else if (mt.includes('text') || ['txt', 'json', 'csv', 'xml', 'md', 'log', 'py', 'js', 'html', 'css'].includes(fileExt)) {
         fetch(downloadUrl, { headers: getAuthHeaders() })
             .then(res => res.text())
             .then(text => {
@@ -274,10 +285,10 @@ function showPreviewModal(file) {
             });
     }
     // ✅ Видео
-    else if (mt.includes('video') || ['mp4', 'avi', 'mkv', 'mov', 'webm'].includes(fileExt)) {
+    else if (mt.includes('video') || ['mp4', 'avi', 'mkv', 'mov', 'webm', 'flv'].includes(fileExt)) {
         previewContent.innerHTML = `
             <div style="text-align:center;">
-                <video controls style="max-width:100%;max-height:80vh;border-radius:8px;">
+                <video controls style="max-width:100%;max-height:80vh;border-radius:8px;background:#000;">
                     <source src="${downloadUrl}" type="${mt || 'video/mp4'}">
                     Ваш браузер не поддерживает видео
                 </video>
@@ -286,7 +297,7 @@ function showPreviewModal(file) {
         showModal(previewModal);
     }
     // ✅ Аудио
-    else if (mt.includes('audio') || ['mp3', 'wav', 'ogg', 'flac'].includes(fileExt)) {
+    else if (mt.includes('audio') || ['mp3', 'wav', 'ogg', 'flac', 'm4a'].includes(fileExt)) {
         previewContent.innerHTML = `
             <div style="text-align:center;padding:2rem;">
                 <audio controls style="width:100%;max-width:600px;">
@@ -345,13 +356,14 @@ function showDocumentEditor(doc) {
     title.textContent = doc.title;
     currentDocument = doc;
     showModal('documentModal');
+    // ✅ Ждём пока модалка полностью отрендерится перед инициализацией таблицы
     setTimeout(() => {
         if (doc.doc_type === 'spreadsheet') { initHandsontable(doc); }
         else { initTextEditor(doc); }
-    }, 300);
+    }, 400);
 }
 
-// ✅ ПОЛНОЦЕННАЯ ТАБЛИЦА КАК GOOGLE SHEETS/EXCEL
+// ✅ ПОЛНОЦЕННАЯ ТАБЛИЦА С МЫШКОЙ И ФОРМАТИРОВАНИЕМ
 function initHandsontable(doc) {
     console.log('🔍 initHandsontable called');
 
@@ -364,6 +376,7 @@ function initHandsontable(doc) {
         return;
     }
 
+    // ✅ Очищаем контейнер перед созданием
     container.innerHTML = '';
 
     try {
@@ -373,6 +386,7 @@ function initHandsontable(doc) {
             data = Array(20).fill(null).map(() => Array(10).fill(''));
         }
 
+        // ✅ Инициализация с поддержкой мыши
         hotInstance = new Handsontable(container, {
             data: data,
 
@@ -380,7 +394,7 @@ function initHandsontable(doc) {
             colHeaders: true,
             rowHeaders: true,
 
-            // ✅ Размеры
+            // ✅ Размеры - важно для мыши!
             height: '100%',
             width: '100%',
 
@@ -389,6 +403,10 @@ function initHandsontable(doc) {
 
             // ✅ Язык
             language: 'ru-RU',
+
+            // ✅ Включаем взаимодействие с мышью (ОБЯЗАТЕЛЬНО!)
+            readOnly: false,
+            disableVisualSelection: false,
 
             // ✅ Контекстное меню (ПКМ)
             contextMenu: {
@@ -444,7 +462,7 @@ function initHandsontable(doc) {
             // ✅ Комментарии
             comments: true,
 
-            // ✅ Выделение
+            // ✅ Выделение мышью
             selectionMode: 'range',
 
             // ✅ Навигация
@@ -454,7 +472,7 @@ function initHandsontable(doc) {
             autoColumnSize: true,
             autoRowSize: false,
 
-            // ✅ Типы ячеек
+            // ✅ Типы ячеек + форматирование
             cells: function (row, col) {
                 const cellProperties = {
                     type: 'text',
@@ -462,7 +480,7 @@ function initHandsontable(doc) {
                     className: 'htLeft'
                 };
 
-                // Первая строка - заголовки (жирный шрифт)
+                // Первая строка - заголовки (жирный шрифт, по центру)
                 if (row === 0) {
                     cellProperties.className = 'htCenter htMiddle htBold';
                 }
@@ -476,14 +494,31 @@ function initHandsontable(doc) {
             // ✅ Undo/Redo
             undo: true,
 
-            // ✅ Форматирование
+            // ✅ Форматирование текста
             cellMerge: true,
 
             // ✅ Условное форматирование (базовое)
             conditionalFormatting: {
                 indication: true
             },
+
+            // ✅ Колёсико мыши для прокрутки
+            preventOverflow: 'horizontal',
+
+            // ✅ После инициализации пересчитываем размеры
+            afterRender: () => {
+                console.log('✅ Handsontable rendered');
+            }
         });
+
+        // ✅ Принудительно обновляем размеры после создания
+        setTimeout(() => {
+            if (hotInstance) {
+                hotInstance.render();
+                hotInstance.refreshDimensions();
+                console.log('✅ Handsontable dimensions refreshed');
+            }
+        }, 200);
 
         console.log('✅ Handsontable initialized');
 
