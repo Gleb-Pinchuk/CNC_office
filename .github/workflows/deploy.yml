@@ -1,0 +1,108 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches:
+      - develop
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to server
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USERNAME }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            set -e
+            
+            echo "🚀 Начало деплоя: $(date)"
+            cd ~/cnc_office_v2
+            
+            # 1. Pull свежих изменений
+            echo "🔄 Pull свежих изменений..."
+            git fetch origin develop
+            git reset --hard origin/develop
+            
+            # 2. Полная остановка контейнеров
+            echo "🛑 Остановка контейнеров..."
+            docker compose down --remove-orphans
+            
+            # 3. Очистка старых образов
+            echo "🧹 Очистка кэша Docker..."
+            docker image prune -f
+            docker builder prune -f
+            
+            # 4. 🔨 ПЕРЕСБОРКА ОБРАЗОВ (ОБЯЗАТЕЛЬНО --no-cache!)
+            echo "🔨 Пересборка образов (без кэша)..."
+            docker compose build --no-cache --force-rm
+            
+            # 5. ▶️ Запуск контейнеров (БЕЗ фона, чтобы дождаться готовности)
+            echo "▶️ Запуск проекта..."
+            docker compose up -d --force-recreate
+            
+            # 6. ⏳ Ожидание запуска БД и сервисов
+            echo "⏳ Ожидание запуска сервисов (40 сек)..."
+            sleep 40
+            
+            # 7. 🗄 ПРИМЕНЕНИЕ МИГРАЦИЙ (ОБЯЗАТЕЛЬНО до проверки!)
+            echo "🗄 Применение миграций..."
+            docker compose exec -T web python manage.py migrate --noinput
+            
+            # 8. 📁 СБОРКА СТАТИКИ (ОБЯЗАТЕЛЬНО!)
+            echo "📁 Сборка статики..."
+            docker compose exec -T web python manage.py collectstatic --noinput --clear
+            
+            # 9. 🔄 Перезапуск web контейнера (чтобы подхватил новую статику)
+            echo "🔄 Перезапуск web контейнера..."
+            docker compose restart web
+            
+            # 10. ⏳ Ожидание после перезапуска
+            echo "⏳ Ожидание после перезапуска (15 сек)..."
+            sleep 15
+            
+            # 11. 🏥 Проверка здоровья контейнеров
+            echo "🏥 Проверка статуса контейнеров..."
+            docker compose ps
+            
+            # 12. 🔍 Проверка ответа Django
+            echo "🔍 Проверка доступности API..."
+            HTTP_CODE=$(docker compose exec -T web curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/ || echo "000")
+            echo "📊 HTTP код от Django: $HTTP_CODE"
+            
+            if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "401" ] || [ "$HTTP_CODE" = "403" ]; then
+              echo "✅ Backend отвечает корректно!"
+            elif [ "$HTTP_CODE" = "500" ]; then
+              echo "❌ ОШИБКА 500! Смотрим логи Django..."
+              docker compose logs web --tail=100
+              exit 1
+            else
+              echo "⚠️ Неожиданный код: $HTTP_CODE"
+              docker compose logs web --tail=50
+            fi
+            
+            # 13. 🌐 Проверка через Nginx
+            echo "🌐 Проверка через Nginx..."
+            sleep 5
+            EXTERNAL_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:80/api/ || echo "000")
+            echo "📊 HTTP код от Nginx: $EXTERNAL_CODE"
+            
+            # 14. 🧹 Финальная очистка
+            echo "🧹 Очистка старых образов..."
+            docker image prune -f --filter="until=24h"
+            
+            echo "✅ Деплой завершён: $(date)"
+            echo "🔗 Приложение доступно: http://${{ secrets.DEPLOY_HOST }}:8002/"
+            echo ""
+            echo "📋 Важно:"
+            echo "  - Миграции применены ✅"
+            echo "  - Статика собрана ✅"
+            echo "  - Контейнеры перезапущены ✅"
+            echo "  - Очистите кэш браузера: Ctrl+Shift+R"

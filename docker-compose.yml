@@ -1,0 +1,117 @@
+services:
+  db:
+    image: postgres:16
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: cnc_office
+      POSTGRES_USER: cnc_user
+      POSTGRES_PASSWORD: cnc_password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cnc_user -d cnc_office"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - cnc_network
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - cnc_network
+
+  web:
+    build: .
+    command: gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 120
+    volumes:
+      - .:/app
+      - media_volume:/app/media
+      - static_volume:/app/staticfiles
+    expose:
+      - "8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://cnc_user:cnc_password@db:5432/cnc_office
+      REDIS_URL: redis://redis:6379/0
+      DEBUG: "True"
+      ALLOWED_HOSTS: "*"
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+    # ✅ HEALTHCHECK ДЛЯ WEB (использует публичный эндпоинт /api/health/)
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - cnc_network
+
+  celery_worker:
+    build: .
+    command: celery -A config worker -l info
+    volumes:
+      - .:/app
+      - media_volume:/app/media
+    depends_on:
+      - redis
+      - db
+    environment:
+      DATABASE_URL: postgres://cnc_user:cnc_password@db:5432/cnc_office
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+    networks:
+      - cnc_network
+
+  celery_beat:
+    build: .
+    command: celery -A config beat -l info
+    volumes:
+      - .:/app
+    depends_on:
+      - redis
+      - celery_worker
+    environment:
+      DATABASE_URL: postgres://cnc_user:cnc_password@db:5432/cnc_office
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+    networks:
+      - cnc_network
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "8002:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - static_volume:/app/staticfiles:ro
+      - media_volume:/app/media:ro
+    depends_on:
+      - web
+    networks:
+      - cnc_network
+
+volumes:
+  postgres_data:
+  redis_data:
+  media_volume:
+  static_volume:
+
+networks:
+  cnc_network:
+    driver: bridge

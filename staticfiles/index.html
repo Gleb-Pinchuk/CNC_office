@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CNC Office | Облачное хранилище</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="logo">
+                <span class="logo-icon">📁</span>
+                <span class="logo-text">CNC Office</span>
+            </div>
+            <nav class="nav-menu">
+                <a href="#" class="nav-item active" data-view="files">
+                    <span class="nav-icon">📄</span>
+                    <span>Файлы</span>
+                </a>
+                <a href="#" class="nav-item" data-view="folders">
+                    <span class="nav-icon">📂</span>
+                    <span>Папки</span>
+                </a>
+                <a href="#" class="nav-item" data-view="shared">
+                    <span class="nav-icon">🔗</span>
+                    <span>Общий доступ</span>
+                </a>
+                <a href="#" class="nav-item" data-view="logs">
+                    <span class="nav-icon">📊</span>
+                    <span>Логи</span>
+                </a>
+            </nav>
+            <div class="user-profile">
+                <div class="user-avatar">👤</div>
+                <div class="user-info">
+                    <span class="user-name" id="username">Гость</span>
+                    <button class="logout-btn" id="logoutBtn">Выйти</button>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <header class="header">
+                <h1 class="page-title" id="pageTitle">Мои файлы</h1>
+                <div class="header-actions">
+                    <button class="btn btn-primary" id="uploadBtn">
+                        <span>📤</span> Загрузить файл
+                    </button>
+                </div>
+            </header>
+
+            <div class="content-area">
+                <!-- Files Grid -->
+                <div class="files-grid" id="filesGrid">
+                    <!-- Files will be loaded here -->
+                </div>
+
+                <!-- Loading State -->
+                <div class="loading-state" id="loadingState">
+                    <div class="spinner"></div>
+                    <p>Загрузка...</p>
+                </div>
+
+                <!-- Empty State -->
+                <div class="empty-state" id="emptyState">
+                    <div class="empty-icon">📭</div>
+                    <h3>Нет файлов</h3>
+                    <p>Загрузите первый файл, чтобы начать</p>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Upload Modal -->
+    <div class="modal" id="uploadModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Загрузка файла</h2>
+                <button class="modal-close" id="closeModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="uploadForm" enctype="multipart/form-data">
+                    <div class="form-group">
+                        <label for="fileInput">Выберите файл</label>
+                        <input type="file" id="fileInput" name="file" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="folderSelect">Папка (необязательно)</label>
+                        <select id="folderSelect" name="folder">
+                            <option value="">Корневая папка</option>
+                        </select>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-full">Загрузить</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Login Modal -->
+    <div class="modal" id="loginModal">
+        <div class="modal-content modal-small">
+            <div class="modal-header">
+                <h2>Вход в систему</h2>
+            </div>
+            <div class="modal-body">
+                <form id="loginForm">
+                    <div class="form-group">
+                        <label for="loginUsername">Имя пользователя</label>
+                        <input type="text" id="loginUsername" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="loginPassword">Пароль</label>
+                        <input type="password" id="loginPassword" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-full">Войти</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
