@@ -1,11 +1,11 @@
-// ==================== CNC Office - Frontend App v11.0 (Jspreadsheet) ====================
+// ==================== CNC Office - Frontend App v13.0 (Handsontable) ====================
 const API_BASE = '/api';
 let currentUser = null;
 let currentFolder = null;
 let currentView = 'files';
 let currentDocument = null;
 let authToken = localStorage.getItem('cnc_auth_token');
-let jspreadsheetInstance = null;
+let hotInstance = null;
 
 const filesGrid = document.getElementById('filesGrid');
 const loadingState = document.getElementById('loadingState');
@@ -26,7 +26,7 @@ const folderSelect = document.getElementById('folderSelect');
 const navItems = document.querySelectorAll('.nav-item');
 
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('🚀 App initialized v11.0 with Jspreadsheet');
+    console.log('🚀 App initialized v13.0 with Handsontable');
     setupEventListeners();
     checkAuth();
 });
@@ -60,8 +60,8 @@ function hideModal(modal) {
     const el = typeof modal === 'string' ? document.getElementById(modal) : modal;
     if (el) {
         if (el.id === 'documentModal') {
-            if (currentDocument && jspreadsheetInstance) { saveDocument(); }
-            jspreadsheetInstance = null;
+            if (currentDocument && hotInstance) { saveDocument(); }
+            if (hotInstance) { hotInstance.destroy(); hotInstance = null; }
             currentDocument = null;
         }
         el.classList.remove('show');
@@ -190,7 +190,7 @@ async function createFolder() { const name = prompt('Имя папки:'); if (!
 
 async function deleteFolder(id) { if (!confirm('Удалить папку?')) return; try { const res = await fetch(`${API_BASE}/folders/${id}/`, { method: 'DELETE', headers: getAuthHeaders() }); if (res.ok || res.status === 204) await loadFolders(); else alert('Ошибка'); } catch { alert('Ошибка подключения'); } }
 
-// ✅ ДОКУМЕНТЫ С JSPREADSHEET
+// ✅ ДОКУМЕНТЫ С HANDSONTABLE
 async function loadDocuments() { console.log('📄 Loading documents...'); try { const res = await fetch(`${API_BASE}/documents/`, { headers: getAuthHeaders() }); if (res.status === 200) { const data = await res.json(); const docs = data.results || data || []; renderDocuments(docs); } else { showEmpty('Не удалось загрузить'); } } catch (e) { console.error('❌ Load documents error:', e); showEmpty('Ошибка'); } }
 
 function renderDocuments(docs) { hideLoading(); if (!docs?.length) { showEmpty('Нет документов'); return; } hideEmpty(); if (filesGrid) { filesGrid.innerHTML = ''; docs.forEach((d, i) => filesGrid.appendChild(createDocumentCard(d, i))); } }
@@ -221,19 +221,19 @@ function showDocumentEditor(doc) {
     currentDocument = doc;
     showModal('documentModal');
     setTimeout(() => {
-        if (doc.doc_type === 'spreadsheet') { initJspreadsheet(doc); }
+        if (doc.doc_type === 'spreadsheet') { initHandsontable(doc); }
         else { initTextEditor(doc); }
     }, 300);
 }
 
-function initJspreadsheet(doc) {
-    console.log('🔍 initJspreadsheet called');
+function initHandsontable(doc) {
+    console.log('🔍 initHandsontable called');
 
-    const container = document.getElementById('jspreadsheet-container');
+    const container = document.getElementById('handsontable-container');
     if (!container) { console.error('❌ Container not found'); return; }
 
-    if (typeof jspreadsheet === 'undefined') {
-        console.error('❌ Jspreadsheet not loaded');
+    if (typeof Handsontable === 'undefined') {
+        console.error('❌ Handsontable not loaded');
         container.innerHTML = '<div style="padding:2rem;color:#000;">⚠️ Редактор не загрузился</div>';
         return;
     }
@@ -241,27 +241,29 @@ function initJspreadsheet(doc) {
     container.innerHTML = '';
 
     try {
-        let data = doc.content?.jspreadsheet;
+        let data = doc.content?.handsontable;
         if (!data || !Array.isArray(data)) {
-            data = [
-                ['A1', 'B1', 'C1'],
-                ['A2', 'B2', 'C2'],
-                ['A3', 'B3', 'C3'],
-            ];
+            data = Array(10).fill(null).map(() => ['', '', '']);
         }
 
-        jspreadsheetInstance = jspreadsheet(container, {
-            data: data,
-            columns: [
-                { type: 'text', width: 120 },
-                { type: 'text', width: 120 },
-                { type: 'text', width: 120 },
-            ],
-            language: 'ru',
-            minDimensions: [3, 10],
+        hotInstance = new Handsontable(container, {
+            data,
+            colHeaders: true,
+            rowHeaders: true,
+            height: '100%',
+            width: '100%',
+            licenseKey: 'non-commercial-and-evaluation',
+            language: 'ru-RU',
+            contextMenu: true,
+            filters: true,
+            dropdownMenu: true,
+            manualColumnResize: true,
+            manualRowResize: true,
+            columnSorting: true,
+            search: true,
         });
 
-        console.log('✅ Jspreadsheet created');
+        console.log('✅ Handsontable initialized');
 
     } catch (e) {
         console.error('❌ Error:', e);
@@ -270,7 +272,7 @@ function initJspreadsheet(doc) {
 }
 
 function initTextEditor(doc) {
-    const container = document.getElementById('jspreadsheet-container');
+    const container = document.getElementById('handsontable-container');
     if (!container) return;
     container.innerHTML = `<textarea id="docText" style="width:100%;height:100%;padding:1rem;font-family:monospace;font-size:14px;border:none;resize:none;background:#1a1a25;color:#fff;">${doc.content?.text || ''}</textarea>`;
 }
@@ -279,10 +281,10 @@ async function saveDocument() {
     if (!currentDocument) return;
     let content = {};
 
-    if (currentDocument.doc_type === 'spreadsheet' && jspreadsheetInstance) {
+    if (currentDocument.doc_type === 'spreadsheet' && hotInstance) {
         try {
-            const data = jspreadsheetInstance.getData();
-            content = { jspreadsheet: data };
+            const data = hotInstance.getData();
+            content = { handsontable: data };
             console.log('💾 Saving spreadsheet');
         } catch(e) {
             console.error('❌ Save error:', e);
