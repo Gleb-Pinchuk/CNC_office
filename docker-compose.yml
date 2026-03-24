@@ -13,16 +13,11 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test:
-        - CMD-SHELL
-        - >-
-          pg_isready
-          -U ${POSTGRES_USER:-cnc_user}
-          -d ${POSTGRES_DB:-cnc_office}
-      interval: 5s
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 10s
       timeout: 5s
-      retries: 5
-      start_period: 10s
+      retries: 10
+      start_period: 30s
     networks:
       - app-network
     logging:
@@ -56,12 +51,7 @@ services:
       db:
         condition: service_healthy
     healthcheck:
-      test:
-        - CMD
-        - python
-        - manage.py
-        - check
-        - --deploy
+      test: ['CMD', 'python', 'manage.py', 'check', '--deploy']
       interval: 10s
       timeout: 5s
       retries: 5
