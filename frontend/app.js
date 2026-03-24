@@ -1,4 +1,4 @@
-// ==================== CNC Office - Frontend App v13.0 (Handsontable) ====================
+// ==================== CNC Office - Frontend App v14.0 (Handsontable Full) ====================
 const API_BASE = '/api';
 let currentUser = null;
 let currentFolder = null;
@@ -26,7 +26,7 @@ const folderSelect = document.getElementById('folderSelect');
 const navItems = document.querySelectorAll('.nav-item');
 
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('🚀 App initialized v13.0 with Handsontable');
+    console.log('🚀 App initialized v14.0 with Handsontable Full');
     setupEventListeners();
     checkAuth();
 });
@@ -60,8 +60,14 @@ function hideModal(modal) {
     const el = typeof modal === 'string' ? document.getElementById(modal) : modal;
     if (el) {
         if (el.id === 'documentModal') {
-            if (currentDocument && hotInstance) { saveDocument(); }
-            if (hotInstance) { hotInstance.destroy(); hotInstance = null; }
+            // ✅ Тихое автосохранение без alert
+            if (currentDocument && hotInstance) {
+                saveDocumentSilent();
+            }
+            if (hotInstance) {
+                hotInstance.destroy();
+                hotInstance = null;
+            }
             currentDocument = null;
         }
         el.classList.remove('show');
@@ -156,7 +162,7 @@ function renderFiles(files) { hideLoading(); if (!files?.length) { showEmpty('Н
 
 function createFileCard(file, index) {
     const card = document.createElement('div'); card.className = 'file-card'; card.style.animationDelay = `${index * 0.1}s`; card.style.cursor = 'pointer';
-    card.onclick = (e) => { if (!e.target.closest('.file-actions')) { const mt = (file.mime_type||'').toLowerCase(); if(mt.includes('image')||mt.includes('pdf')||mt.includes('text')) showPreviewModal(file); else downloadFile(file.id); } };
+    card.onclick = (e) => { if (!e.target.closest('.file-actions')) { const mt = (file.mime_type||'').toLowerCase(); if(mt.includes('image')||mt.includes('pdf')||mt.includes('text')||mt.includes('video')||mt.includes('audio')) showPreviewModal(file); else downloadFile(file.id); } };
     const icon = getFileIcon(file.mime_type); let name = file.file_name || (file.file ? file.file.split('/').pop() : 'Без имени'); try { name = decodeURIComponent(name); } catch {}
     const size = file.size_mb ? `${file.size_mb} MB` : file.size ? `${(file.size/1024/1024).toFixed(2)} MB` : '0 MB';
     const date = file.uploaded_at ? new Date(file.uploaded_at).toLocaleDateString('ru-RU') : ''; const canAct = file.owner === currentUser?.username;
@@ -166,17 +172,136 @@ function createFileCard(file, index) {
 
 function getFileIcon(mimeType) { if (!mimeType) return '📄'; const mt = mimeType.toLowerCase(); if (mt.includes('excel')||mt.includes('spreadsheet')) return '📊'; if (mt.includes('word')||mt.includes('.doc')) return '📝'; if (mt.includes('pdf')) return '📄'; if (mt.includes('image')) return '🖼️'; if (mt.includes('video')) return '🎬'; if (mt.includes('audio')) return '🎵'; if (mt.includes('zip')) return '📦'; return '📄'; }
 
-async function uploadFile(file) { console.log('📤 Uploading:', file.name); const fd = new FormData(); fd.append('file', file); if (currentFolder) fd.append('folder', currentFolder.id); else if (folderSelect?.value) fd.append('folder', folderSelect.value); try { const res = await fetch(`${API_BASE}/files/`, { method: 'POST', headers: getAuthHeaders(false), body: fd }); const data = await res.json().catch(() => ({})); if (res.ok || res.status === 201) { hideModal('uploadModal'); if (uploadForm) uploadForm.reset(); await loadFiles(); } else { alert(`Ошибка: ${data.detail || data.file?.[0] || 'Неизвестная ошибка'}`); } } catch (e) { console.error('❌ Upload error:', e); alert('Ошибка: ' + e.message); } }
+async function uploadFile(file) {
+    console.log('📤 Uploading:', file.name, file.size, 'bytes');
+    const fd = new FormData();
+    fd.append('file', file);
+    if (currentFolder) fd.append('folder', currentFolder.id);
+    else if (folderSelect?.value) fd.append('folder', folderSelect.value);
+    try {
+        const res = await fetch(`${API_BASE}/files/`, { method: 'POST', headers: getAuthHeaders(false), body: fd });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok || res.status === 201) {
+            hideModal('uploadModal');
+            if (uploadForm) uploadForm.reset();
+            await loadFiles();
+        } else {
+            alert(`Ошибка: ${data.detail || data.file?.[0] || data.error || 'Неизвестная ошибка'}`);
+        }
+    } catch (e) {
+        console.error('❌ Upload error:', e);
+        alert('Ошибка подключения: ' + e.message);
+    }
+}
 
 async function handleUpload(e) { e.preventDefault(); const fi = document.getElementById('fileInput'); if (!fi?.files[0]) { alert('Выберите файл'); return; } await uploadFile(fi.files[0]); }
 
-async function downloadFile(fileId) { try { const res = await fetch(`${API_BASE}/files/${fileId}/download/`, { headers: getAuthHeaders() }); if (res.ok) { const blob = await res.blob(); let filename = `file_${fileId}`; const disposition = res.headers.get('Content-Disposition'); if (disposition) { const m = disposition.match(/filename\*=UTF-8''([^;]+)/i) || disposition.match(/filename="([^"]+)"/i); if (m && m[1]) filename = decodeURIComponent(m[1]); } const url = window.URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); window.URL.revokeObjectURL(url); document.body.removeChild(a); } else if (res.status === 401 || res.status === 403) { clearAuth(); showLoginModal(); } else { alert('Не удалось скачать'); } } catch (e) { console.error('Download error:', e); alert('Ошибка подключения'); } }
+async function downloadFile(fileId) {
+    try {
+        const res = await fetch(`${API_BASE}/files/${fileId}/download/`, { headers: getAuthHeaders() });
+        if (res.ok) {
+            const blob = await res.blob();
+            let filename = `file_${fileId}`;
+            const disposition = res.headers.get('Content-Disposition');
+            if (disposition) {
+                const m = disposition.match(/filename\*=UTF-8''([^;]+)/i) || disposition.match(/filename="([^"]+)"/i);
+                if (m && m[1]) filename = decodeURIComponent(m[1]);
+            }
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+        } else if (res.status === 401 || res.status === 403) { clearAuth(); showLoginModal(); }
+        else { alert('Не удалось скачать'); }
+    } catch (e) { console.error('Download error:', e); alert('Ошибка подключения'); }
+}
 
 async function shareFile(fileId) { const username = prompt('Имя пользователя:'); if (!username) return; try { const res = await fetch(`${API_BASE}/files/${fileId}/share/`, { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ username, permission: 'read' }) }); const data = await res.json().catch(() => ({})); alert(res.ok ? `✅ Доступ предоставлен ${username}` : `❌ ${data.detail || 'Ошибка'}`); } catch { alert('Ошибка подключения'); } }
 
 async function deleteFile(fileId) { if (!confirm('Удалить файл?')) return; try { const res = await fetch(`${API_BASE}/files/${fileId}/`, { method: 'DELETE', headers: getAuthHeaders() }); if (res.ok || res.status === 204) await loadFiles(); else alert('Ошибка удаления'); } catch { alert('Ошибка подключения'); } }
 
-function showPreviewModal(file) { const mt = (file.mime_type || '').toLowerCase(); if (mt.includes('pdf')) { downloadFile(file.id); return; } if (!previewModal) { downloadFile(file.id); return; } const previewContent = document.getElementById('previewContent'); const previewTitle = document.getElementById('previewTitle'); if (!previewContent || !previewTitle) { downloadFile(file.id); return; } previewTitle.textContent = file.file_name || 'Файл'; const downloadUrl = `${API_BASE}/files/${file.id}/download/`; if (mt.includes('image')) { fetch(downloadUrl, { headers: getAuthHeaders() }).then(res => res.blob()).then(blob => { const imgUrl = URL.createObjectURL(blob); previewContent.innerHTML = `<div style="text-align:center;"><img src="${imgUrl}" style="max-width:100%;max-height:80vh;border-radius:8px;"></div>`; showModal(previewModal); }).catch(() => { previewContent.innerHTML = `<p style="color:#ff4466;">Не удалось загрузить</p>`; showModal(previewModal); }); } else { downloadFile(file.id); } }
+// ✅ УЛУЧШЕННЫЙ ПРЕДПРОСМОТР С ПОДДЕРЖКОЙ PDF И ДРУГИХ ФОРМАТОВ
+function showPreviewModal(file) {
+    const mt = (file.mime_type || '').toLowerCase();
+    const fileExt = (file.file_name || '').split('.').pop().toLowerCase();
+
+    if (!previewModal) { downloadFile(file.id); return; }
+    const previewContent = document.getElementById('previewContent');
+    const previewTitle = document.getElementById('previewTitle');
+    if (!previewContent || !previewTitle) { downloadFile(file.id); return; }
+
+    previewTitle.textContent = file.file_name || 'Файл';
+    const downloadUrl = `${API_BASE}/files/${file.id}/download/`;
+
+    // ✅ PDF
+    if (mt.includes('pdf') || fileExt === 'pdf') {
+        previewContent.innerHTML = `
+            <div style="width:100%;height:80vh;">
+                <iframe src="${downloadUrl}" style="width:100%;height:100%;border:none;" title="PDF Preview"></iframe>
+            </div>
+        `;
+        showModal(previewModal);
+    }
+    // ✅ Изображения
+    else if (mt.includes('image') || ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'svg', 'webp'].includes(fileExt)) {
+        fetch(downloadUrl, { headers: getAuthHeaders() })
+            .then(res => res.blob())
+            .then(blob => {
+                const imgUrl = URL.createObjectURL(blob);
+                previewContent.innerHTML = `<div style="text-align:center;"><img src="${imgUrl}" style="max-width:100%;max-height:80vh;border-radius:8px;"></div>`;
+                showModal(previewModal);
+            })
+            .catch(() => {
+                previewContent.innerHTML = `<p style="color:#ff4466;">Не удалось загрузить</p><button class="btn btn-primary" onclick="downloadFile(${file.id})">⬇️ Скачать</button>`;
+                showModal(previewModal);
+            });
+    }
+    // ✅ Текст, JSON, CSV, XML, MD
+    else if (mt.includes('text') || ['txt', 'json', 'csv', 'xml', 'md', 'log'].includes(fileExt)) {
+        fetch(downloadUrl, { headers: getAuthHeaders() })
+            .then(res => res.text())
+            .then(text => {
+                previewContent.innerHTML = `<pre style="background:#1a1a25;padding:1rem;border-radius:8px;overflow:auto;max-height:80vh;color:#fff;white-space:pre-wrap;word-wrap:break-word;font-family:monospace;font-size:13px;">${escapeHtml(text)}</pre>`;
+                showModal(previewModal);
+            })
+            .catch(() => {
+                previewContent.innerHTML = `<p style="color:#ff4466;">Не удалось загрузить</p><button class="btn btn-primary" onclick="downloadFile(${file.id})">⬇️ Скачать</button>`;
+                showModal(previewModal);
+            });
+    }
+    // ✅ Видео
+    else if (mt.includes('video') || ['mp4', 'avi', 'mkv', 'mov', 'webm'].includes(fileExt)) {
+        previewContent.innerHTML = `
+            <div style="text-align:center;">
+                <video controls style="max-width:100%;max-height:80vh;border-radius:8px;">
+                    <source src="${downloadUrl}" type="${mt || 'video/mp4'}">
+                    Ваш браузер не поддерживает видео
+                </video>
+            </div>
+        `;
+        showModal(previewModal);
+    }
+    // ✅ Аудио
+    else if (mt.includes('audio') || ['mp3', 'wav', 'ogg', 'flac'].includes(fileExt)) {
+        previewContent.innerHTML = `
+            <div style="text-align:center;padding:2rem;">
+                <audio controls style="width:100%;max-width:600px;">
+                    <source src="${downloadUrl}" type="${mt || 'audio/mp3'}">
+                    Ваш браузер не поддерживает аудио
+                </audio>
+            </div>
+        `;
+        showModal(previewModal);
+    }
+    // ❌ Остальные форматы - скачивание
+    else {
+        downloadFile(file.id);
+    }
+}
 
 async function loadFoldersForDropdown() { if (!folderSelect) return; folderSelect.innerHTML = '<option value="">Корневая папка</option>'; try { const res = await fetch(`${API_BASE}/folders/`, { headers: getAuthHeaders() }); if (res.status === 200) { const data = await res.json(); const folders = data.results || data || []; folders.forEach(folder => { const option = document.createElement('option'); option.value = folder.id; option.textContent = folder.name; folderSelect.appendChild(option); }); } } catch (e) {} }
 
@@ -226,6 +351,7 @@ function showDocumentEditor(doc) {
     }, 300);
 }
 
+// ✅ ПОЛНОЦЕННАЯ ТАБЛИЦА КАК GOOGLE SHEETS/EXCEL
 function initHandsontable(doc) {
     console.log('🔍 initHandsontable called');
 
@@ -243,24 +369,120 @@ function initHandsontable(doc) {
     try {
         let data = doc.content?.handsontable;
         if (!data || !Array.isArray(data)) {
-            data = Array(10).fill(null).map(() => ['', '', '']);
+            // Создаём пустую таблицу 20 строк × 10 колонок
+            data = Array(20).fill(null).map(() => Array(10).fill(''));
         }
 
         hotInstance = new Handsontable(container, {
-            data,
+            data: data,
+
+            // ✅ Заголовки
             colHeaders: true,
             rowHeaders: true,
+
+            // ✅ Размеры
             height: '100%',
             width: '100%',
+
+            // ✅ Лицензия (бесплатно для некоммерческого)
             licenseKey: 'non-commercial-and-evaluation',
+
+            // ✅ Язык
             language: 'ru-RU',
-            contextMenu: true,
-            filters: true,
+
+            // ✅ Контекстное меню (ПКМ)
+            contextMenu: {
+                items: {
+                    "row_above": {name: "Вставить строку выше"},
+                    "row_below": {name: "Вставить строку ниже"},
+                    "col_left": {name: "Вставить столбец слева"},
+                    "col_right": {name: "Вставить столбец справа"},
+                    "---------": {name: "---------"},
+                    "remove_row": {name: "Удалить строку"},
+                    "remove_col": {name: "Удалить столбец"},
+                    "clear_column": {name: "Очистить столбец"},
+                    "freeze_column": {name: "Заморозить столбец"},
+                    "---------": {name: "---------"},
+                    "mergeCells": {name: "Объединить ячейки"},
+                    "alignment": {name: "Выравнивание"}
+                }
+            },
+
+            // ✅ Выпадающее меню колонок
             dropdownMenu: true,
+
+            // ✅ Фильты
+            filters: true,
+
+            // ✅ Сортировка
+            columnSorting: true,
+
+            // ✅ Ручное изменение размеров
             manualColumnResize: true,
             manualRowResize: true,
-            columnSorting: true,
+
+            // ✅ Ручное перемещение
+            manualColumnMove: true,
+            manualRowMove: true,
+
+            // ✅ Копирование/вставка (из Excel тоже!)
+            copyPaste: {
+                pasteMode: 'overwrite',
+                rowsLimit: 1000,
+                columnsLimit: 50
+            },
+
+            // ✅ Автозаполнение (протягивание)
+            fillHandle: {
+                autoInsertRow: false,
+                autoDirection: 'both'
+            },
+
+            // ✅ Поиск
             search: true,
+
+            // ✅ Комментарии
+            comments: true,
+
+            // ✅ Выделение
+            selectionMode: 'range',
+
+            // ✅ Навигация
+            navigableHeaders: true,
+
+            // ✅ Автозавершение
+            autoColumnSize: true,
+            autoRowSize: false,
+
+            // ✅ Типы ячеек
+            cells: function (row, col) {
+                const cellProperties = {
+                    type: 'text',
+                    allowEmpty: true,
+                    className: 'htLeft'
+                };
+
+                // Первая строка - заголовки (жирный шрифт)
+                if (row === 0) {
+                    cellProperties.className = 'htCenter htMiddle htBold';
+                }
+
+                return cellProperties;
+            },
+
+            // ✅ Горячие клавиши
+            tabNavigation: true,
+
+            // ✅ Undo/Redo
+            undo: true,
+
+            // ✅ Форматирование
+            cellMerge: true,
+
+            // ✅ Условное форматирование (базовое)
+            conditionalFormatting: {
+                indication: true
+            },
         });
 
         console.log('✅ Handsontable initialized');
@@ -277,6 +499,38 @@ function initTextEditor(doc) {
     container.innerHTML = `<textarea id="docText" style="width:100%;height:100%;padding:1rem;font-family:monospace;font-size:14px;border:none;resize:none;background:#1a1a25;color:#fff;">${doc.content?.text || ''}</textarea>`;
 }
 
+// ✅ ТИХОЕ СОХРАНЕНИЕ (без alert при закрытии)
+async function saveDocumentSilent() {
+    if (!currentDocument) return;
+    let content = {};
+
+    if (currentDocument.doc_type === 'spreadsheet' && hotInstance) {
+        try {
+            const data = hotInstance.getData();
+            content = { handsontable: data };
+        } catch(e) {
+            console.error('❌ Silent save error:', e);
+            return;
+        }
+    } else if (currentDocument.doc_type === 'text') {
+        const textEl = document.getElementById('docText');
+        if (textEl) content = { text: textEl.value };
+    }
+
+    try {
+        await fetch(`${API_BASE}/documents/${currentDocument.id}/save_content/`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ content })
+        });
+        currentDocument.content = content;
+        console.log('✅ Auto-saved silently');
+    } catch (e) {
+        console.error('❌ Silent save failed:', e);
+    }
+}
+
+// ✅ СОХРАНЕНИЕ ПО КНОПКЕ (с alert)
 async function saveDocument() {
     if (!currentDocument) return;
     let content = {};
