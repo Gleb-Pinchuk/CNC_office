@@ -235,17 +235,12 @@ function initLuckysheet(doc) {
     const container = document.getElementById('luckysheet-container');
     if (!container) {
         console.error('❌ Container not found');
-        alert('❌ Контейнер не найден');
         return;
     }
 
-    console.log('🔍 Luckysheet type:', typeof window.luckysheet);
-    console.log('🔍 Container:', container);
-
     if (typeof window.luckysheet === 'undefined') {
         console.error('❌ Luckysheet not loaded');
-        alert('❌ Luckysheet не загрузился! Проверь CDN.');
-        container.innerHTML = '<div style="padding:2rem;color:#000;"><h3>⚠️ Ошибка</h3><p>Редактор таблиц не загрузился</p><p style="font-size:0.9rem;color:#666;">Откройте консоль (F12) и проверьте ошибки</p></div>';
+        container.innerHTML = '<div style="padding:2rem;color:#000;">⚠️ Редактор не загрузился</div>';
         return;
     }
 
@@ -257,7 +252,6 @@ function initLuckysheet(doc) {
             data = [{
                 name: 'Лист 1',
                 celldata: [],
-                config: {},
                 index: 0,
                 status: '1',
                 order: 0,
@@ -266,24 +260,30 @@ function initLuckysheet(doc) {
             }];
         }
 
-        console.log('📊 Creating with data:', data.length, 'sheets');
-
+        // ✅ Минимальная инициализация без плагинов
         window.luckysheet.create({
             container: 'luckysheet-container',
             lang: 'ru',
             data: data,
-            showtoolbarConfig: { image: true, print: true, exportXlsx: true },
+            // ✅ Отключаем проблемные функции
+            showtoolbarConfig: {
+                image: false,
+                print: false,
+                exportXlsx: true
+            },
             allowCopy: true,
             allowEdit: true,
+            // ✅ Минимальный набор
+            enableAddRow: false,
+            enableAddBackTop: false,
         });
 
         luckysheetInstance = true;
-        console.log('✅ Luckysheet created successfully');
+        console.log('✅ Luckysheet created');
 
     } catch (e) {
         console.error('❌ Error:', e);
-        alert('⚠️ Ошибка инициализации: ' + e.message);
-        container.innerHTML = '<div style="padding:2rem;color:#000;"><h3>⚠️ Ошибка</h3><p>' + e.message + '</p></div>';
+        container.innerHTML = `<div style="padding:2rem;color:#000;">⚠️ ${e.message}</div>`;
     }
 }
 
