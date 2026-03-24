@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="/static/style.css">
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=Rajdhani:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 
-    <!-- ✅ Handsontable CSS (локально) -->
+    <!-- ✅ Handsontable CSS -->
     <link rel="stylesheet" href="/static/vendor/univer/handsontable.css" />
 
     <style>
@@ -16,13 +16,13 @@
         #previewContent img { border-radius: 8px; }
         .section-divider { margin: 1rem 0 0.5rem 0; padding: 0.5rem 1rem; font-size: 0.75rem; text-transform: uppercase; color: #666; font-weight: 600; }
 
-        /* ✅ Handsontable контейнер - ИСПРАВЛЕНО */
         #handsontable-container {
             width: 100%;
-            height: calc(100vh - 100px);
+            height: calc(100vh - 120px);
             min-height: 600px;
             background: #fff;
             overflow: hidden;
+            position: relative;
         }
         #documentModal .modal-content {
             max-width: 99vw !important;
@@ -267,6 +267,7 @@
                 <h2 id="documentTitle" style="margin:0;font-size:1.1rem;">Редактор</h2>
                 <div>
                     <button class="btn btn-secondary btn-sm" onclick="shareCurrentDocument()" style="margin-right:8px;">🔗 Поделиться</button>
+                    <button class="btn btn-success btn-sm" onclick="exportToExcel()" style="margin-right:8px;">📥 Excel</button>
                     <button class="btn btn-primary btn-sm" onclick="saveDocument()">💾 Сохранить</button>
                 </div>
             </div>
@@ -299,10 +300,10 @@
         </div>
     </div>
 
-    <!-- ✅ Handsontable JS (локально) -->
+    <!-- ✅ Handsontable JS -->
     <script src="/static/vendor/univer/handsontable.js"></script>
 
     <!-- ✅ App JS -->
-    <script src="/static/app.js?v=15.0"></script>
+    <script src="/static/app.js?v=16.0"></script>
 </body>
 </html>
