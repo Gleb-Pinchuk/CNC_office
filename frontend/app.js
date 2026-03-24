@@ -233,10 +233,7 @@ function initLuckysheet(doc) {
     console.log('🔍 initLuckysheet called');
 
     const container = document.getElementById('luckysheet-container');
-    if (!container) {
-        console.error('❌ Container not found');
-        return;
-    }
+    if (!container) { console.error('❌ Container not found'); return; }
 
     if (typeof window.luckysheet === 'undefined') {
         console.error('❌ Luckysheet not loaded');
@@ -249,33 +246,16 @@ function initLuckysheet(doc) {
     try {
         let data = doc.content?.luckysheet;
         if (!data || !Array.isArray(data) || data.length === 0) {
-            data = [{
-                name: 'Лист 1',
-                celldata: [],
-                index: 0,
-                status: '1',
-                order: 0,
-                rows: 50,
-                columns: 20,
-            }];
+            data = [{ name: 'Лист 1', celldata: [], index: 0, status: '1', order: 0, rows: 50, columns: 20 }];
         }
 
-        // ✅ Минимальная инициализация без плагинов
         window.luckysheet.create({
             container: 'luckysheet-container',
             lang: 'ru',
             data: data,
-            // ✅ Отключаем проблемные функции
-            showtoolbarConfig: {
-                image: false,
-                print: false,
-                exportXlsx: true
-            },
+            showtoolbarConfig: { image: false, print: false, exportXlsx: true },
             allowCopy: true,
             allowEdit: true,
-            // ✅ Минимальный набор
-            enableAddRow: false,
-            enableAddBackTop: false,
         });
 
         luckysheetInstance = true;
