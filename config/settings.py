@@ -21,10 +21,14 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+
+    # Third-party
     'rest_framework',
     'rest_framework.authtoken',
     'corsheaders',
     'django_filters',
+
+    # Local apps
     'files',
     'users',
     'documents',
@@ -44,10 +48,11 @@ MIDDLEWARE = [
 
 ROOT_URLCONF = 'config.urls'
 
+# ✅ Templates: index.html для SPA
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [BASE_DIR / 'templates'],
+        'DIRS': [BASE_DIR / 'templates'],  # ✅ Папка с index.html
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -88,8 +93,7 @@ TIME_ZONE = 'Europe/Moscow'
 USE_I18N = True
 USE_TZ = True
 
-# ✅ Static files
-# ✅ Добавлен vendor для handsontable.css/js
+# ✅ Static files (для SPA + vendor)
 STATICFILES_DIRS = [
     BASE_DIR / 'frontend',
     BASE_DIR / 'frontend/vendor',
@@ -101,7 +105,7 @@ STATIC_URL = '/static/'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
-# ✅ CORS
+# ✅ CORS (разрешаем все для разработки)
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
 
@@ -116,17 +120,16 @@ REST_FRAMEWORK = {
     ],
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 20,
-    # ✅ Увеличим лимиты для загрузки файлов
     'DEFAULT_PARSER_CLASSES': [
         'rest_framework.parsers.JSONParser',
         'rest_framework.parsers.FormParser',
-        'rest_framework.parsers.MultiPartParser',  # ✅ Для multipart/form-data
+        'rest_framework.parsers.MultiPartParser',
     ],
 }
 
-# ✅ File upload settings
-FILE_UPLOAD_MAX_MEMORY_SIZE = 100 * 1024 * 1024  # 100MB
-DATA_UPLOAD_MAX_MEMORY_SIZE = 100 * 1024 * 1024  # 100MB
+# ✅ File upload settings (100MB)
+FILE_UPLOAD_MAX_MEMORY_SIZE = 100 * 1024 * 1024
+DATA_UPLOAD_MAX_MEMORY_SIZE = 100 * 1024 * 1024
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
@@ -140,10 +143,24 @@ CSRF_TRUSTED_ORIGINS = [
     'http://127.0.0.1:8000',
     'http://192.168.0.104:8000',
     'http://83.166.236.188:8002',
-    'http://83.166.236.188',  # ✅ Без порта
+    'http://83.166.236.188',
 ]
 
-# ✅ Улучшенное логирование для отладки 500 ошибок
+# ✅ Content Security Policy (разрешаем CDN для handsontable)
+CSP_DEFAULT_SRC = ("'self'", 'https:', 'http:', "'unsafe-inline'", "'unsafe-eval'")
+CSP_SCRIPT_SRC = ("'self'", 'https:', 'http:', "'unsafe-inline'", "'unsafe-eval'",
+                  'cdnjs.cloudflare.com', 'cdn.jsdelivr.net', 'fonts.googleapis.com')
+CSP_STYLE_SRC = ("'self'", 'https:', 'http:', "'unsafe-inline'",
+                 'cdnjs.cloudflare.com', 'cdn.jsdelivr.net', 'fonts.googleapis.com')
+CSP_CONNECT_SRC = ("'self'", 'https:', 'http:')
+CSP_IMG_SRC = ("'self'", 'https:', 'http:', 'data:', 'blob:')
+CSP_FONT_SRC = ("'self'", 'https:', 'http:', 'data:', 'fonts.gstatic.com')
+CSP_FRAME_SRC = ("'self'", 'https:', 'http:')
+
+# ✅ X-Frame-Options (разрешаем iframe для предпросмотра)
+X_FRAME_OPTIONS = 'SAMEORIGIN'
+
+# ✅ Логирование
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
@@ -197,12 +214,22 @@ LOGGING = {
     },
 }
 
-CSP_DEFAULT_SRC = ("'self'", 'https:', 'http:', "'unsafe-inline'", "'unsafe-eval'")
-CSP_SCRIPT_SRC = ("'self'", 'https:', 'http:', "'unsafe-inline'", "'unsafe-eval'", 'cdnjs.cloudflare.com', 'cdn.jsdelivr.net')
-CSP_STYLE_SRC = ("'self'", 'https:', 'http:', "'unsafe-inline'", 'cdnjs.cloudflare.com', 'cdn.jsdelivr.net', 'fonts.googleapis.com')
-CSP_CONNECT_SRC = ("'self'", 'https:', 'http:')
-CSP_IMG_SRC = ("'self'", 'https:', 'http:', 'data:', 'blob:')
-CSP_FONT_SRC = ("'self'", 'https:', 'http:', 'data:', 'fonts.gstatic.com')
-CSP_FRAME_SRC = ("'self'", 'https:', 'http:')
+# ✅ ПРОДАКШЕН НАСТРОЙКИ (чтобы check --deploy проходил)
+# Эти настройки применяются только когда DEBUG=False
+if not DEBUG:
+    # ✅ Безопасность: заголовки
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')  # Для работы за nginx
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    SECURE_BROWSER_XSS_FILTER = True
+    X_FRAME_OPTIONS = 'DENY'  # ✅ Более строгий для прода
 
-X_FRAME_OPTIONS = 'SAMEORIGIN'
+    # ✅ Куки: пока нет HTTPS — оставляем False, иначе сессии не будут работать
+    SESSION_COOKIE_SECURE = False  # ✅ Поставь True когда будет HTTPS
+    CSRF_COOKIE_SECURE = False     # ✅ Поставь True когда будет HTTPS
+
+    # ✅ HSTS: пока нет HTTPS — отключаем
+    SECURE_HSTS_SECONDS = 0  # ✅ Поставь 3600 когда будет HTTPS
+
+    # ✅ Запрещаем доступ к файлам вне MEDIA/STATIC
+    MEDIA_ROOT = BASE_DIR / 'media'
+    STATIC_ROOT = BASE_DIR / 'staticfiles'
