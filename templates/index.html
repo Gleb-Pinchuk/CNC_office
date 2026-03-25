@@ -1,14 +1,19 @@
+{% load static %}
 <!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CNC Office | Облачное хранилище</title>
-    <link rel="stylesheet" href="/static/style.css">
+
+    <!-- ✅ Исправлен URL шрифтов (убраны лишние пробелы) -->
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=Rajdhani:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 
-    <!-- ✅ Handsontable CSS -->
-    <link rel="stylesheet" href="/static/vendor/univer/handsontable.css" />
+    <!-- ✅ Все пути к статике через {% static %} -->
+    <link rel="stylesheet" href="{% static 'style.css' %}">
+    <link rel="stylesheet" href="{% static 'landing.css' %}">
+    <link rel="stylesheet" href="{% static 'vendor/univer/handsontable.css' %}">
+    <link rel="icon" type="image/x-icon" href="{% static 'favicon.ico' %}">
 
     <style>
         .hidden { display: none !important; }
@@ -41,7 +46,7 @@
         }
         .handsontable { height: 100% !important; overflow: auto !important; }
 
-        /* ✅ ИСПРАВЛЕНИЕ МЫШИ */
+        /* ✅ Исправление мыши */
         #documentModal { pointer-events: none !important; }
         #documentModal.show { pointer-events: auto !important; }
         #documentModal .modal-backdrop { pointer-events: none !important; }
@@ -317,10 +322,8 @@
         </div>
     </div>
 
-    <!-- ✅ Handsontable JS -->
-    <script src="/static/vendor/univer/handsontable.js"></script>
-
-    <!-- ✅ App JS -->
-    <script src="/static/app.js?v=17.0"></script>
+    <!-- ✅ Все пути к JS через {% static %} -->
+    <script src="{% static 'vendor/univer/handsontable.js' %}"></script>
+    <script src="{% static 'app.js' %}"></script>
 </body>
 </html>
