@@ -48,7 +48,6 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    # ✅ ПРОСТОЙ healthcheck (вместо manage.py check --deploy)
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/"]
       interval: 30s
