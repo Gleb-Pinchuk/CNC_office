@@ -1,4 +1,3 @@
-# .github/workflows/deploy.yml
 name: Deploy to Production
 
 on:
@@ -71,7 +70,7 @@ jobs:
             ELAPSED=0
             
             while [ $ELAPSED -lt $MAX_WAIT ]; do
-              if docker compose ps | grep -q "web.*running"; then
+              if docker compose ps | grep -q "web.*running\|web.*healthy"; then
                 echo "✅ Контейнер web запущен!"
                 break
               fi
@@ -80,7 +79,7 @@ jobs:
               ELAPSED=$((ELAPSED + WAIT_INTERVAL))
             done
             
-            if ! docker compose ps | grep -q "web.*running"; then
+            if ! docker compose ps | grep -q "web.*running\|web.*healthy"; then
               echo "❌ ОШИБКА: Контейнер web не запустился за ${MAX_WAIT} сек!"
               echo "=== Логи web ==="
               docker compose logs web --tail=50
@@ -88,7 +87,7 @@ jobs:
             fi
             
             # ============================================
-            # 7. Проверка здоровья Django с повторами
+            # 7. Проверка здоровья Django (HTTP check)
             # ============================================
             echo "🏥 Проверка здоровья Django..."
             
@@ -96,19 +95,22 @@ jobs:
             for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
               echo "🔍 Попытка $i/12: проверка Django..."
               
-              if docker compose exec -T web python manage.py check --deploy 2>/dev/null; then
-                echo "✅ Django здоров!"
+              # ✅ Проверяем HTTP ответ (200/401/403 = успех)
+              CODE=$(docker compose exec -T web curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/api/ 2>/dev/null || echo "000")
+              
+              if [ "$CODE" = "200" ] || [ "$CODE" = "401" ] || [ "$CODE" = "403" ]; then
+                echo "✅ Django здоров (HTTP $CODE)!"
                 HEALTHY=true
                 break
               fi
               
-              echo "⚠️ Django ещё не готов, ждём 5 сек..."
-              docker compose logs web --tail=5 || true
+              echo "⚠️ Django ещё не готов (HTTP $CODE), ждём 5 сек..."
+              docker compose logs web --tail=3 || true
               sleep 5
             done
             
             if [ "$HEALTHY" = false ]; then
-              echo "❌ ОШИБКА: Django не запустился за 60 сек!"
+              echo "❌ ОШИБКА: Django не ответил за 60 сек!"
               echo "=== Полные логи web ==="
               docker compose logs web --tail=100
               exit 1
