@@ -24,9 +24,12 @@ urlpatterns = [
     path('api/auth/', include('rest_framework.urls')),
 ]
 
+# ✅ Статика в режиме отладки
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 
+# ✅ SPA catch-all: отдаём index.html для всех не-API путей
+# ⚠️ Должен быть ПОСЛЕДНИМ и только ОДИН раз!
 if not settings.DEBUG:
     urlpatterns += [
         re_path(r'^.*$', TemplateView.as_view(template_name='index.html')),

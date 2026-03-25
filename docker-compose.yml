@@ -12,10 +12,10 @@ services:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U postgres']
-      interval: 5s
+      interval: 10s
       timeout: 5s
-      retries: 15
-      start_period: 220s
+      retries: 10
+      start_period: 30s
     networks:
       - app-network
     logging:
@@ -48,12 +48,13 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    # ✅ ПРОСТОЙ healthcheck (вместо manage.py check --deploy)
     healthcheck:
-      test: ['CMD', 'python', 'manage.py', 'check', '--deploy']
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
     networks:
       - app-network
     logging:
@@ -74,8 +75,7 @@ services:
       - static_volume:/app/staticfiles:ro
       - media_volume:/app/media:ro
     depends_on:
-      web:
-        condition: service_healthy
+      - web
     networks:
       - app-network
     logging:
