@@ -1,121 +1,107 @@
+# documents/views.py
 from rest_framework import viewsets, permissions, status
-from rest_framework.decorators import action
 from rest_framework.response import Response
-from django.db import models
-from django.utils import timezone
-from .models import Document, DocumentPermission
-from .serializers import DocumentSerializer, DocumentListSerializer, DocumentPermissionSerializer
-
-
-class IsOwnerOrHasPermission(permissions.BasePermission):
-    """Доступ: владелец или есть разрешение"""
-
-    def has_permission(self, request, view):
-        return request.user and request.user.is_authenticated
-
-    def has_object_permission(self, request, view, obj):
-        if request.method in permissions.SAFE_METHODS:
-            if obj.owner == request.user:
-                return True
-            return DocumentPermission.objects.filter(
-                document=obj, user=request.user
-            ).exists()
-        # Для записи - только владелец или write permission
-        if obj.owner == request.user:
-            return True
-        perm = DocumentPermission.objects.filter(
-            document=obj, user=request.user, permission='write'
-        ).first()
-        return perm is not None
+from rest_framework.decorators import action
+from .models import Document
+from .serializers import DocumentSerializer
 
 
 class DocumentViewSet(viewsets.ModelViewSet):
-    """ViewSet для документов"""
+    """
+    CRUD для документов (Таблицы и Текст)
+    """
+    queryset = Document.objects.all()
     serializer_class = DocumentSerializer
-    permission_classes = [permissions.IsAuthenticated, IsOwnerOrHasPermission]
+    permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        user = self.request.user
-        return Document.objects.filter(
-            models.Q(owner=user) |
-            models.Q(permissions__user=user) |
-            models.Q(is_shared=True)
-        ).distinct().select_related('owner', 'folder').prefetch_related('permissions')
-
-    def get_serializer_context(self):
-        context = super().get_serializer_context()
-        context['request'] = self.request
-        return context
+        """
+        Показываем документы пользователя
+        """
+        return Document.objects.filter(owner=self.request.user).order_by('-updated_at')
 
     def perform_create(self, serializer):
+        """
+        При создании документа устанавливаем owner
+        """
         serializer.save(owner=self.request.user)
 
-    @action(detail=True, methods=['post'])
+    @action(detail=True, methods=['post'], url_path='save_content')
     def save_content(self, request, pk=None):
-        """Сохранение изменений в документе"""
+        """
+        Сохранение содержимого документа
+        """
         doc = self.get_object()
-        content = request.data.get('content')
+        content = request.data.get('content', {})
 
-        if content is None:
-            return Response({'detail': 'content required'}, status=400)
-
-        # Проверяем права на запись
-        if doc.owner != request.user:
-            perm = DocumentPermission.objects.filter(
-                document=doc, user=request.user, permission='write'
-            ).first()
-            if not perm:
-                return Response({'detail': 'Нет прав на запись'}, status=403)
+        if not isinstance(content, dict):
+            return Response(
+                {'detail': 'content должен быть объектом'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         doc.content = content
         doc.save()
 
-        return Response({'status': 'saved', 'updated_at': doc.updated_at})
+        return Response({
+            'status': 'saved',
+            'document_id': doc.id,
+            'content_keys': list(content.keys())
+        })
 
-    @action(detail=True, methods=['post'])
+    @action(detail=True, methods=['post'], url_path='share')
     def share(self, request, pk=None):
-        """Предоставить доступ к документу"""
+        """
+        Поделиться документом с другим пользователем
+        """
         doc = self.get_object()
 
         if doc.owner != request.user:
-            return Response({'detail': 'Только владелец может предоставлять доступ'}, status=403)
+            return Response(
+                {'detail': 'Только владелец может предоставлять доступ'},
+                status=status.HTTP_403_FORBIDDEN
+            )
 
         username = request.data.get('username')
-        permission_type = request.data.get('permission', 'read')
+        permission = request.data.get('permission', 'read')
+
+        if not username:
+            return Response(
+                {'detail': 'Укажите имя пользователя'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         from django.contrib.auth import get_user_model
         User = get_user_model()
 
         try:
-            target_user = User.objects.get(username=username)
+            user = User.objects.get(username=username)
         except User.DoesNotExist:
-            return Response({'detail': 'Пользователь не найден'}, status=404)
+            return Response(
+                {'detail': f'Пользователь {username} не найден'},
+                status=status.HTTP_404_NOT_FOUND
+            )
 
-        if target_user == request.user:
-            return Response({'detail': 'Нельзя предоставить доступ самому себе'}, status=400)
+        if user == doc.owner:
+            return Response(
+                {'detail': 'Вы уже владелец этого документа'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
-        perm, created = DocumentPermission.objects.get_or_create(
-            document=doc, user=target_user,
-            defaults={'permission': permission_type}
+        from files.models import FilePermission
+        perm, created = FilePermission.objects.get_or_create(
+            file_type='document',
+            file_id=doc.id,
+            user=user,
+            defaults={'permission': permission}
         )
 
         if not created:
-            perm.permission = permission_type
+            perm.permission = permission
             perm.save()
 
-        return Response(
-            DocumentPermissionSerializer(perm).data,
-            status=201 if created else 200
-        )
-
-
-class DocumentPermissionViewSet(viewsets.ModelViewSet):
-    """ViewSet для управления доступом к документам"""
-    serializer_class = DocumentPermissionSerializer
-    permission_classes = [permissions.IsAuthenticated]
-
-    def get_queryset(self):
-        user = self.request.user
-        return DocumentPermission.objects.filter(
-            models.Q(document__owner=user) | models.Q(user=user)
-        ).select_related('document', 'user').order_by('-granted_at')
+        return Response({
+            'status': 'shared',
+            'username': username,
+            'permission': permission
+        })
