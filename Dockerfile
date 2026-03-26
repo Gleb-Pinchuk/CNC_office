@@ -1,5 +1,5 @@
 # Dockerfile
-FROM python:3.12-slim
+FROM python:3.12-slim-bookworm
 
 # ✅ Настройка pip: используем стандартный PyPI + таймауты
 RUN pip config set global.timeout 100 && \
