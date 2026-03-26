@@ -5,7 +5,7 @@ from rest_framework.decorators import action
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from django.db.models import Q
 from django.utils import timezone
-from django.http import FileResponse
+from django.http import FileResponse, HttpResponseNotFound
 import os
 from .models import StorageFile, StorageFolder, FilePermission, AuditLog
 from .serializers import (
@@ -30,8 +30,16 @@ class StorageFileViewSet(viewsets.ModelViewSet):
         Показываем файлы пользователя + файлы с общим доступом
         """
         user = self.request.user
+
+        # ✅ Получаем ID файлов, к которым есть доступ через FilePermission
+        # (т.к. FilePermission использует generic FK: file_type + file_id)
+        permitted_file_ids = FilePermission.objects.filter(
+            file_type='storage_file',
+            user=user
+        ).values_list('file_id', flat=True)
+
         return StorageFile.objects.filter(
-            Q(owner=user) | Q(permissions__user=user, permissions__file_type='storage_file')
+            Q(owner=user) | Q(id__in=permitted_file_ids)
         ).distinct().order_by('-uploaded_at')
 
     def get_serializer_context(self):
@@ -224,6 +232,11 @@ class FilePermissionViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = FilePermissionSerializer
     permission_classes = [permissions.IsAuthenticated]
 
+    def get_renderer_classes(self):
+        """✅ Возвращаем только JSON рендерер для API"""
+        from rest_framework.renderers import JSONRenderer
+        return [JSONRenderer]
+
     def get_queryset(self):
         """
         Показываем доступы к файлам и таблицам пользователя + доступы которые даны пользователю
@@ -231,9 +244,7 @@ class FilePermissionViewSet(viewsets.ReadOnlyModelViewSet):
         user = self.request.user
         return FilePermission.objects.filter(
             Q(user=user) |
-            Q(file__owner=user) |
-            Q(file_type='section_table',
-              file_id__in=sections.models.SectionTable.objects.filter(owner=user).values('id'))
+            Q(file__owner=user)
         ).select_related('user').order_by('-created_at')
 
 
@@ -243,6 +254,11 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     """
     serializer_class = AuditLogSerializer
     permission_classes = [permissions.IsAuthenticated]
+
+    def get_renderer_classes(self):
+        """✅ Возвращаем только JSON рендерер для API"""
+        from rest_framework.renderers import JSONRenderer
+        return [JSONRenderer]
 
     def get_queryset(self):
         """
