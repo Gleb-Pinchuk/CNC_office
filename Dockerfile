@@ -4,8 +4,10 @@ FROM python:3.12-slim-bookworm
 # ✅ Рабочая директория
 WORKDIR /app
 
-# ✅ Установка системных пакетов (ОБЯЗАТЕЛЬНО перед pip install!)
-# 🔧 psycopg2 требует libpq-dev, build-essential для компиляции
+# ✅ 1. Сначала копируем requirements.txt (для кэширования слоя pip)
+COPY requirements.txt .
+
+# ✅ 2. Установка системных пакетов (ОБЯЗАТЕЛЬНО перед pip install!)
 RUN set -ex; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
@@ -22,27 +24,23 @@ RUN set -ex; \
     rm -rf /var/lib/apt/lists/*; \
     apt-get clean;
 
-# ✅ Обновление pip и установка зависимостей с повторными попытками
-# 🔧 --no-cache-dir экономит место, --retries и --timeout для стабильности
+# ✅ 3. Обновление pip и установка зависимостей
+# 🔧 Используем зеркало для стабильности в РФ
 RUN pip install --upgrade pip setuptools wheel && \
-    pip install --no-cache-dir \
-        --retries 10 \
-        --timeout 100 \
-        --default-timeout 100 \
-        -r requirements.txt || \
+    pip config set global.index-url https://pypi.org/simple && \
     pip install --no-cache-dir \
         --retries 10 \
         --timeout 100 \
         --default-timeout 100 \
         -r requirements.txt
 
-# ✅ Копируем код проекта
+# ✅ 4. Копируем ВЕСЬ код проекта (после pip install!)
 COPY . .
 
-# ✅ Создаём папки для статики, медиа и логов
+# ✅ 5. Создаём папки для статики, медиа и логов
 RUN mkdir -p /app/staticfiles /app/media /app/logs
 
-# ✅ Скрипт запуска
+# ✅ 6. Скрипт запуска
 COPY docker-entrypoint.sh /start
 RUN chmod +x /start
 
