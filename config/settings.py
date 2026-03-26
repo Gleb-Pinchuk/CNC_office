@@ -52,7 +52,7 @@ ROOT_URLCONF = 'config.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [BASE_DIR / 'templates'],  # ✅ Папка с index.html
+        'DIRS': [BASE_DIR / 'templates'],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -110,10 +110,12 @@ CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
 
 # ✅ REST Framework
+# 🔧 ИСПРАВЛЕНО: Убран SessionAuthentication — он требует CSRF для POST-запросов
+# Для API с токенами достаточно TokenAuthentication
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework.authentication.TokenAuthentication',
-        'rest_framework.authentication.SessionAuthentication',
+        # ✅ SessionAuthentication убран — не требует CSRF для API
     ],
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
@@ -157,7 +159,7 @@ CSP_IMG_SRC = ("'self'", 'https:', 'http:', 'data:', 'blob:')
 CSP_FONT_SRC = ("'self'", 'https:', 'http:', 'data:', 'fonts.gstatic.com')
 CSP_FRAME_SRC = ("'self'", 'https:', 'http:')
 
-# ✅ X-Frame-Options (разрешаем iframe для предпросмотра)
+# ✅ X-Frame-Options
 X_FRAME_OPTIONS = 'SAMEORIGIN'
 
 # ✅ Логирование
@@ -214,22 +216,19 @@ LOGGING = {
     },
 }
 
-# ✅ ПРОДАКШЕН НАСТРОЙКИ (чтобы check --deploy проходил)
-# Эти настройки применяются только когда DEBUG=False
+# ✅ ПРОДАКШЕН НАСТРОЙКИ (когда DEBUG=False)
 if not DEBUG:
-    # ✅ Безопасность: заголовки
-    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')  # Для работы за nginx
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
     SECURE_CONTENT_TYPE_NOSNIFF = True
     SECURE_BROWSER_XSS_FILTER = True
-    X_FRAME_OPTIONS = 'DENY'  # ✅ Более строгий для прода
+    X_FRAME_OPTIONS = 'DENY'
 
-    # ✅ Куки: пока нет HTTPS — оставляем False, иначе сессии не будут работать
-    SESSION_COOKIE_SECURE = False  # ✅ Поставь True когда будет HTTPS
-    CSRF_COOKIE_SECURE = False     # ✅ Поставь True когда будет HTTPS
+    # ✅ Куки: пока нет HTTPS — оставляем False
+    SESSION_COOKIE_SECURE = False
+    CSRF_COOKIE_SECURE = False
 
     # ✅ HSTS: пока нет HTTPS — отключаем
-    SECURE_HSTS_SECONDS = 0  # ✅ Поставь 3600 когда будет HTTPS
+    SECURE_HSTS_SECONDS = 0
 
-    # ✅ Запрещаем доступ к файлам вне MEDIA/STATIC
     MEDIA_ROOT = BASE_DIR / 'media'
     STATIC_ROOT = BASE_DIR / 'staticfiles'
