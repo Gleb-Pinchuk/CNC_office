@@ -47,11 +47,10 @@ MIDDLEWARE = [
 
 ROOT_URLCONF = 'config.urls'
 
-# ✅ Templates: SPA в frontend/
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [BASE_DIR / 'frontend'],  # ✅ Ищем index.html в frontend/
+        'DIRS': [BASE_DIR / 'frontend'],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
