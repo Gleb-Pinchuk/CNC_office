@@ -9,7 +9,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-cnc_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cnc_password}
     volumes:
-      - postgres_/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data  # ✅ ИСПРАВЛЕНО
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-cnc_user}']
       interval: 10s
@@ -48,7 +48,6 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    # ✅ ИСПРАВЛЕННЫЙ healthcheck: принимает 200/401/403 как успех
     healthcheck:
       test: ["CMD-SHELL", "curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/api/ | grep -qE '^(200|401|403)$'"]
       interval: 30s
@@ -85,10 +84,10 @@ services:
         max-file: '3'
 
 volumes:
-  postgres_data: {}
-  static_volume: {}
-  media_volume: {}
-  logs_volume: {}
+  postgres_data:  # ✅ ИСПРАВЛЕНО (было postgres_)
+  static_volume:
+  media_volume:
+  logs_volume:
 
 networks:
   app-network:
