@@ -8,8 +8,8 @@ class SectionTableSerializer(serializers.ModelSerializer):
     """
     Сериализатор для таблиц разделов
     """
-    owner_username = serializers.ReadOnlyField(source='owner.username')
     owner = UserListSerializer(read_only=True)
+    owner_username = serializers.ReadOnlyField(source='owner.username')
 
     class Meta:
         model = SectionTable

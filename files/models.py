@@ -1,6 +1,7 @@
 # files/models.py
 from django.db import models
 from django.conf import settings
+from django.utils import timezone
 import os
 
 
@@ -27,11 +28,14 @@ class StorageFile(models.Model):
     )
     file_name = models.CharField(
         max_length=255,
+        default='',
+        blank=True,
         verbose_name='Имя файла'
     )
     mime_type = models.CharField(
         max_length=100,
         blank=True,
+        default='',
         verbose_name='MIME тип'
     )
     size = models.BigIntegerField(
@@ -61,14 +65,15 @@ class StorageFile(models.Model):
         ]
 
     def __str__(self):
-        return self.file_name
+        return self.file_name or self.file.name
 
     def save(self, *args, **kwargs):
         """
-        Автоматически заполняем mime_type и size
+        Автоматически заполняем mime_type, size и file_name
         """
         if self.file:
-            self.file_name = os.path.basename(self.file.name)
+            if not self.file_name:
+                self.file_name = os.path.basename(self.file.name)
             self.size = self.file.size
 
             # Определяем mime_type
@@ -144,6 +149,7 @@ class FilePermission(models.Model):
     FILE_TYPE_CHOICES = [
         ('storage_file', 'Файл'),
         ('section_table', 'Таблица раздела'),
+        ('document', 'Документ'),
     ]
 
     file_type = models.CharField(
@@ -199,6 +205,12 @@ class FilePermission(models.Model):
                 return SectionTable.objects.get(id=self.file_id).title
             except:
                 return f'Таблица #{self.file_id}'
+        elif self.file_type == 'document':
+            try:
+                from documents.models import Document
+                return Document.objects.get(id=self.file_id).title
+            except:
+                return f'Документ #{self.file_id}'
         return f'{self.file_type} #{self.file_id}'
 
 
@@ -221,7 +233,9 @@ class AuditLog(models.Model):
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name='audit_logs',
-        verbose_name='Пользователь'
+        verbose_name='Пользователь',
+        null=True,
+        blank=True
     )
     action = models.CharField(
         max_length=20,
@@ -260,24 +274,4 @@ class AuditLog(models.Model):
         ]
 
     def __str__(self):
-        return f'{self.user.username} - {self.get_action_display()} - {self.timestamp}'
-
-    def save(self, *args, **kwargs):
-        """
-        Автоматически заполняем IP адрес из request если есть
-        """
-        if not self.ip_address:
-            # Пытаемся получить IP из контекста (если вызывается из view)
-            import inspect
-            frame = inspect.currentframe()
-            try:
-                while frame:
-                    if 'request' in frame.f_locals:
-                        request = frame.f_locals['request']
-                        self.ip_address = request.META.get('REMOTE_ADDR')
-                        break
-                    frame = frame.f_back
-            finally:
-                del frame
-
-        super().save(*args, **kwargs)
+        return f'{self.user.username if self.user else "System"} - {self.get_action_display()} - {self.timestamp}'

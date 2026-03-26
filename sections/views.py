@@ -16,19 +16,25 @@ class SectionTableViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         """
-        Фильтруем таблицы по section_type из query параметра
+        Фильтруем таблицы по section_type из query параметра И по владельцу
         """
-        queryset = super().get_queryset()
+        queryset = SectionTable.objects.filter(owner=self.request.user)
         section_type = self.request.query_params.get('section_type', None)
         if section_type:
             queryset = queryset.filter(section_type=section_type)
-        return queryset
+        return queryset.order_by('-updated_at')
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context
 
     def perform_create(self, serializer):
         """
-        При создании таблицы автоматически устанавливаем owner
+        При создании таблицы автоматически устанавливаем owner и section_type
         """
-        serializer.save(owner=self.request.user)
+        section_type = self.request.data.get('section_type', 'attendance')
+        serializer.save(owner=self.request.user, section_type=section_type)
 
     @action(detail=True, methods=['post'], url_path='save_content')
     def save_content(self, request, pk=None):
@@ -45,7 +51,7 @@ class SectionTableViewSet(viewsets.ModelViewSet):
             )
 
         table.content = content
-        table.save()
+        table.save(update_fields=['content', 'updated_at'])
 
         return Response({
             'status': 'saved',
@@ -59,6 +65,13 @@ class SectionTableViewSet(viewsets.ModelViewSet):
         Поделиться таблицей с другим пользователем
         """
         table = self.get_object()
+
+        if table.owner != request.user:
+            return Response(
+                {'detail': 'Только владелец может предоставлять доступ'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
         username = request.data.get('username')
         permission = request.data.get('permission', 'read')
 
@@ -79,15 +92,13 @@ class SectionTableViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        # ✅ Проверяем что пользователь не владелец
         if user == table.owner:
             return Response(
                 {'detail': 'Вы уже владелец этой таблицы'},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # ✅ Создаём или обновляем запись о доступе
-        from files.models import FilePermission  # Используем существующую модель
+        from files.models import FilePermission
         perm, created = FilePermission.objects.get_or_create(
             file_type='section_table',
             file_id=table.id,
@@ -113,6 +124,6 @@ class SectionTableViewSet(viewsets.ModelViewSet):
         tables = SectionTable.objects.filter(
             section_type=section_type,
             owner=request.user
-        )
+        ).order_by('-updated_at')
         serializer = self.get_serializer(tables, many=True)
         return Response(serializer.data)

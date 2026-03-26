@@ -20,6 +20,11 @@ class DocumentViewSet(viewsets.ModelViewSet):
         """
         return Document.objects.filter(owner=self.request.user).order_by('-updated_at')
 
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context
+
     def perform_create(self, serializer):
         """
         При создании документа устанавливаем owner
@@ -41,7 +46,7 @@ class DocumentViewSet(viewsets.ModelViewSet):
             )
 
         doc.content = content
-        doc.save()
+        doc.save(update_fields=['content', 'updated_at'])
 
         return Response({
             'status': 'saved',

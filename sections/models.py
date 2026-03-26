@@ -39,7 +39,12 @@ class SectionTable(models.Model):
         ordering = ['-updated_at']
         indexes = [
             models.Index(fields=['section_type', 'owner']),
+            models.Index(fields=['owner', '-updated_at']),
         ]
 
     def __str__(self):
         return f'{self.get_section_type_display()} - {self.title}'
+
+    @property
+    def owner_username(self):
+        return self.owner.username

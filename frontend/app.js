@@ -1,4 +1,4 @@
-// ==================== CNC Office - Frontend App v18.0 (Fixed + Enhanced) ====================
+// ==================== CNC Office - Frontend App v18.5 (Full Fixed) ====================
 const API_BASE = '/api';
 let currentUser = null;
 let currentFolder = null;
@@ -29,7 +29,7 @@ const navItems = document.querySelectorAll('.nav-item');
 
 // ✅ Инициализация
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('🚀 App initialized v18.0');
+    console.log('🚀 App initialized v18.5');
     setupEventListeners();
     checkAuth();
 });
@@ -58,7 +58,7 @@ function clearAuth() {
     currentUser = null;
 }
 
-// ✅ Проверка авторизации (ИСПРАВЛЕНО: не выкидывает при обновлении)
+// ✅ Проверка авторизации
 async function checkAuth() {
     authToken = localStorage.getItem('cnc_auth_token');
     if (!authToken) { showLoginModal(); return; }
@@ -75,7 +75,6 @@ async function checkAuth() {
         }
     } catch (e) {
         console.error('Auth check failed:', e);
-        // ✅ НЕ очищаем авторизацию при ошибке сети - сохраняем токен
         showLoginModal();
     }
 }
@@ -155,8 +154,6 @@ async function handleLogin(e) {
         } else {
             const errorMsg = data.detail ||
                            data.non_field_errors?.[0] ||
-                           data.username?.[0] ||
-                           data.password?.[0] ||
                            'Неверный логин или пароль';
             alert(`❌ ${errorMsg}`);
         }
@@ -270,13 +267,6 @@ async function loadView(view) {
     }
 }
 
-function showSectionPlaceholder(name) {
-    hideLoading(); hideEmpty();
-    if (filesGrid) {
-        filesGrid.innerHTML = `<div style="text-align:center;padding:3rem;color:#888;"><div style="font-size:4rem;margin-bottom:1rem;">🚧</div><h2 style="margin-bottom:1rem;">${name}</h2><p>Раздел в разработке</p></div>`;
-    }
-}
-
 // ✅ ЗАГРУЗКА ФАЙЛОВ
 async function loadFiles() {
     console.log('🔄 Loading files...');
@@ -321,7 +311,7 @@ function createFileCard(file, index) {
     try { name = decodeURIComponent(name); } catch {}
     const size = file.size_mb ? `${file.size_mb} MB` : file.size ? `${(file.size/1024/1024).toFixed(2)} MB` : '0 MB';
     const date = file.uploaded_at ? new Date(file.uploaded_at).toLocaleDateString('ru-RU') : '';
-    const canAct = file.owner === currentUser?.username;
+    const canAct = file.owner?.username === currentUser?.username;
 
     card.innerHTML = `
         <div class="file-icon">${icon}</div>
@@ -348,7 +338,7 @@ function getFileIcon(mimeType) {
     return '📄';
 }
 
-// ✅ ЗАГРУЗКА ФАЙЛА
+// ✅ ЗАГРУЗКА ФАЙЛА (ИСПРАВЛЕНО: FormData без Content-Type)
 async function uploadFile(file) {
     console.log('📤 Uploading:', file.name, file.size, 'bytes');
     const fd = new FormData();
@@ -357,9 +347,12 @@ async function uploadFile(file) {
     else if (folderSelect?.value) fd.append('folder', folderSelect.value);
 
     try {
+        const headers = getAuthHeaders(false);
+        delete headers['Content-Type']; // ✅ Важно для FormData
+
         const res = await fetch(`${API_BASE}/files/`, {
             method: 'POST',
-            headers: getAuthHeaders(false),
+            headers: headers,
             body: fd
         });
         const data = await res.json().catch(() => ({}));
@@ -562,7 +555,7 @@ async function loadFoldersForDropdown() {
     } catch (e) {}
 }
 
-// ✅ ЗАГРУЗКА ПАПОК (ИСПРАВЛЕНО: отображение папок)
+// ✅ ЗАГРУЗКА ПАПОК
 async function loadFolders() {
     console.log('📁 Loading folders...');
     try {
@@ -704,7 +697,7 @@ function showDocumentEditor(doc) {
     }, 400);
 }
 
-// ✅ ИНИЦИАЛИЗАЦИЯ HANDSONTABLE (УЛУЧШЕНО: русский язык, кликабельные ячейки)
+// ✅ ИНИЦИАЛИЗАЦИЯ HANDSONTABLE (ИСПРАВЛЕНО: русский язык, кликабельные ячейки)
 function initHandsontable(doc) {
     console.log('🔍 initHandsontable called');
     const container = document.getElementById('handsontable-container');
@@ -721,7 +714,7 @@ function initHandsontable(doc) {
             data = Array(20).fill(null).map(() => Array(10).fill(''));
         }
         hotInstance = new Handsontable(container, {
-            data,
+            data: data,
             colHeaders: true,
             rowHeaders: true,
             height: '100%',
@@ -747,15 +740,24 @@ function initHandsontable(doc) {
             autoColumnSize: true,
             autoRowSize: false,
             cells: function (row, col) {
-                const cellProperties = { type: 'text', allowEmpty: true, className: 'htLeft' };
-                if (row === 0) { cellProperties.className = 'htCenter htMiddle htBold'; }
+                const cellProperties = {
+                    type: 'text',
+                    allowEmpty: true,
+                    className: 'htLeft',
+                    readOnly: false
+                };
+                if (row === 0) {
+                    cellProperties.className = 'htCenter htMiddle htBold';
+                }
                 return cellProperties;
             },
             tabNavigation: true,
             undo: true,
             cellMerge: true,
             preventOverflow: 'horizontal',
-            afterRender: () => { console.log('✅ Handsontable rendered'); }
+            afterRender: () => {
+                console.log('✅ Handsontable rendered');
+            }
         });
         setTimeout(() => {
             if (hotInstance) {
@@ -956,7 +958,7 @@ async function deleteSectionTable(tableId) {
     } catch { alert('Ошибка подключения'); }
 }
 
-// ✅ ЗАГРУЗКА ОБЩЕГО ДОСТУПА (ИСПРАВЛЕНО: показывает файлы)
+// ✅ ЗАГРУЗКА ОБЩЕГО ДОСТУПА (ИСПРАВЛЕНО: показывает файлы и таблицы)
 async function loadShared() {
     console.log('🔗 Loading shared...');
     try {
@@ -996,7 +998,7 @@ function createSharedCard(perm, index) {
     return card;
 }
 
-// ✅ ЗАГРУЗКА ЛОГОВ (ИСПРАВЛЕНО: показывает логи)
+// ✅ ЗАГРУЗКА ЛОГОВ
 async function loadLogs() {
     console.log('📋 Loading logs...');
     try {

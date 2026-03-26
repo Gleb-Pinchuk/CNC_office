@@ -5,6 +5,7 @@ from rest_framework.decorators import action
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from django.db.models import Q
 from django.utils import timezone
+from django.http import FileResponse
 import os
 from .models import StorageFile, StorageFolder, FilePermission, AuditLog
 from .serializers import (
@@ -30,8 +31,13 @@ class StorageFileViewSet(viewsets.ModelViewSet):
         """
         user = self.request.user
         return StorageFile.objects.filter(
-            Q(owner=user) | Q(permissions__user=user)
+            Q(owner=user) | Q(permissions__user=user, permissions__file_type='storage_file')
         ).distinct().order_by('-uploaded_at')
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context
 
     def perform_create(self, serializer):
         """
@@ -52,7 +58,7 @@ class StorageFileViewSet(viewsets.ModelViewSet):
         """
         file = self.get_object()
 
-        # ✅ Проверяем доступ
+        # Проверяем доступ
         if file.owner != request.user and not FilePermission.objects.filter(
                 file_type='storage_file',
                 file_id=file.id,
@@ -63,7 +69,7 @@ class StorageFileViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        # ✅ Создаём запись в логах
+        # Создаём запись в логах
         AuditLog.objects.create(
             user=request.user,
             action='download',
@@ -71,15 +77,13 @@ class StorageFileViewSet(viewsets.ModelViewSet):
             details=f'Скачан файл: {file.file_name}'
         )
 
-        from django.http import FileResponse
-        import io
-
         try:
             response = FileResponse(
                 open(file.file.path, 'rb'),
                 as_attachment=True,
                 filename=file.file_name
             )
+            response['Content-Length'] = file.size
             return response
         except FileNotFoundError:
             return Response(
@@ -94,7 +98,7 @@ class StorageFileViewSet(viewsets.ModelViewSet):
         """
         file = self.get_object()
 
-        # ✅ Проверяем что пользователь владелец
+        # Проверяем что пользователь владелец
         if file.owner != request.user:
             return Response(
                 {'detail': 'Только владелец может предоставлять доступ'},
@@ -121,14 +125,14 @@ class StorageFileViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        # ✅ Проверяем что пользователь не владелец
+        # Проверяем что пользователь не владелец
         if user == file.owner:
             return Response(
                 {'detail': 'Вы уже владелец этого файла'},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # ✅ Создаём или обновляем запись о доступе
+        # Создаём или обновляем запись о доступе
         perm, created = FilePermission.objects.get_or_create(
             file_type='storage_file',
             file_id=file.id,
@@ -140,7 +144,7 @@ class StorageFileViewSet(viewsets.ModelViewSet):
             perm.permission = permission
             perm.save()
 
-        # ✅ Запись в логах
+        # Запись в логах
         AuditLog.objects.create(
             user=request.user,
             action='share',
@@ -185,6 +189,11 @@ class StorageFolderViewSet(viewsets.ModelViewSet):
         """
         return StorageFolder.objects.filter(owner=self.request.user).order_by('-created_at')
 
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context
+
     def perform_create(self, serializer):
         """
         При создании папки устанавливаем owner
@@ -217,12 +226,15 @@ class FilePermissionViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         """
-        Показываем доступы к файлам пользователя + доступы которые даны пользователю
+        Показываем доступы к файлам и таблицам пользователя + доступы которые даны пользователю
         """
         user = self.request.user
         return FilePermission.objects.filter(
-            Q(user=user) | Q(file__owner=user)
-        ).select_related('file', 'user').order_by('-created_at')
+            Q(user=user) |
+            Q(file__owner=user) |
+            Q(file_type='section_table',
+              file_id__in=sections.models.SectionTable.objects.filter(owner=user).values('id'))
+        ).select_related('user').order_by('-created_at')
 
 
 class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
@@ -237,3 +249,4 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
         Показываем логи текущего пользователя
         """
         return AuditLog.objects.filter(user=self.request.user).order_by('-timestamp')
+    
