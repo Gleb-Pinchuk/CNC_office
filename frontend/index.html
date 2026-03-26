@@ -5,11 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CNC Office — Облачное хранилище</title>
 
-    <!-- ✅ Handsontable CSS (локально) -->
-    <link rel="stylesheet" href="/static/vendor/univer/handsontable.css" />
+    <!-- ✅ Luckysheet CSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/luckysheet/dist/plugins/css/pluginsCss.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/luckysheet/dist/plugins/plugins.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/luckysheet/dist/css/luckysheet.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/luckysheet/dist/assets/iconfont/iconfont.css" />
 
-    <!-- ✅ Handsontable JS (локально) -->
-    <script src="/static/vendor/univer/handsontable.js"></script>
+    <!-- ✅ Luckysheet JS -->
+    <script src="https://cdn.jsdelivr.net/npm/luckysheet/dist/plugins/js/plugin.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/luckysheet/dist/luckysheet.umd.js"></script>
 
     <style>
         :root {
@@ -35,11 +39,12 @@
             line-height: 1.5;
         }
 
-        /* ✅ Handsontable контейнер */
-        #handsontable-container {
+        /* ✅ Luckysheet контейнер */
+        #luckysheet-container {
             width: 100%;
             height: calc(100vh - 120px);
-            background: var(--bg-primary);
+            margin: 0;
+            padding: 0;
         }
 
         /* ✅ Стили интерфейса */

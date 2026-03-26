@@ -28,7 +28,7 @@ class SectionTable(models.Model):
     content = models.JSONField(
         default=dict,
         blank=True,
-        verbose_name='Содержимое (Handsontable data)'
+        verbose_name='Содержимое (Luckysheet data)'
     )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='Дата создания')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='Дата обновления')

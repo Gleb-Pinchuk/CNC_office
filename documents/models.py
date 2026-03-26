@@ -5,7 +5,7 @@ from django.conf import settings
 
 class Document(models.Model):
     """
-    Документ (Таблица или Текст)
+    Документ (Таблица Luckysheet или Текст)
     """
     DOC_TYPE_CHOICES = [
         ('spreadsheet', '📊 Таблица'),
@@ -28,7 +28,7 @@ class Document(models.Model):
     content = models.JSONField(
         default=dict,
         blank=True,
-        verbose_name='Содержимое'
+        verbose_name='Содержимое (Luckysheet data)'
     )
     is_editable = models.BooleanField(
         default=True,

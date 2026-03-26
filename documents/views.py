@@ -8,7 +8,7 @@ from .serializers import DocumentSerializer
 
 class DocumentViewSet(viewsets.ModelViewSet):
     """
-    CRUD для документов (Таблицы и Текст)
+    CRUD для документов (Таблицы Luckysheet и Текст)
     """
     queryset = Document.objects.all()
     serializer_class = DocumentSerializer
@@ -34,7 +34,7 @@ class DocumentViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='save_content')
     def save_content(self, request, pk=None):
         """
-        Сохранение содержимого документа
+        Сохранение содержимого документа (Luckysheet data)
         """
         doc = self.get_object()
         content = request.data.get('content', {})

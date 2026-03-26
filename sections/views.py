@@ -8,16 +8,13 @@ from .serializers import SectionTableSerializer
 
 class SectionTableViewSet(viewsets.ModelViewSet):
     """
-    CRUD для таблиц разделов (Посещаемость, Рейнджеры, Ведомости)
+    CRUD для таблиц разделов (Luckysheet)
     """
     queryset = SectionTable.objects.all()
     serializer_class = SectionTableSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        """
-        Фильтруем таблицы по section_type из query параметра И по владельцу
-        """
         queryset = SectionTable.objects.filter(owner=self.request.user)
         section_type = self.request.query_params.get('section_type', None)
         if section_type:
@@ -30,16 +27,13 @@ class SectionTableViewSet(viewsets.ModelViewSet):
         return context
 
     def perform_create(self, serializer):
-        """
-        При создании таблицы автоматически устанавливаем owner и section_type
-        """
         section_type = self.request.data.get('section_type', 'attendance')
         serializer.save(owner=self.request.user, section_type=section_type)
 
     @action(detail=True, methods=['post'], url_path='save_content')
     def save_content(self, request, pk=None):
         """
-        Сохранение содержимого таблицы (Handsontable data)
+        Сохранение содержимого таблицы (Luckysheet data)
         """
         table = self.get_object()
         content = request.data.get('content', {})
@@ -115,15 +109,3 @@ class SectionTableViewSet(viewsets.ModelViewSet):
             'username': username,
             'permission': permission
         })
-
-    @action(detail=False, methods=['get'], url_path='by_section/(?P<section_type>[^/.]+)')
-    def by_section(self, request, section_type=None):
-        """
-        Получить все таблицы для конкретного раздела
-        """
-        tables = SectionTable.objects.filter(
-            section_type=section_type,
-            owner=request.user
-        ).order_by('-updated_at')
-        serializer = self.get_serializer(tables, many=True)
-        return Response(serializer.data)

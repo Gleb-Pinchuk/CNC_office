@@ -1,4 +1,4 @@
-// ==================== CNC Office - Frontend App v18.5 (Full Fixed) ====================
+// ==================== CNC Office - Frontend App v19.0 (Luckysheet) ====================
 const API_BASE = '/api';
 let currentUser = null;
 let currentFolder = null;
@@ -6,7 +6,7 @@ let currentView = 'files';
 let currentDocument = null;
 let currentSectionType = null;
 let authToken = localStorage.getItem('cnc_auth_token');
-let hotInstance = null;
+let luckysheetInstance = null;
 
 // DOM Elements
 const filesGrid = document.getElementById('filesGrid');
@@ -29,12 +29,12 @@ const navItems = document.querySelectorAll('.nav-item');
 
 // ✅ Инициализация
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('🚀 App initialized v18.5');
+    console.log('🚀 App initialized v19.0 with Luckysheet');
     setupEventListeners();
     checkAuth();
 });
 
-// ✅ Заголовки для API-запросов
+// ✅ Заголовки для API
 function getAuthHeaders(isJson = true) {
     const headers = { 'Accept': 'application/json' };
     if (authToken) headers['Authorization'] = `Token ${authToken}`;
@@ -87,9 +87,9 @@ function showModal(modal) {
         el.style.display = 'flex';
         document.body.style.overflow = 'hidden';
         setTimeout(() => {
-            if (hotInstance) {
-                hotInstance.render();
-                hotInstance.refreshDimensions();
+            if (window.luckysheet) {
+                window.luckysheet.scrollCount();
+                window.luckysheet.mergeCalculation();
             }
         }, 100);
     }
@@ -100,8 +100,10 @@ function hideModal(modal) {
     const el = typeof modal === 'string' ? document.getElementById(modal) : modal;
     if (el) {
         if (el.id === 'documentModal') {
-            if (currentDocument && hotInstance) saveDocumentSilent();
-            if (hotInstance) { hotInstance.destroy(); hotInstance = null; }
+            if (currentDocument && window.luckysheet) saveDocumentSilent();
+            if (window.luckysheet) {
+                window.luckysheet.destroy();
+            }
             currentDocument = null;
         }
         el.classList.remove('show');
@@ -123,7 +125,7 @@ function showRegisterModal() {
     showModal(loginModal);
 }
 
-// ✅ ЛОГИН (ИСПРАВЛЕНО: без Authorization заголовка)
+// ✅ ЛОГИН
 async function handleLogin(e) {
     e.preventDefault();
     const username = document.getElementById('loginUsername')?.value?.trim();
@@ -134,10 +136,7 @@ async function handleLogin(e) {
     try {
         const res = await fetch(`${API_BASE}/users/login/`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Accept': 'application/json'
-            },
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
             body: JSON.stringify({ username, password })
         });
 
@@ -152,9 +151,7 @@ async function handleLogin(e) {
             hideModal('loginModal');
             loadView('files');
         } else {
-            const errorMsg = data.detail ||
-                           data.non_field_errors?.[0] ||
-                           'Неверный логин или пароль';
+            const errorMsg = data.detail || data.non_field_errors?.[0] || 'Неверный логин или пароль';
             alert(`❌ ${errorMsg}`);
         }
     } catch (e) {
@@ -269,7 +266,6 @@ async function loadView(view) {
 
 // ✅ ЗАГРУЗКА ФАЙЛОВ
 async function loadFiles() {
-    console.log('🔄 Loading files...');
     try {
         let url = `${API_BASE}/files/`;
         if (currentFolder) url += `?folder=${currentFolder.id}`;
@@ -338,7 +334,7 @@ function getFileIcon(mimeType) {
     return '📄';
 }
 
-// ✅ ЗАГРУЗКА ФАЙЛА (ИСПРАВЛЕНО: FormData без Content-Type)
+// ✅ ЗАГРУЗКА ФАЙЛА
 async function uploadFile(file) {
     console.log('📤 Uploading:', file.name, file.size, 'bytes');
     const fd = new FormData();
@@ -348,7 +344,7 @@ async function uploadFile(file) {
 
     try {
         const headers = getAuthHeaders(false);
-        delete headers['Content-Type']; // ✅ Важно для FormData
+        delete headers['Content-Type'];
 
         const res = await fetch(`${API_BASE}/files/`, {
             method: 'POST',
@@ -487,44 +483,42 @@ function showPreviewModal(file) {
         previewContent.innerHTML = `<div style="text-align:center;padding:2rem;"><audio controls style="width:100%;max-width:600px;"><source src="${downloadUrl}" type="${mt || 'audio/mp3'}">Ваш браузер не поддерживает аудио</audio></div>`;
         showModal(previewModal);
     }
-    else if (mt.includes('excel') || mt.includes('spreadsheet') || ['xls', 'xlsx', 'csv'].includes(fileExt)) {
-        previewContent.innerHTML = `
-            <div style="text-align:center;padding:2rem;">
-                <div style="font-size:4rem;margin-bottom:1rem;">📊</div>
-                <h3>Excel файл</h3>
-                <p style="color:#888;margin:1rem 0;">${file.file_name || 'Файл'}</p>
-                <button class="btn btn-primary" onclick="downloadFile(${file.id})">⬇️ Скачать</button>
-            </div>
-        `;
-        showModal(previewModal);
-    }
     else {
         downloadFile(file.id);
     }
 }
 
-// ✅ ЭКСПОРТ В EXCEL (CSV)
+// ✅ ЭКСПОРТ В EXCEL (из Luckysheet)
 async function exportToExcel() {
-    if (!hotInstance || !currentDocument) {
+    if (!window.luckysheet) {
         alert('Нет данных для экспорта');
         return;
     }
     try {
-        const data = hotInstance.getData();
-        const headers = hotInstance.getColHeader();
+        // Получаем данные из Luckysheet
+        const data = window.luckysheet.getCellValue();
+        const sheetData = window.luckysheet.getSheetData();
+
+        // Конвертируем в CSV
         let csv = [];
-        if (headers && headers.length > 0) {
-            csv.push(headers.map(h => `"${h || ''}"`).join(';'));
+        if (sheetData && sheetData.length > 0) {
+            sheetData.forEach(row => {
+                const csvRow = row.map(cell => {
+                    if (cell && cell.v !== undefined) {
+                        return `"${String(cell.v).replace(/"/g, '""')}"`;
+                    }
+                    return '""';
+                });
+                csv.push(csvRow.join(';'));
+            });
         }
-        data.forEach(row => {
-            csv.push(row.map(cell => `"${cell || ''}"`).join(';'));
-        });
-        const csvContent = csv.join('\n');
-        const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
+
+        const csvContent = '\ufeff' + csv.join('\n');
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
-        link.download = `${currentDocument.title || 'table'}.csv`;
+        link.download = `${currentDocument?.title || 'table'}.csv`;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -557,7 +551,6 @@ async function loadFoldersForDropdown() {
 
 // ✅ ЗАГРУЗКА ПАПОК
 async function loadFolders() {
-    console.log('📁 Loading folders...');
     try {
         const res = await fetch(`${API_BASE}/folders/`, { headers: getAuthHeaders() });
         if (res.status === 200) {
@@ -628,7 +621,6 @@ async function deleteFolder(id) {
 
 // ✅ ЗАГРУЗКА ДОКУМЕНТОВ
 async function loadDocuments() {
-    console.log('📄 Loading documents...');
     try {
         const res = await fetch(`${API_BASE}/documents/`, { headers: getAuthHeaders() });
         if (res.status === 200) {
@@ -692,136 +684,126 @@ function showDocumentEditor(doc) {
     currentDocument = doc;
     showModal('documentModal');
     setTimeout(() => {
-        if (doc.doc_type === 'spreadsheet') { initHandsontable(doc); }
+        if (doc.doc_type === 'spreadsheet') { initLuckysheet(doc); }
         else { initTextEditor(doc); }
     }, 400);
 }
 
-// ✅ ИНИЦИАЛИЗАЦИЯ HANDSONTABLE (ИСПРАВЛЕНО: русский язык, кликабельные ячейки)
-function initHandsontable(doc) {
-    console.log('🔍 initHandsontable called');
-    const container = document.getElementById('handsontable-container');
+// ✅ ИНИЦИАЛИЗАЦИЯ LUCKYSHEET (как OnlyOffice!)
+function initLuckysheet(doc) {
+    console.log('🔍 initLuckysheet called');
+    const container = document.getElementById('luckysheet-container');
     if (!container) { console.error('❌ Container not found'); return; }
-    if (typeof Handsontable === 'undefined') {
-        console.error('❌ Handsontable not loaded');
-        container.innerHTML = '<div style="padding:2rem;color:#000;">⚠️ Редактор не загрузился</div>';
+    if (typeof window.luckysheet === 'undefined') {
+        console.error('❌ Luckysheet not loaded');
+        container.innerHTML = '<div style="padding:2rem;color:#000;">⚠️ Редактор не загрузился. Проверьте подключение к интернету.</div>';
         return;
     }
-    container.innerHTML = '';
+
     try {
-        let data = doc.content?.handsontable;
-        if (!data || !Array.isArray(data)) {
-            data = Array(20).fill(null).map(() => Array(10).fill(''));
+        // Очищаем контейнер
+        container.innerHTML = '';
+
+        // Получаем данные или создаём пустую таблицу
+        let sheetData = doc.content?.luckysheet;
+        if (!sheetData || !Array.isArray(sheetData)) {
+            sheetData = [{
+                name: 'Sheet1',
+                color: '',
+                status: '1',
+                order: '0',
+                data: Array(50).fill(null).map(() => Array(30).fill(null)),
+                rowCount: 50,
+                columnCount: 30,
+                defaultRowHeight: 19,
+                defaultColWidth: 73
+            }];
         }
-        hotInstance = new Handsontable(container, {
-            data: data,
-            colHeaders: true,
-            rowHeaders: true,
-            height: '100%',
-            width: '100%',
-            licenseKey: 'non-commercial-and-evaluation',
-            language: 'ru-RU',
-            readOnly: false,
-            disableVisualSelection: false,
-            contextMenu: true,
-            dropdownMenu: true,
-            filters: true,
-            columnSorting: true,
-            manualColumnResize: true,
-            manualRowResize: true,
-            manualColumnMove: true,
-            manualRowMove: true,
-            copyPaste: { pasteMode: 'overwrite', rowsLimit: 1000, columnsLimit: 50 },
-            fillHandle: { autoInsertRow: false, autoDirection: 'both' },
-            search: true,
-            comments: true,
-            selectionMode: 'range',
-            navigableHeaders: true,
-            autoColumnSize: true,
-            autoRowSize: false,
-            cells: function (row, col) {
-                const cellProperties = {
-                    type: 'text',
-                    allowEmpty: true,
-                    className: 'htLeft',
-                    readOnly: false
-                };
-                if (row === 0) {
-                    cellProperties.className = 'htCenter htMiddle htBold';
-                }
-                return cellProperties;
+
+        // Инициализируем Luckysheet
+        window.luckysheet.create({
+            container: 'luckysheet-container',
+            lang: 'ru',
+            showtoolbarConfig: {
+                image: true,
+                print: true,
+                exportXlsx: true
             },
-            tabNavigation: true,
-            undo: true,
-            cellMerge: true,
-            preventOverflow: 'horizontal',
-            afterRender: () => {
-                console.log('✅ Handsontable rendered');
+            data: sheetData,
+            allowUpdate: true,
+            userInfo: currentUser?.username || 'User',
+            myFolderUrl: '/',
+            showConfigWindowResize: true,
+            enableAddRow: true,
+            enableAddBackTop: true,
+            rowHeaderWidth: 45,
+            defaultRowHeight: 19,
+            defaultColWidth: 73,
+            contextMenu: true,
+            allowUpdate: true,
+            hook: {
+                workbookCreatedAfter: function() {
+                    console.log('✅ Luckysheet initialized');
+                }
             }
         });
-        setTimeout(() => {
-            if (hotInstance) {
-                hotInstance.render();
-                hotInstance.refreshDimensions();
-                console.log('✅ Handsontable dimensions refreshed');
-            }
-        }, 200);
-        console.log('✅ Handsontable initialized');
+
+        console.log('✅ Luckysheet created successfully');
     } catch (e) {
-        console.error('❌ Error:', e);
-        container.innerHTML = `<div style="padding:2rem;color:#000;">⚠️ ${e.message}</div>`;
+        console.error('❌ Luckysheet error:', e);
+        container.innerHTML = `<div style="padding:2rem;color:#000;">⚠️ Ошибка: ${e.message}</div>`;
     }
 }
 
 function initTextEditor(doc) {
-    const container = document.getElementById('handsontable-container');
+    const container = document.getElementById('luckysheet-container');
     if (!container) return;
     container.innerHTML = `<textarea id="docText" style="width:100%;height:100%;padding:1rem;font-family:monospace;font-size:14px;border:none;resize:none;background:#1a1a25;color:#fff;">${doc.content?.text || ''}</textarea>`;
 }
 
 // ✅ ТИХОЕ СОХРАНЕНИЕ
 async function saveDocumentSilent() {
-    if (!currentDocument) return;
-    let content = {};
-    if (currentDocument.doc_type === 'spreadsheet' && hotInstance) {
-        try {
-            const data = hotInstance.getData();
-            content = { handsontable: data };
-        } catch(e) { console.error('❌ Silent save error:', e); return; }
-    } else if (currentDocument.doc_type === 'text') {
-        const textEl = document.getElementById('docText');
-        if (textEl) content = { text: textEl.value };
-    }
+    if (!currentDocument || !window.luckysheet) return;
     try {
+        const sheetData = window.luckysheet.getAllSheets();
+        const content = { luckysheet: sheetData };
+
         await fetch(`${API_BASE}/documents/${currentDocument.id}/save_content/`, {
-            method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ content })
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ content })
         });
         currentDocument.content = content;
         console.log('✅ Auto-saved silently');
-    } catch (e) { console.error('❌ Silent save failed:', e); }
+    } catch (e) {
+        console.error('❌ Silent save failed:', e);
+    }
 }
 
 // ✅ СОХРАНЕНИЕ ПО КНОПКЕ
 async function saveDocument() {
-    if (!currentDocument) return;
-    let content = {};
-    if (currentDocument.doc_type === 'spreadsheet' && hotInstance) {
-        try {
-            const data = hotInstance.getData();
-            content = { handsontable: data };
-            console.log('💾 Saving spreadsheet');
-        } catch(e) { console.error('❌ Save error:', e); alert('Ошибка сохранения'); return; }
-    } else if (currentDocument.doc_type === 'text') {
-        const textEl = document.getElementById('docText');
-        if (textEl) content = { text: textEl.value };
-    }
+    if (!currentDocument || !window.luckysheet) return;
     try {
+        const sheetData = window.luckysheet.getAllSheets();
+        const content = { luckysheet: sheetData };
+
         const res = await fetch(`${API_BASE}/documents/${currentDocument.id}/save_content/`, {
-            method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ content })
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ content })
         });
-        if (res.ok) { currentDocument.content = content; alert('✅ Сохранено!'); }
-        else { const err = await res.json().catch(() => ({})); alert(`Ошибка: ${err.detail || 'Не удалось сохранить'}`); }
-    } catch (e) { console.error('❌ Save error:', e); alert('Ошибка подключения'); }
+
+        if (res.ok) {
+            currentDocument.content = content;
+            alert('✅ Сохранено!');
+        } else {
+            const err = await res.json().catch(() => ({}));
+            alert(`Ошибка: ${err.detail || 'Не удалось сохранить'}`);
+        }
+    } catch (e) {
+        console.error('❌ Save error:', e);
+        alert('Ошибка подключения');
+    }
 }
 
 function openCreateDocumentModal() {
@@ -836,7 +818,11 @@ async function createDocument() {
     const title = document.getElementById('newDocTitle')?.value || 'Без названия';
     const docType = document.getElementById('newDocType')?.value;
     try {
-        const res = await fetch(`${API_BASE}/documents/`, { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ title, doc_type: docType, content: {} }) });
+        const res = await fetch(`${API_BASE}/documents/`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ title, doc_type: docType, content: {} })
+        });
         if (res.ok) { hideModal('createDocumentModal'); await loadDocuments(); }
         else { const err = await res.json().catch(() => ({})); alert(`Ошибка: ${err.detail || 'Неизвестная ошибка'}`); }
     } catch (e) { console.error('Create document error:', e); alert('Ошибка подключения'); }
@@ -856,15 +842,18 @@ async function shareCurrentDocument() {
     const username = prompt('Имя пользователя:');
     if (!username) return;
     try {
-        const res = await fetch(`${API_BASE}/documents/${currentDocument.id}/share/`, { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ username, permission: 'write' }) });
+        const res = await fetch(`${API_BASE}/documents/${currentDocument.id}/share/`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ username, permission: 'write' })
+        });
         const data = await res.json().catch(() => ({}));
         alert(res.ok ? `✅ Доступ предоставлен ${username}` : `❌ ${data.detail || 'Ошибка'}`);
     } catch { alert('Ошибка подключения'); }
 }
 
-// ✅ ЗАГРУЗКА ТАБЛИЦ РАЗДЕЛОВ (ИСПРАВЛЕНО: таблицы создаются в разделах)
+// ✅ ЗАГРУЗКА ТАБЛИЦ РАЗДЕЛОВ
 async function loadSectionTable(sectionType) {
-    console.log(`📊 Loading ${sectionType} tables...`);
     try {
         const res = await fetch(`${API_BASE}/section-tables/?section_type=${sectionType}`, { headers: getAuthHeaders() });
         if (res.status === 200) {
@@ -924,7 +913,7 @@ async function createSectionTable() {
             body: JSON.stringify({
                 title,
                 section_type: sectionType,
-                content: { handsontable: Array(20).fill(null).map(() => Array(10).fill('')) }
+                content: { luckysheet: [] }
             })
         });
         if (res.ok) {
@@ -958,9 +947,8 @@ async function deleteSectionTable(tableId) {
     } catch { alert('Ошибка подключения'); }
 }
 
-// ✅ ЗАГРУЗКА ОБЩЕГО ДОСТУПА (ИСПРАВЛЕНО: показывает файлы и таблицы)
+// ✅ ЗАГРУЗКА ОБЩЕГО ДОСТУПА
 async function loadShared() {
-    console.log('🔗 Loading shared...');
     try {
         const res = await fetch(`${API_BASE}/permissions/`, { headers: getAuthHeaders() });
         if (res.status === 200) {
@@ -1000,7 +988,6 @@ function createSharedCard(perm, index) {
 
 // ✅ ЗАГРУЗКА ЛОГОВ
 async function loadLogs() {
-    console.log('📋 Loading logs...');
     try {
         const res = await fetch(`${API_BASE}/audit-logs/`, { headers: getAuthHeaders() });
         if (res.status === 200) {
