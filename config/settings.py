@@ -13,7 +13,6 @@ DEBUG = os.getenv('DEBUG', 'False').lower() in ('true', '1', 'yes')
 ALLOWED_HOSTS_ENV = os.getenv('ALLOWED_HOSTS', '*')
 ALLOWED_HOSTS = [h.strip() for h in ALLOWED_HOSTS_ENV.split(',') if h.strip()] if ALLOWED_HOSTS_ENV else ['*']
 
-# ✅ Application definition
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
@@ -48,11 +47,11 @@ MIDDLEWARE = [
 
 ROOT_URLCONF = 'config.urls'
 
-# ✅ Templates: index.html для SPA
+# ✅ Templates: index.html для SPA — ИСПРАВЛЕНО: используем frontend/
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [BASE_DIR / 'templates'],
+        'DIRS': [BASE_DIR / 'frontend'],  # ✅ Ищем шаблоны в frontend/
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -110,12 +109,9 @@ CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
 
 # ✅ REST Framework
-# 🔧 ИСПРАВЛЕНО: Убран SessionAuthentication — он требует CSRF для POST-запросов
-# Для API с токенами достаточно TokenAuthentication
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework.authentication.TokenAuthentication',
-        # ✅ SessionAuthentication убран — не требует CSRF для API
     ],
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
@@ -126,9 +122,6 @@ REST_FRAMEWORK = {
         'rest_framework.parsers.JSONParser',
         'rest_framework.parsers.FormParser',
         'rest_framework.parsers.MultiPartParser',
-    ],
-    'DEFAULT_AUTHENTICATION_CLASSES': [
-        'rest_framework.authentication.TokenAuthentication',
     ],
     'DEFAULT_THROTTLE_CLASSES': [],
     'DEFAULT_THROTTLE_RATES': {
@@ -231,11 +224,8 @@ if not DEBUG:
     SECURE_BROWSER_XSS_FILTER = True
     X_FRAME_OPTIONS = 'DENY'
 
-    # ✅ Куки: пока нет HTTPS — оставляем False
     SESSION_COOKIE_SECURE = False
     CSRF_COOKIE_SECURE = False
-
-    # ✅ HSTS: пока нет HTTPS — отключаем
     SECURE_HSTS_SECONDS = 0
 
     MEDIA_ROOT = BASE_DIR / 'media'
