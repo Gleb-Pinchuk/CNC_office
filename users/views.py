@@ -4,9 +4,16 @@ from rest_framework.authtoken.models import Token
 from rest_framework.authtoken.views import ObtainAuthToken
 from django.contrib.auth import get_user_model
 from .serializers import UserSerializer, UserListSerializer, RegisterSerializer
+from django.views.decorators.csrf import csrf_exempt
+from django.utils.decorators import method_decorator
 
 User = get_user_model()
 
+@method_decorator(csrf_exempt, name='dispatch')
+class LoginView(ObtainAuthToken):
+    """Вход пользователя — возвращает токен"""
+    permission_classes = [permissions.AllowAny]
+    authentication_classes = []
 
 class RegisterView(generics.CreateAPIView):
     """Регистрация нового пользователя"""
