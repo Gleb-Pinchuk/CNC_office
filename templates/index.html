@@ -6,10 +6,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CNC Office | Облачное хранилище</title>
 
-    <!-- ✅ Исправлен URL шрифтов (убраны лишние пробелы) -->
+    {# ✅ Исправлен URL шрифтов (убраны лишние пробелы) #}
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=Rajdhani:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 
-    <!-- ✅ Все пути к статике через {% static %} -->
+    {# ✅ Все пути к статике #}
     <link rel="stylesheet" href="{% static 'style.css' %}">
     <link rel="stylesheet" href="{% static 'landing.css' %}">
     <link rel="stylesheet" href="{% static 'vendor/univer/handsontable.css' %}">
@@ -46,7 +46,7 @@
         }
         .handsontable { height: 100% !important; overflow: auto !important; }
 
-        /* ✅ Исправление мыши */
+        {# ✅ Исправление мыши #}
         #documentModal { pointer-events: none !important; }
         #documentModal.show { pointer-events: auto !important; }
         #documentModal .modal-backdrop { pointer-events: none !important; }
@@ -165,7 +165,7 @@
         </main>
     </div>
 
-    <!-- Upload Modal -->
+    {# Upload Modal #}
     <div class="modal" id="uploadModal">
         <div class="modal-backdrop" onclick="hideModal('uploadModal')"></div>
         <div class="modal-content">
@@ -200,7 +200,7 @@
         </div>
     </div>
 
-    <!-- Login/Register Modal -->
+    {# Login/Register Modal #}
     <div class="modal" id="loginModal">
         <div class="modal-backdrop" onclick="hideModal('loginModal')"></div>
         <div class="modal-content modal-small">
@@ -270,7 +270,7 @@
         </div>
     </div>
 
-    <!-- Preview Modal -->
+    {# Preview Modal #}
     <div class="modal" id="previewModal">
         <div class="modal-backdrop" onclick="hideModal('previewModal')"></div>
         <div class="modal-content" style="max-width:900px;width:90%;">
@@ -280,7 +280,7 @@
         </div>
     </div>
 
-    <!-- Document Modal с Handsontable -->
+    {# Document Modal с Handsontable #}
     <div class="modal" id="documentModal">
         <div class="modal-backdrop" onclick="hideModal('documentModal')"></div>
         <div class="modal-content" style="max-width:99vw;width:99vw;height:99vh;margin:0.5vh 0.5vw;display:flex;flex-direction:column;">
@@ -299,7 +299,7 @@
         </div>
     </div>
 
-    <!-- Create Document Modal -->
+    {# Create Document Modal #}
     <div class="modal" id="createDocumentModal">
         <div class="modal-backdrop" onclick="hideModal('createDocumentModal')"></div>
         <div class="modal-content modal-small">
@@ -322,7 +322,7 @@
         </div>
     </div>
 
-    <!-- ✅ Все пути к JS через {% static %} -->
+    {# ✅ Все пути к JS #}
     <script src="{% static 'vendor/univer/handsontable.js' %}"></script>
     <script src="{% static 'app.js' %}"></script>
 </body>

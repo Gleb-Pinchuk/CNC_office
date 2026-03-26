@@ -10,22 +10,26 @@ from files.views import StorageFileViewSet, StorageFolderViewSet
 from documents.views import DocumentViewSet
 from sections.views import SectionTableViewSet
 
+# ✅ Регистрация роутеров
 router = DefaultRouter()
 router.register(r'files', StorageFileViewSet, basename='file')
 router.register(r'folders', StorageFolderViewSet, basename='folder')
 router.register(r'documents', DocumentViewSet, basename='document')
 router.register(r'section-tables', SectionTableViewSet, basename='section-table')
 
+# ✅ Основные URL-паттерны
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include(router.urls)),
     path('api/auth/', include('rest_framework.urls')),
 ]
 
+# ✅ Статика в режиме отладки
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 
-if not settings.DEBUG:
-    urlpatterns += [
-        re_path(r'^.*$', TemplateView.as_view(template_name='index.html')),
-    ]
+# ✅ SPA catch-all: отдаём index.html для всех не-API путей
+# ⚠️ Должен быть ПОСЛЕДНИМ и БЕЗ условия DEBUG!
+urlpatterns += [
+    re_path(r'^.*$', TemplateView.as_view(template_name='index.html')),
+]

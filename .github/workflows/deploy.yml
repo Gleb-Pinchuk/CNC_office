@@ -70,7 +70,7 @@ jobs:
             ELAPSED=0
             
             while [ $ELAPSED -lt $MAX_WAIT ]; do
-              if docker compose ps | grep -q "web.*running\|web.*healthy"; then
+              if docker compose ps | grep -qE "web.*(running|healthy)"; then
                 echo "✅ Контейнер web запущен!"
                 break
               fi
@@ -79,7 +79,7 @@ jobs:
               ELAPSED=$((ELAPSED + WAIT_INTERVAL))
             done
             
-            if ! docker compose ps | grep -q "web.*running\|web.*healthy"; then
+            if ! docker compose ps | grep -qE "web.*(running|healthy)"; then
               echo "❌ ОШИБКА: Контейнер web не запустился за ${MAX_WAIT} сек!"
               echo "=== Логи web ==="
               docker compose logs web --tail=50
