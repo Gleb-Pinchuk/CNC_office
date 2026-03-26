@@ -47,11 +47,11 @@ MIDDLEWARE = [
 
 ROOT_URLCONF = 'config.urls'
 
-# ✅ Templates: index.html для SPA — ИСПРАВЛЕНО: используем frontend/
+# ✅ Templates: SPA в frontend/
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [BASE_DIR / 'frontend'],  # ✅ Ищем шаблоны в frontend/
+        'DIRS': [BASE_DIR / 'frontend'],  # ✅ Ищем index.html в frontend/
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -60,6 +60,8 @@ TEMPLATES = [
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
             ],
+            # ✅ Отключаем строгую проверку переменных для SPA
+            'string_if_invalid': '',
         },
     },
 ]
@@ -92,7 +94,7 @@ TIME_ZONE = 'Europe/Moscow'
 USE_I18N = True
 USE_TZ = True
 
-# ✅ Static files (для SPA + vendor)
+# ✅ Static files (SPA + vendor)
 STATICFILES_DIRS = [
     BASE_DIR / 'frontend',
     BASE_DIR / 'frontend/vendor',
@@ -104,7 +106,7 @@ STATIC_URL = '/static/'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
-# ✅ CORS (разрешаем все для разработки)
+# ✅ CORS
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
 
@@ -130,7 +132,7 @@ REST_FRAMEWORK = {
     },
 }
 
-# ✅ File upload settings (100MB)
+# ✅ File upload (100MB)
 FILE_UPLOAD_MAX_MEMORY_SIZE = 100 * 1024 * 1024
 DATA_UPLOAD_MAX_MEMORY_SIZE = 100 * 1024 * 1024
 
@@ -149,7 +151,7 @@ CSRF_TRUSTED_ORIGINS = [
     'http://83.166.236.188',
 ]
 
-# ✅ Content Security Policy (разрешаем CDN для handsontable)
+# ✅ CSP (разрешаем CDN для Luckysheet)
 CSP_DEFAULT_SRC = ("'self'", 'https:', 'http:', "'unsafe-inline'", "'unsafe-eval'")
 CSP_SCRIPT_SRC = ("'self'", 'https:', 'http:', "'unsafe-inline'", "'unsafe-eval'",
                   'cdnjs.cloudflare.com', 'cdn.jsdelivr.net', 'fonts.googleapis.com')
@@ -217,16 +219,14 @@ LOGGING = {
     },
 }
 
-# ✅ ПРОДАКШЕН НАСТРОЙКИ (когда DEBUG=False)
+# ✅ ПРОДАКШЕН (когда DEBUG=False)
 if not DEBUG:
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
     SECURE_CONTENT_TYPE_NOSNIFF = True
     SECURE_BROWSER_XSS_FILTER = True
     X_FRAME_OPTIONS = 'DENY'
-
     SESSION_COOKIE_SECURE = False
     CSRF_COOKIE_SECURE = False
     SECURE_HSTS_SECONDS = 0
-
     MEDIA_ROOT = BASE_DIR / 'media'
     STATIC_ROOT = BASE_DIR / 'staticfiles'
