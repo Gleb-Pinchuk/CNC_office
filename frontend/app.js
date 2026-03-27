@@ -742,10 +742,10 @@ function showDocumentEditor(doc) {
     }, 500);
 }
 
-// ✅ ИНИЦИАЛИЗАЦИЯ LUCKYSHEET (ИСПРАВЛЕНО)
 function initLuckysheet(doc) {
     console.log('🔍 [LUCKY] initLuckysheet START');
 
+    // 1. Находим контейнер
     const container = document.getElementById('luckysheet-container');
     if (!container) {
         console.error('❌ [LUCKY] Container #luckysheet-container NOT FOUND');
@@ -753,74 +753,82 @@ function initLuckysheet(doc) {
     }
     console.log('🔍 [LUCKY] Container found:', container);
 
+    // 2. Проверяем что Luckysheet загружен
     if (typeof window.luckysheet === 'undefined') {
-        console.error('❌ [LUCKY] window.luckysheet is UNDEFINED - CDN failed?');
-        container.innerHTML = '<div style="padding:2rem;color:#fff;text-align:center;">⚠️ Luckysheet не загрузился.<br>Проверьте подключение к интернету.</div>';
+        console.error('❌ [LUCKY] window.luckysheet is UNDEFINED - check CDN');
+        container.innerHTML = '<div style="padding:2rem;color:#fff;text-align:center;">⚠️ Luckysheet не загрузился</div>';
         return;
     }
     console.log('🔍 [LUCKY] Luckysheet object exists');
 
     try {
-        container.innerHTML = '';
-        container.style.setProperty('display', 'block', 'important');
-        container.style.height = 'calc(100vh - 60px)';
+        // 3. ✅ ВАЖНО: Сначала делаем контейнер видимым, ПОТОМ инициализируем
+        container.style.display = 'block';
+        container.style.visibility = 'visible';
+        container.style.opacity = '1';
+        container.style.height = 'calc(100vh - 80px)';
         container.style.width = '100%';
+        container.innerHTML = '';
 
-        let sheetData = doc.content?.luckysheet;
-        if (!sheetData || !Array.isArray(sheetData) || sheetData.length === 0) {
-            console.log('🔍 [LUCKY] Creating empty sheet data');
-            // ✅ ИСПРАВЛЕНО: добавлен ключ "data:" перед массивом
-            sheetData = [{
-                name: 'Sheet1',
-                color: '',
-                status: '1',
-                order: '0',
-                data: Array(50).fill(null).map(() => Array(30).fill(null)),
-                rowCount: 50,
-                columnCount: 30,
+        // 4. Даём браузеру время отрисовать контейнер
+        setTimeout(() => {
+            console.log('🔍 [LUCKY] setTimeout - container visible, creating...');
+
+            // 5. Готовим данные
+            let sheetData = doc.content?.luckysheet;
+            if (!sheetData || !Array.isArray(sheetData) || sheetData.length === 0) {
+                console.log('🔍 [LUCKY] Creating empty sheet');
+                sheetData = [{
+                    name: 'Sheet1',
+                    color: '',
+                    status: '1',
+                    order: '0',
+                    data: Array(50).fill(null).map(() => Array(30).fill(null)),
+                    rowCount: 50,
+                    columnCount: 30,
+                    defaultRowHeight: 19,
+                    defaultColWidth: 73
+                }];
+            }
+
+            // 6. ✅ Минимальная конфигурация для стабильности
+            const config = {
+                container: 'luckysheet-container',
+                lang: 'ru',
+                 sheetData,
+                showtoolbarConfig: {
+                    image: false,
+                    print: false,
+                    exportXlsx: true
+                },
+                allowUpdate: true,
+                rowHeaderWidth: 45,
                 defaultRowHeight: 19,
                 defaultColWidth: 73
-            }];
-        }
+            };
 
-        console.log('🔍 [LUCKY] Calling luckysheet.create()');
+            console.log('🔍 [LUCKY] Calling luckysheet.create() with config:', config);
 
-        // ✅ ИСПРАВЛЕНО: добавлен ключ "data:" перед sheetData
-        window.luckysheet.create({
-            container: 'luckysheet-container',
-            lang: 'ru',
-            showtoolbarConfig: {
-                image: true,
-                print: true,
-                exportXlsx: true
-            },
-            data: sheetData,
-            allowUpdate: true,
-            userInfo: currentUser?.username || 'User',
-            myFolderUrl: '/',
-            showConfigWindowResize: true,
-            enableAddRow: true,
-            enableAddBackTop: true,
-            rowHeaderWidth: 45,
-            defaultRowHeight: 19,
-            defaultColWidth: 73,
-            contextMenu: true,
-            hook: {
-                workbookCreatedAfter: function() {
-                    console.log('✅ [LUCKY] Luckysheet initialized successfully');
-                },
-                afterRender: function() {
-                    console.log('✅ [LUCKY] Luckysheet rendered');
+            // 7. Инициализируем
+            window.luckysheet.create(config);
+
+            console.log('✅ [LUCKY] luckysheet.create() completed');
+
+            // 8. ✅ ВАЖНО: Пересчитываем размеры после инициализации
+            setTimeout(() => {
+                if (window.luckysheet && typeof window.luckysheet.refresh === 'function') {
+                    window.luckysheet.refresh();
+                    console.log('✅ [LUCKY] refresh() called');
                 }
-            }
-        });
+            }, 200);
 
-        console.log('✅ [LUCKY] luckysheet.create() completed');
+        }, 100); // Небольшая задержка для отрисовки
+
     } catch (e) {
-        console.error('❌ [LUCKY] Exception in initLuckysheet:', e);
+        console.error('❌ [LUCKY] Exception:', e);
         console.error('❌ [LUCKY] Stack:', e.stack);
         if (container) {
-            container.innerHTML = `<div style="padding:2rem;color:#fff;text-align:center;">⚠️ Ошибка Luckysheet:<br><code>${e.message}</code></div>`;
+            container.innerHTML = `<div style="padding:2rem;color:#fff;">⚠️ Ошибка: ${e.message}</div>`;
         }
     }
 }
