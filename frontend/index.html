@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CNC Office — Облачное хранилище</title>
 
+    <!-- ✅ jQuery (ОБЯЗАТЕЛЬНО для sparkline/плагинов Luckysheet) -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+
     <!-- ✅ Luckysheet CSS - ТОЛЬКО ОСНОВНОЙ (без плагинов!) -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/luckysheet/dist/css/luckysheet.css" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/luckysheet/dist/assets/iconfont/iconfont.css" />
@@ -413,7 +416,7 @@
                     <button class="modal-close" onclick="hideModal('documentModal')">&times;</button>
                 </div>
             </div>
-            <!-- ✅ Контейнер для Luckysheet (исправлено: был handsontable-container) -->
+            <!-- ✅ Контейнер для Luckysheet -->
             <div id="luckysheet-container" style="flex: 1; min-height: 0;"></div>
         </div>
     </div>
@@ -434,6 +437,6 @@
     </div>
 
     <!-- ✅ Подключаем app.js через /static/ (ОБНОВЛЁННАЯ ВЕРСИЯ) -->
-    <script src="/static/app.js?v=20.1"></script>
+    <script src="/static/app.js?v=20.2"></script>
 </body>
 </html>
