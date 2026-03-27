@@ -1,4 +1,4 @@
-// ==================== CNC Office - Frontend App v19.0 (Luckysheet) ====================
+// ==================== CNC Office - Frontend App v19.1 (Luckysheet Fixed) ====================
 const API_BASE = '/api';
 let currentUser = null;
 let currentFolder = null;
@@ -6,7 +6,6 @@ let currentView = 'files';
 let currentDocument = null;
 let currentSectionType = null;
 let authToken = localStorage.getItem('cnc_auth_token');
-let luckysheetInstance = null;
 
 // DOM Elements
 const filesGrid = document.getElementById('filesGrid');
@@ -29,7 +28,7 @@ const navItems = document.querySelectorAll('.nav-item');
 
 // ✅ Инициализация
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('🚀 App initialized v19.0 with Luckysheet');
+    console.log('🚀 App initialized v19.1 with Luckysheet');
     setupEventListeners();
     checkAuth();
 });
@@ -86,12 +85,6 @@ function showModal(modal) {
         el.classList.add('show');
         el.style.display = 'flex';
         document.body.style.overflow = 'hidden';
-        setTimeout(() => {
-            if (window.luckysheet) {
-                window.luckysheet.scrollCount();
-                window.luckysheet.mergeCalculation();
-            }
-        }, 100);
     }
 }
 
@@ -100,9 +93,9 @@ function hideModal(modal) {
     const el = typeof modal === 'string' ? document.getElementById(modal) : modal;
     if (el) {
         if (el.id === 'documentModal') {
-            if (currentDocument && window.luckysheet) saveDocumentSilent();
-            if (window.luckysheet) {
-                window.luckysheet.destroy();
+            if (currentDocument) saveDocumentSilent();
+            if (typeof window.luckysheet !== 'undefined') {
+                try { window.luckysheet.destroy(); } catch(e) {}
             }
             currentDocument = null;
         }
@@ -490,16 +483,13 @@ function showPreviewModal(file) {
 
 // ✅ ЭКСПОРТ В EXCEL (из Luckysheet)
 async function exportToExcel() {
-    if (!window.luckysheet) {
+    if (typeof window.luckysheet === 'undefined') {
         alert('Нет данных для экспорта');
         return;
     }
     try {
-        // Получаем данные из Luckysheet
-        const data = window.luckysheet.getCellValue();
         const sheetData = window.luckysheet.getSheetData();
 
-        // Конвертируем в CSV
         let csv = [];
         if (sheetData && sheetData.length > 0) {
             sheetData.forEach(row => {
@@ -686,10 +676,10 @@ function showDocumentEditor(doc) {
     setTimeout(() => {
         if (doc.doc_type === 'spreadsheet') { initLuckysheet(doc); }
         else { initTextEditor(doc); }
-    }, 400);
+    }, 300);
 }
 
-// ✅ ИНИЦИАЛИЗАЦИЯ LUCKYSHEET (как OnlyOffice!)
+// ✅ ИНИЦИАЛИЗАЦИЯ LUCKYSHEET
 function initLuckysheet(doc) {
     console.log('🔍 initLuckysheet called');
     const container = document.getElementById('luckysheet-container');
@@ -701,12 +691,11 @@ function initLuckysheet(doc) {
     }
 
     try {
-        // Очищаем контейнер
         container.innerHTML = '';
+        container.style.display = 'block';
 
-        // Получаем данные или создаём пустую таблицу
         let sheetData = doc.content?.luckysheet;
-        if (!sheetData || !Array.isArray(sheetData)) {
+        if (!sheetData || !Array.isArray(sheetData) || sheetData.length === 0) {
             sheetData = [{
                 name: 'Sheet1',
                 color: '',
@@ -720,7 +709,6 @@ function initLuckysheet(doc) {
             }];
         }
 
-        // Инициализируем Luckysheet
         window.luckysheet.create({
             container: 'luckysheet-container',
             lang: 'ru',
@@ -740,7 +728,6 @@ function initLuckysheet(doc) {
             defaultRowHeight: 19,
             defaultColWidth: 73,
             contextMenu: true,
-            allowUpdate: true,
             hook: {
                 workbookCreatedAfter: function() {
                     console.log('✅ Luckysheet initialized');
@@ -763,7 +750,7 @@ function initTextEditor(doc) {
 
 // ✅ ТИХОЕ СОХРАНЕНИЕ
 async function saveDocumentSilent() {
-    if (!currentDocument || !window.luckysheet) return;
+    if (!currentDocument || typeof window.luckysheet === 'undefined') return;
     try {
         const sheetData = window.luckysheet.getAllSheets();
         const content = { luckysheet: sheetData };
@@ -782,7 +769,10 @@ async function saveDocumentSilent() {
 
 // ✅ СОХРАНЕНИЕ ПО КНОПКЕ
 async function saveDocument() {
-    if (!currentDocument || !window.luckysheet) return;
+    if (!currentDocument || typeof window.luckysheet === 'undefined') {
+        alert('Нет данных для сохранения');
+        return;
+    }
     try {
         const sheetData = window.luckysheet.getAllSheets();
         const content = { luckysheet: sheetData };
@@ -1082,4 +1072,15 @@ function setupEventListeners() {
     [uploadModal, loginModal, previewModal, documentModal, createDocumentModalEl].forEach(modal => {
         if (modal) modal.onclick = (e) => { if (e.target === modal) hideModal(modal); };
     });
+}
+
+// ✅ Toast уведомления
+function showToast(message) {
+    const toast = document.createElement('div');
+    toast.className = 'toast';
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    setTimeout(() => {
+        toast.remove();
+    }, 3000);
 }
