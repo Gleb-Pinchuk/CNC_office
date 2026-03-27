@@ -742,7 +742,7 @@ function showDocumentEditor(doc) {
     }, 500);
 }
 
-// ✅ ИНИЦИАЛИЗАЦИЯ LUCKYSHEET (ФИКС: больше логов и проверок)
+// ✅ ИНИЦИАЛИЗАЦИЯ LUCKYSHEET (ИСПРАВЛЕНО)
 function initLuckysheet(doc) {
     console.log('🔍 [LUCKY] initLuckysheet START');
 
@@ -769,12 +769,13 @@ function initLuckysheet(doc) {
         let sheetData = doc.content?.luckysheet;
         if (!sheetData || !Array.isArray(sheetData) || sheetData.length === 0) {
             console.log('🔍 [LUCKY] Creating empty sheet data');
+            // ✅ ИСПРАВЛЕНО: добавлен ключ "data:" перед массивом
             sheetData = [{
                 name: 'Sheet1',
                 color: '',
                 status: '1',
                 order: '0',
-                 Array(50).fill(null).map(() => Array(30).fill(null)),
+                data: Array(50).fill(null).map(() => Array(30).fill(null)),
                 rowCount: 50,
                 columnCount: 30,
                 defaultRowHeight: 19,
@@ -784,6 +785,7 @@ function initLuckysheet(doc) {
 
         console.log('🔍 [LUCKY] Calling luckysheet.create()');
 
+        // ✅ ИСПРАВЛЕНО: добавлен ключ "data:" перед sheetData
         window.luckysheet.create({
             container: 'luckysheet-container',
             lang: 'ru',
@@ -792,7 +794,7 @@ function initLuckysheet(doc) {
                 print: true,
                 exportXlsx: true
             },
-             sheetData,
+            data: sheetData,
             allowUpdate: true,
             userInfo: currentUser?.username || 'User',
             myFolderUrl: '/',
