@@ -5,14 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CNC Office — Облачное хранилище</title>
 
-    <!-- ✅ Luckysheet CSS -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/luckysheet/dist/plugins/css/pluginsCss.css" />
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/luckysheet/dist/plugins/plugins.css" />
+    <!-- ✅ Luckysheet CSS - ТОЛЬКО ОСНОВНОЙ (без плагинов!) -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/luckysheet/dist/css/luckysheet.css" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/luckysheet/dist/assets/iconfont/iconfont.css" />
 
-    <!-- ✅ Luckysheet JS -->
-    <script src="https://cdn.jsdelivr.net/npm/luckysheet/dist/plugins/js/plugin.js"></script>
+    <!-- ✅ Luckysheet JS - ТОЛЬКО ОСНОВНОЙ (БЕЗ plugin.js!) -->
     <script src="https://cdn.jsdelivr.net/npm/luckysheet/dist/luckysheet.umd.js"></script>
 
     <style>
@@ -42,10 +39,10 @@
         /* ✅ Luckysheet контейнер */
         #luckysheet-container {
             width: 100%;
-            height: calc(100vh - 120px);
+            height: calc(100vh - 60px);
             margin: 0;
             padding: 0;
-            display: none; /* Скрыт по умолчанию, показывается при открытии таблицы */
+            display: none;
         }
 
         /* ✅ Стили интерфейса */
@@ -416,8 +413,8 @@
                     <button class="modal-close" onclick="hideModal('documentModal')">&times;</button>
                 </div>
             </div>
-            <!-- Контейнер для Luckysheet или текстового редактора -->
-            <div id="handsontable-container" style="flex: 1; min-height: 0;"></div>
+            <!-- ✅ Контейнер для Luckysheet (исправлено: был handsontable-container) -->
+            <div id="luckysheet-container" style="flex: 1; min-height: 0;"></div>
         </div>
     </div>
 
@@ -436,7 +433,7 @@
         </div>
     </div>
 
-    <!-- ✅ Подключаем app.js через /static/ -->
-    <script src="/static/app.js?v=19.5"></script>
+    <!-- ✅ Подключаем app.js через /static/ (ОБНОВЛЁННАЯ ВЕРСИЯ) -->
+    <script src="/static/app.js?v=20.1"></script>
 </body>
 </html>
