@@ -1,4 +1,4 @@
-// ==================== CNC Office - Frontend App v19.2 (Display Fix) ====================
+// ==================== CNC Office - Frontend App v19.5 (Luckysheet Fixed) ====================
 const API_BASE = '/api';
 let currentUser = null;
 let currentFolder = null;
@@ -28,7 +28,7 @@ const navItems = document.querySelectorAll('.nav-item');
 
 // ✅ Инициализация
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('🚀 App initialized v19.2 with Luckysheet');
+    console.log('🚀 App initialized v19.5 with Luckysheet');
     setupEventListeners();
     checkAuth();
 });
@@ -78,29 +78,13 @@ async function checkAuth() {
     }
 }
 
-// ✅ Показать модальное окно (ФИКС: принудительное отображение)
+// ✅ Показать модальное окно
 function showModal(modal) {
     const el = typeof modal === 'string' ? document.getElementById(modal) : modal;
     if (el) {
-        // ✅ Принудительно показываем модалку
         el.classList.add('show');
-        el.style.display = 'flex !important';
         el.style.setProperty('display', 'flex', 'important');
         document.body.style.overflow = 'hidden';
-
-        // ✅ Если это редактор документа — ждём рендер и инициализируем
-        if (el.id === 'documentModal' && currentDocument) {
-            setTimeout(() => {
-                console.log('🔍 [MODAL] setTimeout - checking editor init');
-                if (currentDocument.doc_type === 'spreadsheet') {
-                    console.log('🔍 [MODAL] Calling initLuckysheet');
-                    initLuckysheet(currentDocument);
-                } else {
-                    console.log('🔍 [MODAL] Calling initTextEditor');
-                    initTextEditor(currentDocument);
-                }
-            }, 400);
-        }
     }
 }
 
@@ -117,6 +101,280 @@ function hideModal(modal) {
         }
         el.classList.remove('show');
         el.style.display = 'none';
+        document.body.style.overflow = '';
+        const form = el.querySelector('form'); if (form) form.reset();
+    }
+}
+
+function showLoginModal() {
+    if (loginForm) loginForm.classList.remove('hidden');
+    if (registerForm) registerForm.classList.add('hidden');
+    showModal(loginModal);
+}
+
+function showRegisterModal() {
+    if (registerForm) registerForm.classList.remove('hidden');
+    if (loginForm) loginForm.classList.add('hidden');
+    showModal(loginModal);
+}
+
+// ✅ ЛОГИН
+async function handleLogin(e) {
+    e.preventDefault();
+    const username = document.getElementById('loginUsername')?.value?.trim();
+    const password = document.getElementById('loginPassword')?.value;
+
+    if (!username || !password) { alert('Введите логин и пароль'); return; }
+
+    try {
+        const res = await fetch(`${API_BASE}/users/login/`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({ username, password })
+        });
+
+        const data = await res.json().catch(() => ({}));
+
+        if (res.ok && data.token) {
+            authToken = data.token;
+            localStorage.setItem('cnc_auth_token', data.token);
+            localStorage.setItem('cnc_username', data.user?.username || username);
+            currentUser = data.user || { username };
+            if (usernameSpan) usernameSpan.textContent = currentUser.username;
+            hideModal('loginModal');
+            loadView('files');
+        } else {
+            const errorMsg = data.detail || data.non_field_errors?.[0] || 'Неверный логин или пароль';
+            alert(`❌ ${errorMsg}`);
+        }
+    } catch (e) {
+        console.error('Login error:', e);
+        alert('Ошибка подключения к серверу');
+    }
+}
+
+// ✅ РЕГИСТРАЦИЯ
+async function handleRegister(e) {
+    e.preventDefault();
+    const username = document.getElementById('registerUsername')?.value?.trim();
+    const email = document.getElementById('registerEmail')?.value?.trim();
+    const password = document.getElementById('registerPassword')?.value;
+    const password2 = document.getElementById('registerPassword2')?.value;
+
+    if (!username || !email || !password || !password2) { alert('Заполните все поля'); return; }
+    if (password !== password2) { alert('Пароли не совпадают'); return; }
+    if (password.length < 8) { alert('Пароль минимум 8 символов'); return; }
+
+    try {
+        const res = await fetch(`${API_BASE}/users/register/`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ username, email, password, password2 })
+        });
+        const data = await res.json().catch(() => ({}));
+
+        if (res.ok || res.status === 201) {
+            if (data.token) {
+                authToken = data.token;
+                localStorage.setItem('cnc_auth_token', data.token);
+                localStorage.setItem('cnc_username', data.user?.username || username);
+                currentUser = data.user || { username };
+                if (usernameSpan) usernameSpan.textContent = currentUser.username;
+                hideModal('loginModal');
+                loadView('files');
+            } else {
+                alert('✅ Регистрация успешна! Теперь войдите.');
+                if (registerForm) registerForm.classList.add('hidden');
+                if (loginForm) loginForm.classList.remove('hidden');
+            }
+        } else {
+            let msg = '❌ Ошибка:\n';
+            if (typeof data === 'object') {
+                for (const [k, v] of Object.entries(data)) {
+                    msg += `${k}: ${Array.isArray(v) ? v.join(', ') : v}\n`;
+                }
+            }
+            alert(msg || 'Неизвестная ошибка');
+        }
+    } catch (e) {
+        console.error('Register error:', e);
+        alert('Ошибка: ' + e.message);
+    }
+}
+
+async function logout() { clearAuth(); location.reload(); }
+
+// ✅ ЗАГРУЗКА ВИДА
+async function loadView(view) {
+    currentView = view;
+    navItems.forEach(n => n.classList.toggle('active', n.getAttribute('data-view') === view));
+
+    const titles = {
+        'files': 'Мои файлы',
+        'folders': 'Папки',
+        'documents': 'Документы',
+        'section-attendance': '📊 Посещаемость',
+        'section-rangers': '🤖 Цифровые рейнджеры',
+        'section-statements': '📋 Ведомости',
+        'shared': 'Общий доступ',
+        'logs': 'Журнал аудита'
+    };
+    if (pageTitle) pageTitle.textContent = titles[view] || 'CNC Office';
+
+    if (uploadBtn) {
+        if (view === 'files') {
+            uploadBtn.style.display = 'inline-flex';
+            uploadBtn.innerHTML = '📤 Загрузить файл';
+            uploadBtn.onclick = () => { loadFoldersForDropdown(); showModal(uploadModal); };
+        } else if (view === 'folders') {
+            uploadBtn.style.display = 'inline-flex';
+            uploadBtn.innerHTML = '📁 Создать папку';
+            uploadBtn.onclick = createFolder;
+        } else if (view === 'documents' || view?.startsWith('section-')) {
+            uploadBtn.style.display = 'inline-flex';
+            uploadBtn.innerHTML = '📄 Создать таблицу';
+            uploadBtn.onclick = view === 'documents' ? openCreateDocumentModal :
+                () => openCreateSectionTableModal(view?.replace('section-', ''));
+        } else {
+            uploadBtn.style.display = 'none';
+            uploadBtn.onclick = null;
+        }
+    }
+
+    showLoading();
+    switch(view) {
+        case 'files': await loadFiles(); break;
+        case 'folders': await loadFolders(); break;
+        case 'documents': await loadDocuments(); break;
+        case 'section-attendance':
+        case 'section-rangers':
+        case 'section-statements':
+            await loadSectionTable(view?.replace('section-', ''));
+            break;
+        case 'shared': await loadShared(); break;
+        case 'logs': await loadLogs(); break;
+        default: await loadFiles();
+    }
+}
+
+// ✅ ЗАГРУЗКА ФАЙЛОВ
+async function loadFiles() {
+    try {
+        let url = `${API_BASE}/files/`;
+        if (currentFolder) url += `?folder=${currentFolder.id}`;
+        const res = await fetch(url, { headers: getAuthHeaders() });
+        if (res.status === 200) {
+            const data = await res.json();
+            const files = data.results || data || [];
+            renderFiles(files);
+        } else if (res.status === 401 || res.status === 403) {
+            clearAuth(); showLoginModal();
+        } else**File: frontend/app.js** (ПОЛНЫЙ, ИСПРАВЛЕННЫЙ, v19.5)
+
+```javascript
+// ==================== CNC Office - Frontend App v19.5 (Luckysheet Fixed) ====================
+const API_BASE = '/api';
+let currentUser = null;
+let currentFolder = null;
+let currentView = 'files';
+let currentDocument = null;
+let currentSectionType = null;
+let authToken = localStorage.getItem('cnc_auth_token');
+
+// DOM Elements
+const filesGrid = document.getElementById('filesGrid');
+const loadingState = document.getElementById('loadingState');
+const emptyState = document.getElementById('emptyState');
+const pageTitle = document.getElementById('pageTitle');
+const uploadModal = document.getElementById('uploadModal');
+const loginModal = document.getElementById('loginModal');
+const previewModal = document.getElementById('previewModal');
+const documentModal = document.getElementById('documentModal');
+const createDocumentModalEl = document.getElementById('createDocumentModal');
+const uploadBtn = document.getElementById('uploadBtn');
+const logoutBtn = document.getElementById('logoutBtn');
+const uploadForm = document.getElementById('uploadForm');
+const loginForm = document.getElementById('loginForm');
+const registerForm = document.getElementById('registerForm');
+const usernameSpan = document.getElementById('username');
+const folderSelect = document.getElementById('folderSelect');
+const navItems = document.querySelectorAll('.nav-item');
+
+// ✅ Инициализация
+document.addEventListener('DOMContentLoaded', () => {
+    console.log('🚀 App initialized v19.5 with Luckysheet');
+    setupEventListeners();
+    checkAuth();
+});
+
+// ✅ Заголовки для API
+function getAuthHeaders(isJson = true) {
+    const headers = { 'Accept': 'application/json' };
+    if (authToken) headers['Authorization'] = `Token ${authToken}`;
+    if (isJson) headers['Content-Type'] = 'application/json';
+    return headers;
+}
+
+// ✅ Экранирование HTML
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// ✅ Очистка авторизации
+function clearAuth() {
+    localStorage.removeItem('cnc_auth_token');
+    localStorage.removeItem('cnc_username');
+    authToken = null;
+    currentUser = null;
+}
+
+// ✅ Проверка авторизации
+async function checkAuth() {
+    authToken = localStorage.getItem('cnc_auth_token');
+    if (!authToken) { showLoginModal(); return; }
+
+    try {
+        const res = await fetch(`${API_BASE}/users/me/`, { headers: getAuthHeaders() });
+        if (res.ok) {
+            currentUser = await res.json();
+            if (usernameSpan) usernameSpan.textContent = currentUser.username;
+            loadView('files');
+        } else {
+            clearAuth();
+            showLoginModal();
+        }
+    } catch (e) {
+        console.error('Auth check failed:', e);
+        showLoginModal();
+    }
+}
+
+// ✅ Показать модальное окно
+function showModal(modal) {
+    const el = typeof modal === 'string' ? document.getElementById(modal) : modal;
+    if (el) {
+        el.classList.add('show');
+        el.style.display = 'flex';
+        document.body.style.overflow = 'hidden';
+    }
+}
+
+// ✅ Скрыть модальное окно
+function hideModal(modal) {
+    const el = typeof modal === 'string' ? document.getElementById(modal) : modal;
+    if (el) {
+        if (el.id === 'documentModal') {
+            if (currentDocument) saveDocumentSilent();
+            if (typeof window.luckysheet !== 'undefined') {
+                try { window.luckysheet.destroy(); } catch(e) {}
+            }
+            currentDocument = null;
+        }
+        el.classList.remove('show');
+        setTimeout(() => { el.style.display = 'none'; }, 200);
         document.body.style.overflow = '';
         const form = el.querySelector('form'); if (form) form.reset();
     }
@@ -674,7 +932,6 @@ function createDocumentCard(doc, index) {
     return card;
 }
 
-// ✅ ОТКРЫТИЕ ДОКУМЕНТА (ФИКС: добавлен лог и обработка)
 async function openDocument(docId) {
     console.log('📄 [OPEN] openDocument called with id:', docId);
     try {
@@ -695,7 +952,7 @@ async function openDocument(docId) {
     }
 }
 
-// ✅ ПОКАЗ РЕДАКТОРА (ФИКС: принудительное отображение)
+// ✅ ПОКАЗ РЕДАКТОРА
 function showDocumentEditor(doc) {
     console.log('📝 [EDITOR] showDocumentEditor called');
     console.log('📝 [EDITOR] doc:', doc);
@@ -706,7 +963,7 @@ function showDocumentEditor(doc) {
 
     currentDocument = doc;
 
-    // ✅ Принудительно показываем модалку
+    // ✅ Показываем модалку
     const modal = document.getElementById('documentModal');
     if (modal) {
         console.log('📝 [EDITOR] Found modal element');
@@ -742,6 +999,7 @@ function showDocumentEditor(doc) {
     }, 500);
 }
 
+// ✅ ИНИЦИАЛИЗАЦИЯ LUCKYSHEET (ИСПРАВЛЕНО)
 function initLuckysheet(doc) {
     console.log('🔍 [LUCKY] initLuckysheet START');
 
@@ -778,6 +1036,7 @@ function initLuckysheet(doc) {
             let sheetData = doc.content?.luckysheet;
             if (!sheetData || !Array.isArray(sheetData) || sheetData.length === 0) {
                 console.log('🔍 [LUCKY] Creating empty sheet');
+                // ✅ ПРАВИЛЬНО: ключ "data" ВНУТРИ объекта
                 sheetData = [{
                     name: 'Sheet1',
                     color: '',
@@ -795,7 +1054,7 @@ function initLuckysheet(doc) {
             const config = {
                 container: 'luckysheet-container',
                 lang: 'ru',
-                 sheetData,
+                data: sheetData,  // ✅ ПРАВИЛЬНО: ключ "data"
                 showtoolbarConfig: {
                     image: false,
                     print: false,
@@ -839,11 +1098,15 @@ function initTextEditor(doc) {
     container.innerHTML = `<textarea id="docText" style="width:100%;height:100%;padding:1rem;font-family:monospace;font-size:14px;border:none;resize:none;background:#1a1a25;color:#fff;">${doc.content?.text || ''}</textarea>`;
 }
 
-// ✅ ТИХОЕ СОХРАНЕНИЕ
+// ✅ ТИХОЕ СОХРАНЕНИЕ (ИСПРАВЛЕНО: защита от null)
 async function saveDocumentSilent() {
+    // ✅ Проверка на null
     if (!currentDocument || typeof window.luckysheet === 'undefined') return;
+
     try {
         const sheetData = window.luckysheet.getAllSheets();
+        if (!sheetData) return;
+
         const content = { luckysheet: sheetData };
 
         await fetch(`${API_BASE}/documents/${currentDocument.id}/save_content/`, {
