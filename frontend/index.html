@@ -5,14 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CNC Office — Облачное хранилище</title>
 
-    <!-- ✅ jQuery (ОБЯЗАТЕЛЬНО для sparkline/плагинов Luckysheet) -->
+    <!-- ✅ 1. jQuery (ПЕРВЫМ!) -->
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 
-    <!-- ✅ Luckysheet CSS - ТОЛЬКО ОСНОВНОЙ (без плагинов!) -->
+    <!-- ✅ 2. Luckysheet CSS -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/luckysheet/dist/css/luckysheet.css" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/luckysheet/dist/assets/iconfont/iconfont.css" />
 
-    <!-- ✅ Luckysheet JS - ТОЛЬКО ОСНОВНОЙ (БЕЗ plugin.js!) -->
+    <!-- ✅ 3. Luckysheet Plugin (ПЕРЕД основным файлом!) -->
+    <script src="https://cdn.jsdelivr.net/npm/luckysheet/dist/plugins/js/plugin.js"></script>
+
+    <!-- ✅ 4. Luckysheet Main (ПОСЛЕ плагина!) -->
     <script src="https://cdn.jsdelivr.net/npm/luckysheet/dist/luckysheet.umd.js"></script>
 
     <style>
