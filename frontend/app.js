@@ -1,4 +1,4 @@
-// ==================== CNC Office - Frontend App v19.5 (Luckysheet Fixed) ====================
+// ==================== CNC Office - Frontend App v20.0 ====================
 const API_BASE = '/api';
 let currentUser = null;
 let currentFolder = null;
@@ -8,27 +8,33 @@ let currentSectionType = null;
 let authToken = localStorage.getItem('cnc_auth_token');
 
 // DOM Elements
-const filesGrid = document.getElementById('filesGrid');
-const loadingState = document.getElementById('loadingState');
-const emptyState = document.getElementById('emptyState');
-const pageTitle = document.getElementById('pageTitle');
-const uploadModal = document.getElementById('uploadModal');
-const loginModal = document.getElementById('loginModal');
-const previewModal = document.getElementById('previewModal');
-const documentModal = document.getElementById('documentModal');
-const createDocumentModalEl = document.getElementById('createDocumentModal');
-const uploadBtn = document.getElementById('uploadBtn');
-const logoutBtn = document.getElementById('logoutBtn');
-const uploadForm = document.getElementById('uploadForm');
-const loginForm = document.getElementById('loginForm');
-const registerForm = document.getElementById('registerForm');
-const usernameSpan = document.getElementById('username');
-const folderSelect = document.getElementById('folderSelect');
-const navItems = document.querySelectorAll('.nav-item');
+let filesGrid, loadingState, emptyState, pageTitle, uploadModal, loginModal;
+let previewModal, documentModal, createDocumentModalEl, uploadBtn, logoutBtn;
+let uploadForm, loginForm, registerForm, usernameSpan, folderSelect, navItems;
 
 // ✅ Инициализация
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('🚀 App initialized v19.5 with Luckysheet');
+    console.log('🚀 App initialized v20.0');
+
+    // Кэшируем элементы
+    filesGrid = document.getElementById('filesGrid');
+    loadingState = document.getElementById('loadingState');
+    emptyState = document.getElementById('emptyState');
+    pageTitle = document.getElementById('pageTitle');
+    uploadModal = document.getElementById('uploadModal');
+    loginModal = document.getElementById('loginModal');
+    previewModal = document.getElementById('previewModal');
+    documentModal = document.getElementById('documentModal');
+    createDocumentModalEl = document.getElementById('createDocumentModal');
+    uploadBtn = document.getElementById('uploadBtn');
+    logoutBtn = document.getElementById('logoutBtn');
+    uploadForm = document.getElementById('uploadForm');
+    loginForm = document.getElementById('loginForm');
+    registerForm = document.getElementById('registerForm');
+    usernameSpan = document.getElementById('username');
+    folderSelect = document.getElementById('folderSelect');
+    navItems = document.querySelectorAll('.nav-item');
+
     setupEventListeners();
     checkAuth();
 });
@@ -61,7 +67,6 @@ function clearAuth() {
 async function checkAuth() {
     authToken = localStorage.getItem('cnc_auth_token');
     if (!authToken) { showLoginModal(); return; }
-
     try {
         const res = await fetch(`${API_BASE}/users/me/`, { headers: getAuthHeaders() });
         if (res.ok) {
@@ -73,7 +78,7 @@ async function checkAuth() {
             showLoginModal();
         }
     } catch (e) {
-        console.error('Auth check failed:', e);
+        console.error('Auth error:', e);
         showLoginModal();
     }
 }
@@ -92,30 +97,25 @@ function showModal(modal) {
 function hideModal(modal) {
     const el = typeof modal === 'string' ? document.getElementById(modal) : modal;
     if (el) {
-        if (el.id === 'documentModal') {
-            if (currentDocument) saveDocumentSilent();
-            if (typeof window.luckysheet !== 'undefined') {
-                try { window.luckysheet.destroy(); } catch(e) {}
-            }
-            currentDocument = null;
-        }
+        if (el.id === 'documentModal' && currentDocument) saveDocumentSilent();
         el.classList.remove('show');
         el.style.display = 'none';
         document.body.style.overflow = '';
-        const form = el.querySelector('form'); if (form) form.reset();
+        const form = el.querySelector('form');
+        if (form) form.reset();
     }
 }
 
 function showLoginModal() {
     if (loginForm) loginForm.classList.remove('hidden');
     if (registerForm) registerForm.classList.add('hidden');
-    showModal(loginModal);
+    showModal('loginModal');
 }
 
 function showRegisterModal() {
     if (registerForm) registerForm.classList.remove('hidden');
     if (loginForm) loginForm.classList.add('hidden');
-    showModal(loginModal);
+    showModal('loginModal');
 }
 
 // ✅ ЛОГИН
@@ -123,18 +123,14 @@ async function handleLogin(e) {
     e.preventDefault();
     const username = document.getElementById('loginUsername')?.value?.trim();
     const password = document.getElementById('loginPassword')?.value;
-
     if (!username || !password) { alert('Введите логин и пароль'); return; }
-
     try {
         const res = await fetch(`${API_BASE}/users/login/`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username, password })
         });
-
-        const data = await res.json().catch(() => ({}));
-
+        const data = await res.json();
         if (res.ok && data.token) {
             authToken = data.token;
             localStorage.setItem('cnc_auth_token', data.token);
@@ -144,12 +140,10 @@ async function handleLogin(e) {
             hideModal('loginModal');
             loadView('files');
         } else {
-            const errorMsg = data.detail || data.non_field_errors?.[0] || 'Неверный логин или пароль';
-            alert(`❌ ${errorMsg}`);
+            alert('❌ ' + (data.detail || 'Ошибка входа'));
         }
     } catch (e) {
-        console.error('Login error:', e);
-        alert('Ошибка подключения к серверу');
+        alert('Ошибка подключения');
     }
 }
 
@@ -160,24 +154,20 @@ async function handleRegister(e) {
     const email = document.getElementById('registerEmail')?.value?.trim();
     const password = document.getElementById('registerPassword')?.value;
     const password2 = document.getElementById('registerPassword2')?.value;
-
     if (!username || !email || !password || !password2) { alert('Заполните все поля'); return; }
     if (password !== password2) { alert('Пароли не совпадают'); return; }
     if (password.length < 8) { alert('Пароль минимум 8 символов'); return; }
-
     try {
         const res = await fetch(`${API_BASE}/users/register/`, {
             method: 'POST',
             headers: getAuthHeaders(),
             body: JSON.stringify({ username, email, password, password2 })
         });
-        const data = await res.json().catch(() => ({}));
-
+        const data = await res.json();
         if (res.ok || res.status === 201) {
             if (data.token) {
                 authToken = data.token;
                 localStorage.setItem('cnc_auth_token', data.token);
-                localStorage.setItem('cnc_username', data.user?.username || username);
                 currentUser = data.user || { username };
                 if (usernameSpan) usernameSpan.textContent = currentUser.username;
                 hideModal('loginModal');
@@ -188,16 +178,9 @@ async function handleRegister(e) {
                 if (loginForm) loginForm.classList.remove('hidden');
             }
         } else {
-            let msg = '❌ Ошибка:\n';
-            if (typeof data === 'object') {
-                for (const [k, v] of Object.entries(data)) {
-                    msg += `${k}: ${Array.isArray(v) ? v.join(', ') : v}\n`;
-                }
-            }
-            alert(msg || 'Неизвестная ошибка');
+            alert('❌ Ошибка: ' + JSON.stringify(data));
         }
     } catch (e) {
-        console.error('Register error:', e);
         alert('Ошибка: ' + e.message);
     }
 }
@@ -207,17 +190,12 @@ async function logout() { clearAuth(); location.reload(); }
 // ✅ ЗАГРУЗКА ВИДА
 async function loadView(view) {
     currentView = view;
-    navItems.forEach(n => n.classList.toggle('active', n.getAttribute('data-view') === view));
+    if (navItems) navItems.forEach(n => n.classList.toggle('active', n.getAttribute('data-view') === view));
 
     const titles = {
-        'files': 'Мои файлы',
-        'folders': 'Папки',
-        'documents': 'Документы',
-        'section-attendance': '📊 Посещаемость',
-        'section-rangers': '🤖 Цифровые рейнджеры',
-        'section-statements': '📋 Ведомости',
-        'shared': 'Общий доступ',
-        'logs': 'Журнал аудита'
+        'files': 'Мои файлы', 'folders': 'Папки', 'documents': 'Документы',
+        'section-attendance': '📊 Посещаемость', 'section-rangers': '🤖 Рейнджеры',
+        'section-statements': '📋 Ведомости', 'shared': 'Общий доступ', 'logs': 'Журнал'
     };
     if (pageTitle) pageTitle.textContent = titles[view] || 'CNC Office';
 
@@ -225,7 +203,7 @@ async function loadView(view) {
         if (view === 'files') {
             uploadBtn.style.display = 'inline-flex';
             uploadBtn.innerHTML = '📤 Загрузить файл';
-            uploadBtn.onclick = () => { loadFoldersForDropdown(); showModal(uploadModal); };
+            uploadBtn.onclick = () => { loadFoldersForDropdown(); showModal('uploadModal'); };
         } else if (view === 'folders') {
             uploadBtn.style.display = 'inline-flex';
             uploadBtn.innerHTML = '📁 Создать папку';
@@ -237,7 +215,6 @@ async function loadView(view) {
                 () => openCreateSectionTableModal(view?.replace('section-', ''));
         } else {
             uploadBtn.style.display = 'none';
-            uploadBtn.onclick = null;
         }
     }
 
@@ -246,11 +223,8 @@ async function loadView(view) {
         case 'files': await loadFiles(); break;
         case 'folders': await loadFolders(); break;
         case 'documents': await loadDocuments(); break;
-        case 'section-attendance':
-        case 'section-rangers':
-        case 'section-statements':
-            await loadSectionTable(view?.replace('section-', ''));
-            break;
+        case 'section-attendance': case 'section-rangers': case 'section-statements':
+            await loadSectionTable(view?.replace('section-', '')); break;
         case 'shared': await loadShared(); break;
         case 'logs': await loadLogs(); break;
         default: await loadFiles();
@@ -265,290 +239,15 @@ async function loadFiles() {
         const res = await fetch(url, { headers: getAuthHeaders() });
         if (res.status === 200) {
             const data = await res.json();
-            const files = data.results || data || [];
-            renderFiles(files);
-        } else if (res.status === 401 || res.status === 403) {
-            clearAuth(); showLoginModal();
-        } else**File: frontend/app.js** (ПОЛНЫЙ, ИСПРАВЛЕННЫЙ, v19.5)
-
-```javascript
-// ==================== CNC Office - Frontend App v19.5 (Luckysheet Fixed) ====================
-const API_BASE = '/api';
-let currentUser = null;
-let currentFolder = null;
-let currentView = 'files';
-let currentDocument = null;
-let currentSectionType = null;
-let authToken = localStorage.getItem('cnc_auth_token');
-
-// DOM Elements
-const filesGrid = document.getElementById('filesGrid');
-const loadingState = document.getElementById('loadingState');
-const emptyState = document.getElementById('emptyState');
-const pageTitle = document.getElementById('pageTitle');
-const uploadModal = document.getElementById('uploadModal');
-const loginModal = document.getElementById('loginModal');
-const previewModal = document.getElementById('previewModal');
-const documentModal = document.getElementById('documentModal');
-const createDocumentModalEl = document.getElementById('createDocumentModal');
-const uploadBtn = document.getElementById('uploadBtn');
-const logoutBtn = document.getElementById('logoutBtn');
-const uploadForm = document.getElementById('uploadForm');
-const loginForm = document.getElementById('loginForm');
-const registerForm = document.getElementById('registerForm');
-const usernameSpan = document.getElementById('username');
-const folderSelect = document.getElementById('folderSelect');
-const navItems = document.querySelectorAll('.nav-item');
-
-// ✅ Инициализация
-document.addEventListener('DOMContentLoaded', () => {
-    console.log('🚀 App initialized v19.5 with Luckysheet');
-    setupEventListeners();
-    checkAuth();
-});
-
-// ✅ Заголовки для API
-function getAuthHeaders(isJson = true) {
-    const headers = { 'Accept': 'application/json' };
-    if (authToken) headers['Authorization'] = `Token ${authToken}`;
-    if (isJson) headers['Content-Type'] = 'application/json';
-    return headers;
-}
-
-// ✅ Экранирование HTML
-function escapeHtml(text) {
-    if (!text) return '';
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
-
-// ✅ Очистка авторизации
-function clearAuth() {
-    localStorage.removeItem('cnc_auth_token');
-    localStorage.removeItem('cnc_username');
-    authToken = null;
-    currentUser = null;
-}
-
-// ✅ Проверка авторизации
-async function checkAuth() {
-    authToken = localStorage.getItem('cnc_auth_token');
-    if (!authToken) { showLoginModal(); return; }
-
-    try {
-        const res = await fetch(`${API_BASE}/users/me/`, { headers: getAuthHeaders() });
-        if (res.ok) {
-            currentUser = await res.json();
-            if (usernameSpan) usernameSpan.textContent = currentUser.username;
-            loadView('files');
-        } else {
-            clearAuth();
-            showLoginModal();
-        }
-    } catch (e) {
-        console.error('Auth check failed:', e);
-        showLoginModal();
-    }
-}
-
-// ✅ Показать модальное окно
-function showModal(modal) {
-    const el = typeof modal === 'string' ? document.getElementById(modal) : modal;
-    if (el) {
-        el.classList.add('show');
-        el.style.display = 'flex';
-        document.body.style.overflow = 'hidden';
-    }
-}
-
-// ✅ Скрыть модальное окно
-function hideModal(modal) {
-    const el = typeof modal === 'string' ? document.getElementById(modal) : modal;
-    if (el) {
-        if (el.id === 'documentModal') {
-            if (currentDocument) saveDocumentSilent();
-            if (typeof window.luckysheet !== 'undefined') {
-                try { window.luckysheet.destroy(); } catch(e) {}
-            }
-            currentDocument = null;
-        }
-        el.classList.remove('show');
-        setTimeout(() => { el.style.display = 'none'; }, 200);
-        document.body.style.overflow = '';
-        const form = el.querySelector('form'); if (form) form.reset();
-    }
-}
-
-function showLoginModal() {
-    if (loginForm) loginForm.classList.remove('hidden');
-    if (registerForm) registerForm.classList.add('hidden');
-    showModal(loginModal);
-}
-
-function showRegisterModal() {
-    if (registerForm) registerForm.classList.remove('hidden');
-    if (loginForm) loginForm.classList.add('hidden');
-    showModal(loginModal);
-}
-
-// ✅ ЛОГИН
-async function handleLogin(e) {
-    e.preventDefault();
-    const username = document.getElementById('loginUsername')?.value?.trim();
-    const password = document.getElementById('loginPassword')?.value;
-
-    if (!username || !password) { alert('Введите логин и пароль'); return; }
-
-    try {
-        const res = await fetch(`${API_BASE}/users/login/`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-            body: JSON.stringify({ username, password })
-        });
-
-        const data = await res.json().catch(() => ({}));
-
-        if (res.ok && data.token) {
-            authToken = data.token;
-            localStorage.setItem('cnc_auth_token', data.token);
-            localStorage.setItem('cnc_username', data.user?.username || username);
-            currentUser = data.user || { username };
-            if (usernameSpan) usernameSpan.textContent = currentUser.username;
-            hideModal('loginModal');
-            loadView('files');
-        } else {
-            const errorMsg = data.detail || data.non_field_errors?.[0] || 'Неверный логин или пароль';
-            alert(`❌ ${errorMsg}`);
-        }
-    } catch (e) {
-        console.error('Login error:', e);
-        alert('Ошибка подключения к серверу');
-    }
-}
-
-// ✅ РЕГИСТРАЦИЯ
-async function handleRegister(e) {
-    e.preventDefault();
-    const username = document.getElementById('registerUsername')?.value?.trim();
-    const email = document.getElementById('registerEmail')?.value?.trim();
-    const password = document.getElementById('registerPassword')?.value;
-    const password2 = document.getElementById('registerPassword2')?.value;
-
-    if (!username || !email || !password || !password2) { alert('Заполните все поля'); return; }
-    if (password !== password2) { alert('Пароли не совпадают'); return; }
-    if (password.length < 8) { alert('Пароль минимум 8 символов'); return; }
-
-    try {
-        const res = await fetch(`${API_BASE}/users/register/`, {
-            method: 'POST',
-            headers: getAuthHeaders(),
-            body: JSON.stringify({ username, email, password, password2 })
-        });
-        const data = await res.json().catch(() => ({}));
-
-        if (res.ok || res.status === 201) {
-            if (data.token) {
-                authToken = data.token;
-                localStorage.setItem('cnc_auth_token', data.token);
-                localStorage.setItem('cnc_username', data.user?.username || username);
-                currentUser = data.user || { username };
-                if (usernameSpan) usernameSpan.textContent = currentUser.username;
-                hideModal('loginModal');
-                loadView('files');
-            } else {
-                alert('✅ Регистрация успешна! Теперь войдите.');
-                if (registerForm) registerForm.classList.add('hidden');
-                if (loginForm) loginForm.classList.remove('hidden');
-            }
-        } else {
-            let msg = '❌ Ошибка:\n';
-            if (typeof data === 'object') {
-                for (const [k, v] of Object.entries(data)) {
-                    msg += `${k}: ${Array.isArray(v) ? v.join(', ') : v}\n`;
-                }
-            }
-            alert(msg || 'Неизвестная ошибка');
-        }
-    } catch (e) {
-        console.error('Register error:', e);
-        alert('Ошибка: ' + e.message);
-    }
-}
-
-async function logout() { clearAuth(); location.reload(); }
-
-// ✅ ЗАГРУЗКА ВИДА
-async function loadView(view) {
-    currentView = view;
-    navItems.forEach(n => n.classList.toggle('active', n.getAttribute('data-view') === view));
-
-    const titles = {
-        'files': 'Мои файлы',
-        'folders': 'Папки',
-        'documents': 'Документы',
-        'section-attendance': '📊 Посещаемость',
-        'section-rangers': '🤖 Цифровые рейнджеры',
-        'section-statements': '📋 Ведомости',
-        'shared': 'Общий доступ',
-        'logs': 'Журнал аудита'
-    };
-    if (pageTitle) pageTitle.textContent = titles[view] || 'CNC Office';
-
-    if (uploadBtn) {
-        if (view === 'files') {
-            uploadBtn.style.display = 'inline-flex';
-            uploadBtn.innerHTML = '📤 Загрузить файл';
-            uploadBtn.onclick = () => { loadFoldersForDropdown(); showModal(uploadModal); };
-        } else if (view === 'folders') {
-            uploadBtn.style.display = 'inline-flex';
-            uploadBtn.innerHTML = '📁 Создать папку';
-            uploadBtn.onclick = createFolder;
-        } else if (view === 'documents' || view?.startsWith('section-')) {
-            uploadBtn.style.display = 'inline-flex';
-            uploadBtn.innerHTML = '📄 Создать таблицу';
-            uploadBtn.onclick = view === 'documents' ? openCreateDocumentModal :
-                () => openCreateSectionTableModal(view?.replace('section-', ''));
-        } else {
-            uploadBtn.style.display = 'none';
-            uploadBtn.onclick = null;
-        }
-    }
-
-    showLoading();
-    switch(view) {
-        case 'files': await loadFiles(); break;
-        case 'folders': await loadFolders(); break;
-        case 'documents': await loadDocuments(); break;
-        case 'section-attendance':
-        case 'section-rangers':
-        case 'section-statements':
-            await loadSectionTable(view?.replace('section-', ''));
-            break;
-        case 'shared': await loadShared(); break;
-        case 'logs': await loadLogs(); break;
-        default: await loadFiles();
-    }
-}
-
-// ✅ ЗАГРУЗКА ФАЙЛОВ
-async function loadFiles() {
-    try {
-        let url = `${API_BASE}/files/`;
-        if (currentFolder) url += `?folder=${currentFolder.id}`;
-        const res = await fetch(url, { headers: getAuthHeaders() });
-        if (res.status === 200) {
-            const data = await res.json();
-            const files = data.results || data || [];
-            renderFiles(files);
+            renderFiles(data.results || data || []);
         } else if (res.status === 401 || res.status === 403) {
             clearAuth(); showLoginModal();
         } else {
-            showEmpty('Не удалось загрузить файлы');
+            hideLoading(); showEmpty('Не удалось загрузить');
         }
     } catch (e) {
-        console.error('❌ Load files error:', e);
-        showEmpty('Ошибка подключения');
+        console.error('Load files error:', e);
+        hideLoading(); showEmpty('Ошибка подключения');
     }
 }
 
@@ -558,76 +257,57 @@ function renderFiles(files) {
     hideEmpty();
     if (filesGrid) {
         filesGrid.innerHTML = '';
-        files.forEach((f, i) => { if (f) filesGrid.appendChild(createFileCard(f, i)); });
+        files.forEach((f, i) => {
+            if (!f) return;
+            const card = document.createElement('div');
+            card.className = 'file-card';
+            card.style.cursor = 'pointer';
+            const icon = getFileIcon(f.mime_type);
+            const name = f.file_name || (f.file ? f.file.split('/').pop() : 'File');
+            const size = f.size_mb ? `${f.size_mb} MB` : '0 MB';
+            const date = f.uploaded_at ? new Date(f.uploaded_at).toLocaleDateString('ru-RU') : '';
+            card.innerHTML = `
+                <div class="file-icon">${icon}</div>
+                <div class="file-name" title="${escapeHtml(name)}">${escapeHtml(name)}</div>
+                <div class="file-meta"><span>${size}</span><span>${date}</span></div>`;
+            card.onclick = () => showPreviewModal(f);
+            filesGrid.appendChild(card);
+        });
     }
 }
 
-function createFileCard(file, index) {
-    const card = document.createElement('div');
-    card.className = 'file-card';
-    card.style.animationDelay = `${index * 0.1}s`;
-    card.style.cursor = 'pointer';
-    card.onclick = (e) => { if (!e.target.closest('.file-actions')) { showPreviewModal(file); } };
-
-    const icon = getFileIcon(file.mime_type);
-    let name = file.file_name || (file.file ? file.file.split('/').pop() : 'Без имени');
-    try { name = decodeURIComponent(name); } catch {}
-    const size = file.size_mb ? `${file.size_mb} MB` : file.size ? `${(file.size/1024/1024).toFixed(2)} MB` : '0 MB';
-    const date = file.uploaded_at ? new Date(file.uploaded_at).toLocaleDateString('ru-RU') : '';
-    const canAct = file.owner?.username === currentUser?.username;
-
-    card.innerHTML = `
-        <div class="file-icon">${icon}</div>
-        <div class="file-name" title="${escapeHtml(name)}">${escapeHtml(name)}</div>
-        <div class="file-meta"><span>${size}</span><span>${date}</span></div>
-        <div class="file-actions">
-            ${canAct ? `<button class="file-action-btn" onclick="event.stopPropagation();downloadFile(${file.id})">⬇️</button>` : ''}
-            ${canAct ? `<button class="file-action-btn" onclick="event.stopPropagation();shareFile(${file.id})">🔗</button>` : ''}
-            ${canAct ? `<button class="file-action-btn" onclick="event.stopPropagation();deleteFile(${file.id})">🗑️</button>` : ''}
-        </div>`;
-    return card;
-}
-
-function getFileIcon(mimeType) {
-    if (!mimeType) return '📄';
-    const mt = mimeType.toLowerCase();
-    if (mt.includes('excel')||mt.includes('spreadsheet')) return '📊';
-    if (mt.includes('word')||mt.includes('.doc')) return '📝';
-    if (mt.includes('pdf')) return '📄';
-    if (mt.includes('image')) return '🖼️';
-    if (mt.includes('video')) return '🎬';
-    if (mt.includes('audio')) return '🎵';
-    if (mt.includes('zip')) return '📦';
+function getFileIcon(mt) {
+    if (!mt) return '📄';
+    const m = mt.toLowerCase();
+    if (m.includes('excel') || m.includes('spreadsheet')) return '📊';
+    if (m.includes('word') || m.includes('.doc')) return '📝';
+    if (m.includes('pdf')) return '📄';
+    if (m.includes('image')) return '🖼️';
+    if (m.includes('video')) return '🎬';
+    if (m.includes('audio')) return '🎵';
+    if (m.includes('zip')) return '📦';
     return '📄';
 }
 
 // ✅ ЗАГРУЗКА ФАЙЛА
 async function uploadFile(file) {
-    console.log('📤 Uploading:', file.name, file.size, 'bytes');
     const fd = new FormData();
     fd.append('file', file);
     if (currentFolder) fd.append('folder', currentFolder.id);
     else if (folderSelect?.value) fd.append('folder', folderSelect.value);
-
     try {
         const headers = getAuthHeaders(false);
         delete headers['Content-Type'];
-
-        const res = await fetch(`${API_BASE}/files/`, {
-            method: 'POST',
-            headers: headers,
-            body: fd
-        });
-        const data = await res.json().catch(() => ({}));
+        const res = await fetch(`${API_BASE}/files/`, { method: 'POST', headers, body: fd });
+        const data = await res.json();
         if (res.ok || res.status === 201) {
             hideModal('uploadModal');
             if (uploadForm) uploadForm.reset();
             await loadFiles();
         } else {
-            alert(`Ошибка: ${data.detail || data.file?.[0] || data.error || 'Неизвестная ошибка'}`);
+            alert('Ошибка: ' + (data.detail || data.error || 'Неизвестная ошибка'));
         }
     } catch (e) {
-        console.error('❌ Upload error:', e);
         alert('Ошибка подключения: ' + e.message);
     }
 }
@@ -653,180 +333,70 @@ async function downloadFile(fileId) {
             }
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
-            a.href = url;
-            a.download = filename;
-            document.body.appendChild(a);
-            a.click();
-            window.URL.revokeObjectURL(url);
-            document.body.removeChild(a);
-        } else if (res.status === 401 || res.status === 403) {
-            clearAuth(); showLoginModal();
+            a.href = url; a.download = filename;
+            document.body.appendChild(a); a.click();
+            window.URL.revokeObjectURL(url); document.body.removeChild(a);
         } else {
             alert('Не удалось скачать');
         }
     } catch (e) {
-        console.error('Download error:', e);
         alert('Ошибка подключения');
     }
 }
 
-// ✅ ПОДЕЛИТЬСЯ ФАЙЛОМ
-async function shareFile(fileId) {
-    const username = prompt('Имя пользователя:');
-    if (!username) return;
-    try {
-        const res = await fetch(`${API_BASE}/files/${fileId}/share/`, {
-            method: 'POST',
-            headers: getAuthHeaders(),
-            body: JSON.stringify({ username, permission: 'read' })
-        });
-        const data = await res.json().catch(() => ({}));
-        alert(res.ok ? `✅ Доступ предоставлен ${username}` : `❌ ${data.detail || 'Ошибка'}`);
-    } catch {
-        alert('Ошибка подключения');
-    }
-}
-
-// ✅ УДАЛЕНИЕ ФАЙЛА
-async function deleteFile(fileId) {
-    if (!confirm('Удалить файл?')) return;
-    try {
-        const res = await fetch(`${API_BASE}/files/${fileId}/`, { method: 'DELETE', headers: getAuthHeaders() });
-        if (res.ok || res.status === 204) await loadFiles();
-        else alert('Ошибка удаления');
-    } catch {
-        alert('Ошибка подключения');
-    }
-}
-
-// ✅ ПРЕДПРОСМОТР ФАЙЛОВ
+// ✅ ПРЕДПРОСМОТР
 function showPreviewModal(file) {
     const mt = (file.mime_type || '').toLowerCase();
-    const fileExt = (file.file_name || '').split('.').pop().toLowerCase();
-    const downloadUrl = `${API_BASE}/files/${file.id}/download/`;
-
-    if (mt.includes('pdf') || fileExt === 'pdf') {
-        window.open(downloadUrl, '_blank');
-        return;
-    }
-
+    const ext = (file.file_name || '').split('.').pop().toLowerCase();
+    const url = `${API_BASE}/files/${file.id}/download/`;
+    if (mt.includes('pdf') || ext === 'pdf') { window.open(url, '_blank'); return; }
     if (!previewModal) { downloadFile(file.id); return; }
-    const previewContent = document.getElementById('previewContent');
-    const previewTitle = document.getElementById('previewTitle');
-    if (!previewContent || !previewTitle) { downloadFile(file.id); return; }
-
-    previewTitle.textContent = file.file_name || 'Файл';
-
-    if (mt.includes('image') || ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'svg', 'webp'].includes(fileExt)) {
-        fetch(downloadUrl, { headers: getAuthHeaders() })
-            .then(res => res.blob())
-            .then(blob => {
-                const imgUrl = URL.createObjectURL(blob);
-                previewContent.innerHTML = `<div style="text-align:center;"><img src="${imgUrl}" style="max-width:100%;max-height:80vh;border-radius:8px;"></div>`;
-                showModal(previewModal);
-            })
-            .catch(() => {
-                previewContent.innerHTML = `<p style="color:#ff4466;">Не удалось загрузить</p><button class="btn btn-primary" onclick="downloadFile(${file.id})">⬇️ Скачать</button>`;
-                showModal(previewModal);
-            });
-    }
-    else if (mt.includes('text') || ['txt', 'json', 'csv', 'xml', 'md', 'log', 'py', 'js', 'html', 'css', 'sql'].includes(fileExt)) {
-        fetch(downloadUrl, { headers: getAuthHeaders() })
-            .then(res => res.text())
-            .then(text => {
-                previewContent.innerHTML = `<pre style="background:#1a1a25;padding:1rem;border-radius:8px;overflow:auto;max-height:80vh;color:#fff;white-space:pre-wrap;word-wrap:break-word;font-family:monospace;font-size:13px;">${escapeHtml(text)}</pre>`;
-                showModal(previewModal);
-            })
-            .catch(() => {
-                previewContent.innerHTML = `<p style="color:#ff4466;">Не удалось загрузить</p><button class="btn btn-primary" onclick="downloadFile(${file.id})">⬇️ Скачать</button>`;
-                showModal(previewModal);
-            });
-    }
-    else if (mt.includes('video') || ['mp4', 'avi', 'mkv', 'mov', 'webm', 'flv'].includes(fileExt)) {
-        previewContent.innerHTML = `<div style="text-align:center;"><video controls style="max-width:100%;max-height:80vh;border-radius:8px;background:#000;"><source src="${downloadUrl}" type="${mt || 'video/mp4'}">Ваш браузер не поддерживает видео</video></div>`;
-        showModal(previewModal);
-    }
-    else if (mt.includes('audio') || ['mp3', 'wav', 'ogg', 'flac', 'm4a'].includes(fileExt)) {
-        previewContent.innerHTML = `<div style="text-align:center;padding:2rem;"><audio controls style="width:100%;max-width:600px;"><source src="${downloadUrl}" type="${mt || 'audio/mp3'}">Ваш браузер не поддерживает аудио</audio></div>`;
-        showModal(previewModal);
-    }
-    else {
+    const content = document.getElementById('previewContent');
+    const title = document.getElementById('previewTitle');
+    if (!content || !title) { downloadFile(file.id); return; }
+    title.textContent = file.file_name || 'Файл';
+    if (mt.includes('image') || ['jpg','jpeg','png','gif','bmp','svg','webp'].includes(ext)) {
+        fetch(url, { headers: getAuthHeaders() }).then(r => r.blob()).then(blob => {
+            const imgUrl = URL.createObjectURL(blob);
+            content.innerHTML = `<div style="text-align:center;"><img src="${imgUrl}" style="max-width:100%;max-height:80vh;border-radius:8px;"></div>`;
+            showModal('previewModal');
+        }).catch(() => {
+            content.innerHTML = `<p style="color:#ff4466;">Не удалось загрузить</p>`;
+            showModal('previewModal');
+        });
+    } else if (mt.includes('text') || ['txt','json','csv','xml','md','log','py','js','html','css','sql'].includes(ext)) {
+        fetch(url, { headers: getAuthHeaders() }).then(r => r.text()).then(text => {
+            content.innerHTML = `<pre style="background:#1a1a25;padding:1rem;border-radius:8px;overflow:auto;max-height:80vh;color:#fff;white-space:pre-wrap;font-family:monospace;font-size:13px;">${escapeHtml(text)}</pre>`;
+            showModal('previewModal');
+        }).catch(() => {
+            content.innerHTML = `<p style="color:#ff4466;">Ошибка</p>`;
+            showModal('previewModal');
+        });
+    } else if (mt.includes('video') || ['mp4','avi','mkv','mov','webm','flv'].includes(ext)) {
+        content.innerHTML = `<div style="text-align:center;"><video controls style="max-width:100%;max-height:80vh;"><source src="${url}" type="${mt||'video/mp4'}"></video></div>`;
+        showModal('previewModal');
+    } else if (mt.includes('audio') || ['mp3','wav','ogg','flac','m4a'].includes(ext)) {
+        content.innerHTML = `<div style="text-align:center;padding:2rem;"><audio controls style="width:100%;max-width:600px;"><source src="${url}" type="${mt||'audio/mp3'}"></audio></div>`;
+        showModal('previewModal');
+    } else {
         downloadFile(file.id);
     }
-}
-
-// ✅ ЭКСПОРТ В EXCEL (из Luckysheet)
-async function exportToExcel() {
-    if (typeof window.luckysheet === 'undefined') {
-        alert('Нет данных для экспорта');
-        return;
-    }
-    try {
-        const sheetData = window.luckysheet.getSheetData();
-
-        let csv = [];
-        if (sheetData && sheetData.length > 0) {
-            sheetData.forEach(row => {
-                const csvRow = row.map(cell => {
-                    if (cell && cell.v !== undefined) {
-                        return `"${String(cell.v).replace(/"/g, '""')}"`;
-                    }
-                    return '""';
-                });
-                csv.push(csvRow.join(';'));
-            });
-        }
-
-        const csvContent = '\ufeff' + csv.join('\n');
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `${currentDocument?.title || 'table'}.csv`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-        console.log('✅ Exported to Excel (CSV)');
-    } catch (e) {
-        console.error('❌ Export error:', e);
-        alert('Ошибка экспорта: ' + e.message);
-    }
-}
-
-// ✅ ЗАГРУЗКА ПАПОК ДЛЯ DROPDOWN
-async function loadFoldersForDropdown() {
-    if (!folderSelect) return;
-    folderSelect.innerHTML = '<option value="">Корневая папка</option>';
-    try {
-        const res = await fetch(`${API_BASE}/folders/`, { headers: getAuthHeaders() });
-        if (res.status === 200) {
-            const data = await res.json();
-            const folders = data.results || data || [];
-            folders.forEach(folder => {
-                const option = document.createElement('option');
-                option.value = folder.id;
-                option.textContent = folder.name;
-                folderSelect.appendChild(option);
-            });
-        }
-    } catch (e) {}
 }
 
 // ✅ ЗАГРУЗКА ПАПОК
 async function loadFolders() {
     try {
+        hideLoading();
         const res = await fetch(`${API_BASE}/folders/`, { headers: getAuthHeaders() });
         if (res.status === 200) {
             const data = await res.json();
-            const folders = data.results || data || [];
-            renderFolders(folders);
+            renderFolders(data.results || data || []);
         } else {
-            showEmpty('Не удалось загрузить папки');
+            hideLoading(); showEmpty('Нет папок');
         }
     } catch (e) {
-        console.error('❌ Load folders error:', e);
-        showEmpty('Ошибка');
+        console.error('Folders error:', e);
+        hideLoading(); showEmpty('Ошибка');
     }
 }
 
@@ -836,23 +406,19 @@ function renderFolders(folders) {
     hideEmpty();
     if (filesGrid) {
         filesGrid.innerHTML = '';
-        folders.forEach((f, i) => filesGrid.appendChild(createFolderCard(f, i)));
+        folders.forEach(f => {
+            const card = document.createElement('div');
+            card.className = 'file-card';
+            card.style.cursor = 'pointer';
+            const date = f.created_at ? new Date(f.created_at).toLocaleDateString('ru-RU') : '';
+            card.innerHTML = `
+                <div class="file-icon">📁</div>
+                <div class="file-name">${escapeHtml(f.name)}</div>
+                <div class="file-meta"><span>${f.files_count||0} файлов</span><span>${date}</span></div>`;
+            card.onclick = () => { currentFolder = f; loadView('files'); };
+            filesGrid.appendChild(card);
+        });
     }
-}
-
-function createFolderCard(folder, index) {
-    const card = document.createElement('div');
-    card.className = 'file-card';
-    card.style.animationDelay = `${index * 0.1}s`;
-    card.style.cursor = 'pointer';
-    card.onclick = (e) => { if (!e.target.closest('.file-actions')) { currentFolder = folder; currentView = 'files'; loadView('files'); } };
-    const date = folder.created_at ? new Date(folder.created_at).toLocaleDateString('ru-RU') : '';
-    card.innerHTML = `
-        <div class="file-icon">📁</div>
-        <div class="file-name" title="${escapeHtml(folder.name)}">${escapeHtml(folder.name)}</div>
-        <div class="file-meta"><span>${folder.files_count || 0} файлов</span><span>${date}</span></div>
-        <div class="file-actions"><button class="file-action-btn" onclick="event.stopPropagation();deleteFolder(${folder.id})">🗑️</button></div>`;
-    return card;
 }
 
 async function createFolder() {
@@ -860,43 +426,44 @@ async function createFolder() {
     if (!name?.trim()) return;
     try {
         const res = await fetch(`${API_BASE}/folders/`, {
-            method: 'POST',
-            headers: getAuthHeaders(),
+            method: 'POST', headers: getAuthHeaders(),
             body: JSON.stringify({ name: name.trim() })
         });
-        if (res.ok) { await loadFolders(); }
-        else { alert('Ошибка создания'); }
-    } catch (e) {
-        console.error('Create folder error:', e);
-        alert('Ошибка');
-    }
+        if (res.ok) await loadFolders();
+        else alert('Ошибка создания');
+    } catch (e) { alert('Ошибка'); }
 }
 
-async function deleteFolder(id) {
-    if (!confirm('Удалить папку?')) return;
+async function loadFoldersForDropdown() {
+    if (!folderSelect) return;
+    folderSelect.innerHTML = '<option value="">Корневая папка</option>';
     try {
-        const res = await fetch(`${API_BASE}/folders/${id}/`, { method: 'DELETE', headers: getAuthHeaders() });
-        if (res.ok || res.status === 204) await loadFolders();
-        else alert('Ошибка');
-    } catch {
-        alert('Ошибка подключения');
-    }
+        const res = await fetch(`${API_BASE}/folders/`, { headers: getAuthHeaders() });
+        if (res.status === 200) {
+            const data = await res.json();
+            (data.results || data || []).forEach(folder => {
+                const opt = document.createElement('option');
+                opt.value = folder.id; opt.textContent = folder.name;
+                folderSelect.appendChild(opt);
+            });
+        }
+    } catch (e) {}
 }
 
 // ✅ ЗАГРУЗКА ДОКУМЕНТОВ
 async function loadDocuments() {
     try {
+        hideLoading();
         const res = await fetch(`${API_BASE}/documents/`, { headers: getAuthHeaders() });
         if (res.status === 200) {
             const data = await res.json();
-            const docs = data.results || data || [];
-            renderDocuments(docs);
+            renderDocuments(data.results || data || []);
         } else {
-            showEmpty('Не удалось загрузить');
+            hideLoading(); showEmpty('Нет документов');
         }
     } catch (e) {
-        console.error('❌ Load documents error:', e);
-        showEmpty('Ошибка');
+        console.error('Documents error:', e);
+        hideLoading(); showEmpty('Ошибка');
     }
 }
 
@@ -906,274 +473,177 @@ function renderDocuments(docs) {
     hideEmpty();
     if (filesGrid) {
         filesGrid.innerHTML = '';
-        docs.forEach((d, i) => filesGrid.appendChild(createDocumentCard(d, i)));
+        docs.forEach(doc => {
+            const card = document.createElement('div');
+            card.className = 'file-card';
+            card.style.cursor = 'pointer';
+            const icon = doc.doc_type === 'spreadsheet' ? '📊' : '📝';
+            const date = doc.updated_at ? new Date(doc.updated_at).toLocaleString('ru-RU') : '';
+            card.innerHTML = `
+                <div class="file-icon">${icon}</div>
+                <div class="file-name">${escapeHtml(doc.title)}</div>
+                <div class="file-meta"><span>${doc.doc_type==='spreadsheet'?'Таблица':'Текст'}</span><span>${date}</span></div>`;
+            card.onclick = () => openDocument(doc.id);
+            filesGrid.appendChild(card);
+        });
     }
 }
 
-function createDocumentCard(doc, index) {
-    const card = document.createElement('div');
-    card.className = 'file-card';
-    card.style.animationDelay = `${index * 0.1}s`;
-    card.style.cursor = 'pointer';
-    card.onclick = (e) => { if (!e.target.closest('.file-actions')) openDocument(doc.id); };
-
-    const icon = doc.doc_type === 'spreadsheet' ? '📊' : '📝';
-    const date = doc.updated_at ? new Date(doc.updated_at).toLocaleString('ru-RU') : '';
-    const canEdit = doc.is_editable || doc.owner_username === currentUser?.username;
-
-    card.innerHTML = `
-        <div class="file-icon">${icon}</div>
-        <div class="file-name" title="${escapeHtml(doc.title)}">${escapeHtml(doc.title)}</div>
-        <div class="file-meta"><span>${doc.doc_type === 'spreadsheet' ? 'Таблица' : 'Текст'}</span><span>${date}</span></div>
-        <div class="file-actions">
-            ${canEdit ? `<button class="file-action-btn" onclick="event.stopPropagation();openDocument(${doc.id})">✏️</button>` : ''}
-            <button class="file-action-btn" onclick="event.stopPropagation();deleteDocument(${doc.id})">🗑️</button>
-        </div>`;
-    return card;
-}
-
 async function openDocument(docId) {
-    console.log('📄 [OPEN] openDocument called with id:', docId);
     try {
         const res = await fetch(`${API_BASE}/documents/${docId}/`, { headers: getAuthHeaders() });
-        console.log('📄 [OPEN] Fetch response status:', res.status);
-
         if (res.ok) {
             currentDocument = await res.json();
-            console.log('📄 [OPEN] Document loaded:', currentDocument);
             showDocumentEditor(currentDocument);
         } else {
-            console.error('📄 [OPEN] Response not OK:', res.status);
             alert('Ошибка открытия');
         }
     } catch (e) {
-        console.error('📄 [OPEN] Exception:', e);
+        console.error('Open error:', e);
         alert('Ошибка: ' + e.message);
     }
 }
 
-// ✅ ПОКАЗ РЕДАКТОРА
 function showDocumentEditor(doc) {
-    console.log('📝 [EDITOR] showDocumentEditor called');
-    console.log('📝 [EDITOR] doc:', doc);
-    console.log('📝 [EDITOR] doc.doc_type:', doc?.doc_type);
-
+    console.log('📝 Opening:', doc.title);
     const title = document.getElementById('documentTitle');
     if (title) title.textContent = doc.title || 'Таблица';
-
     currentDocument = doc;
-
-    // ✅ Показываем модалку
     const modal = document.getElementById('documentModal');
     if (modal) {
-        console.log('📝 [EDITOR] Found modal element');
         modal.classList.add('show');
         modal.style.setProperty('display', 'flex', 'important');
-        modal.style.width = '100%';
-        modal.style.height = '100%';
-        modal.style.maxWidth = 'none';
-        modal.style.maxHeight = 'none';
-        modal.style.padding = '0';
+        modal.style.width = '100%'; modal.style.height = '100%';
+        modal.style.maxWidth = 'none'; modal.style.maxHeight = 'none';
         document.body.style.overflow = 'hidden';
     }
-
-    // ✅ Ждём рендер и инициализируем редактор
     setTimeout(() => {
-        console.log('📝 [EDITOR] setTimeout triggered');
-
         const container = document.getElementById('luckysheet-container');
         if (container) {
-            console.log('📝 [EDITOR] Found container');
             container.style.setProperty('display', 'block', 'important');
             container.style.height = 'calc(100vh - 60px)';
             container.style.width = '100%';
         }
-
-        if (doc.doc_type === 'spreadsheet') {
-            console.log('📝 [EDITOR] Calling initLuckysheet');
-            initLuckysheet(doc);
-        } else {
-            console.log('📝 [EDITOR] Calling initTextEditor');
-            initTextEditor(doc);
-        }
-    }, 500);
+        if (doc.doc_type === 'spreadsheet') initLuckysheet(doc);
+        else initTextEditor(doc);
+    }, 300);
 }
 
-// ✅ ИНИЦИАЛИЗАЦИЯ LUCKYSHEET (ИСПРАВЛЕНО)
+// ✅ ИНИЦИАЛИЗАЦИЯ LUCKYSHEET
 function initLuckysheet(doc) {
-    console.log('🔍 [LUCKY] initLuckysheet START');
-
-    // 1. Находим контейнер
+    console.log('🔍 [LUCKY] init start');
     const container = document.getElementById('luckysheet-container');
-    if (!container) {
-        console.error('❌ [LUCKY] Container #luckysheet-container NOT FOUND');
-        return;
-    }
-    console.log('🔍 [LUCKY] Container found:', container);
-
-    // 2. Проверяем что Luckysheet загружен
+    if (!container) { console.error('❌ Container not found'); return; }
     if (typeof window.luckysheet === 'undefined') {
-        console.error('❌ [LUCKY] window.luckysheet is UNDEFINED - check CDN');
-        container.innerHTML = '<div style="padding:2rem;color:#fff;text-align:center;">⚠️ Luckysheet не загрузился</div>';
+        console.error('❌ Luckysheet undefined');
+        container.innerHTML = '<div style="padding:2rem;color:#fff;">⚠️ Редактор не загрузился</div>';
         return;
     }
-    console.log('🔍 [LUCKY] Luckysheet object exists');
-
     try {
-        // 3. ✅ ВАЖНО: Сначала делаем контейнер видимым, ПОТОМ инициализируем
+        container.innerHTML = '';
         container.style.display = 'block';
-        container.style.visibility = 'visible';
-        container.style.opacity = '1';
         container.style.height = 'calc(100vh - 80px)';
         container.style.width = '100%';
-        container.innerHTML = '';
 
-        // 4. Даём браузеру время отрисовать контейнер
         setTimeout(() => {
-            console.log('🔍 [LUCKY] setTimeout - container visible, creating...');
-
-            // 5. Готовим данные
             let sheetData = doc.content?.luckysheet;
             if (!sheetData || !Array.isArray(sheetData) || sheetData.length === 0) {
-                console.log('🔍 [LUCKY] Creating empty sheet');
-                // ✅ ПРАВИЛЬНО: ключ "data" ВНУТРИ объекта
                 sheetData = [{
-                    name: 'Sheet1',
-                    color: '',
-                    status: '1',
-                    order: '0',
+                    name: 'Sheet1', status: '1', order: '0',
                     data: Array(50).fill(null).map(() => Array(30).fill(null)),
-                    rowCount: 50,
-                    columnCount: 30,
-                    defaultRowHeight: 19,
-                    defaultColWidth: 73
+                    rowCount: 50, columnCount: 30
                 }];
             }
-
-            // 6. ✅ Минимальная конфигурация для стабильности
-            const config = {
+            window.luckysheet.create({
                 container: 'luckysheet-container',
                 lang: 'ru',
-                data: sheetData,  // ✅ ПРАВИЛЬНО: ключ "data"
-                showtoolbarConfig: {
-                    image: false,
-                    print: false,
-                    exportXlsx: true
-                },
-                allowUpdate: true,
-                rowHeaderWidth: 45,
-                defaultRowHeight: 19,
-                defaultColWidth: 73
-            };
-
-            console.log('🔍 [LUCKY] Calling luckysheet.create() with config:', config);
-
-            // 7. Инициализируем
-            window.luckysheet.create(config);
-
-            console.log('✅ [LUCKY] luckysheet.create() completed');
-
-            // 8. ✅ ВАЖНО: Пересчитываем размеры после инициализации
-            setTimeout(() => {
-                if (window.luckysheet && typeof window.luckysheet.refresh === 'function') {
-                    window.luckysheet.refresh();
-                    console.log('✅ [LUCKY] refresh() called');
-                }
-            }, 200);
-
-        }, 100); // Небольшая задержка для отрисовки
-
+                data: sheetData,
+                showtoolbar: true,
+                showtoolbarConfig: { undoRedo: true, image: false, print: false, exportXlsx: true }
+            });
+            console.log('✅ [LUCKY] created');
+            setTimeout(() => { if (window.luckysheet?.refresh) window.luckysheet.refresh(); }, 200);
+        }, 100);
     } catch (e) {
-        console.error('❌ [LUCKY] Exception:', e);
-        console.error('❌ [LUCKY] Stack:', e.stack);
-        if (container) {
-            container.innerHTML = `<div style="padding:2rem;color:#fff;">⚠️ Ошибка: ${e.message}</div>`;
-        }
+        console.error('❌ [LUCKY] error:', e);
+        container.innerHTML = `<div style="padding:2rem;color:#fff;">⚠️ ${e.message}</div>`;
     }
 }
 
 function initTextEditor(doc) {
     const container = document.getElementById('luckysheet-container');
     if (!container) return;
-    container.innerHTML = `<textarea id="docText" style="width:100%;height:100%;padding:1rem;font-family:monospace;font-size:14px;border:none;resize:none;background:#1a1a25;color:#fff;">${doc.content?.text || ''}</textarea>`;
+    container.innerHTML = `<textarea style="width:100%;height:100%;padding:1rem;font-family:monospace;font-size:14px;border:none;resize:none;background:#1a1a25;color:#fff;">${doc.content?.text||''}</textarea>`;
 }
 
-// ✅ ТИХОЕ СОХРАНЕНИЕ (ИСПРАВЛЕНО: защита от null)
+// ✅ СОХРАНЕНИЕ
 async function saveDocumentSilent() {
-    // ✅ Проверка на null
     if (!currentDocument || typeof window.luckysheet === 'undefined') return;
-
     try {
         const sheetData = window.luckysheet.getAllSheets();
         if (!sheetData) return;
-
-        const content = { luckysheet: sheetData };
-
         await fetch(`${API_BASE}/documents/${currentDocument.id}/save_content/`, {
-            method: 'POST',
-            headers: getAuthHeaders(),
-            body: JSON.stringify({ content })
+            method: 'POST', headers: getAuthHeaders(),
+            body: JSON.stringify({ content: { luckysheet: sheetData } })
         });
-        currentDocument.content = content;
-        console.log('✅ Auto-saved silently');
-    } catch (e) {
-        console.error('❌ Silent save failed:', e);
-    }
+        currentDocument.content = { luckysheet: sheetData };
+    } catch (e) { console.error('Save error:', e); }
 }
 
-// ✅ СОХРАНЕНИЕ ПО КНОПКЕ
 async function saveDocument() {
-    if (!currentDocument || typeof window.luckysheet === 'undefined') {
-        alert('Нет данных для сохранения');
-        return;
-    }
+    if (!currentDocument || typeof window.luckysheet === 'undefined') { alert('Нет данных'); return; }
     try {
         const sheetData = window.luckysheet.getAllSheets();
-        const content = { luckysheet: sheetData };
-
         const res = await fetch(`${API_BASE}/documents/${currentDocument.id}/save_content/`, {
-            method: 'POST',
-            headers: getAuthHeaders(),
-            body: JSON.stringify({ content })
+            method: 'POST', headers: getAuthHeaders(),
+            body: JSON.stringify({ content: { luckysheet: sheetData } })
         });
-
-        if (res.ok) {
-            currentDocument.content = content;
-            alert('✅ Сохранено!');
-        } else {
-            const err = await res.json().catch(() => ({}));
-            alert(`Ошибка: ${err.detail || 'Не удалось сохранить'}`);
-        }
-    } catch (e) {
-        console.error('❌ Save error:', e);
-        alert('Ошибка подключения');
-    }
+        if (res.ok) { currentDocument.content = { luckysheet: sheetData }; alert('✅ Сохранено'); }
+        else alert('Ошибка сохранения');
+    } catch (e) { alert('Ошибка подключения'); }
 }
 
+// ✅ ЭКСПОРТ В EXCEL
+async function exportToExcel() {
+    if (typeof window.luckysheet === 'undefined') { alert('Нет данных'); return; }
+    try {
+        const sheetData = window.luckysheet.getSheetData();
+        let csv = [];
+        if (sheetData?.length) {
+            sheetData.forEach(row => {
+                const csvRow = row.map(cell => cell?.v !== undefined ? `"${String(cell.v).replace(/"/g,'""')}"` : '""');
+                csv.push(csvRow.join(';'));
+            });
+        }
+        const blob = new Blob(['\ufeff'+csv.join('\n')], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href = url; a.download = `${currentDocument?.title||'table'}.csv`;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    } catch (e) { alert('Ошибка экспорта'); }
+}
+
+// ✅ СОЗДАНИЕ ДОКУМЕНТА
 function openCreateDocumentModal() {
     const titleInput = document.getElementById('newDocTitle');
-    const typeSelect = document.getElementById('newDocType');
     if (titleInput) titleInput.value = '';
-    if (typeSelect) typeSelect.value = 'spreadsheet';
     showModal('createDocumentModal');
 }
 
 async function createDocument() {
     const title = document.getElementById('newDocTitle')?.value || 'Без названия';
-    const docType = document.getElementById('newDocType')?.value;
     try {
         const res = await fetch(`${API_BASE}/documents/`, {
-            method: 'POST',
-            headers: getAuthHeaders(),
-            body: JSON.stringify({ title, doc_type: docType, content: {} })
+            method: 'POST', headers: getAuthHeaders(),
+            body: JSON.stringify({ title, doc_type: 'spreadsheet', content: {} })
         });
         if (res.ok) { hideModal('createDocumentModal'); await loadDocuments(); }
-        else { const err = await res.json().catch(() => ({})); alert(`Ошибка: ${err.detail || 'Неизвестная ошибка'}`); }
-    } catch (e) { console.error('Create document error:', e); alert('Ошибка подключения'); }
+        else alert('Ошибка создания');
+    } catch (e) { alert('Ошибка подключения'); }
 }
 
 async function deleteDocument(docId) {
-    if (!confirm('Удалить документ?')) return;
+    if (!confirm('Удалить?')) return;
     try {
         const res = await fetch(`${API_BASE}/documents/${docId}/`, { method: 'DELETE', headers: getAuthHeaders() });
         if (res.ok || res.status === 204) await loadDocuments();
@@ -1181,69 +651,39 @@ async function deleteDocument(docId) {
     } catch { alert('Ошибка подключения'); }
 }
 
-async function shareCurrentDocument() {
-    if (!currentDocument) return;
-    const username = prompt('Имя пользователя:');
-    if (!username) return;
-    try {
-        const res = await fetch(`${API_BASE}/documents/${currentDocument.id}/share/`, {
-            method: 'POST',
-            headers: getAuthHeaders(),
-            body: JSON.stringify({ username, permission: 'write' })
-        });
-        const data = await res.json().catch(() => ({}));
-        alert(res.ok ? `✅ Доступ предоставлен ${username}` : `❌ ${data.detail || 'Ошибка'}`);
-    } catch { alert('Ошибка подключения'); }
-}
-
-// ✅ ЗАГРУЗКА ТАБЛИЦ РАЗДЕЛОВ
+// ✅ РАЗДЕЛЫ (таблицы)
 async function loadSectionTable(sectionType) {
     try {
+        hideLoading();
         const res = await fetch(`${API_BASE}/section-tables/?section_type=${sectionType}`, { headers: getAuthHeaders() });
         if (res.status === 200) {
             const data = await res.json();
-            const tables = data.results || data || [];
-            renderSectionTables(tables, sectionType);
-        } else { showEmpty('Не удалось загрузить таблицы'); }
-    } catch (e) { console.error('❌ Load section tables error:', e); showEmpty('Ошибка подключения'); }
+            renderSectionTables(data.results || data || [], sectionType);
+        } else { hideLoading(); showEmpty('Нет таблиц'); }
+    } catch (e) { console.error('Section error:', e); hideLoading(); showEmpty('Ошибка'); }
 }
 
 function renderSectionTables(tables, sectionType) {
     hideLoading();
-    if (!tables?.length) {
-        showEmpty(`Нет таблиц в разделе. Создайте первую!`);
-        return;
-    }
+    if (!tables?.length) { showEmpty('Нет таблиц'); return; }
     hideEmpty();
     if (filesGrid) {
         filesGrid.innerHTML = '';
-        tables.forEach((t, i) => filesGrid.appendChild(createSectionTableCard(t, i, sectionType)));
+        tables.forEach(t => {
+            const card = document.createElement('div');
+            card.className = 'file-card'; card.style.cursor = 'pointer';
+            const date = t.updated_at ? new Date(t.updated_at).toLocaleString('ru-RU') : '';
+            card.innerHTML = `<div class="file-icon">📊</div><div class="file-name">${escapeHtml(t.title)}</div><div class="file-meta"><span>${sectionType}</span><span>${date}</span></div>`;
+            card.onclick = () => openSectionTable(t.id);
+            filesGrid.appendChild(card);
+        });
     }
 }
 
-function createSectionTableCard(table, index, sectionType) {
-    const card = document.createElement('div');
-    card.className = 'file-card';
-    card.style.animationDelay = `${index * 0.1}s`;
-    card.style.cursor = 'pointer';
-    card.onclick = (e) => { if (!e.target.closest('.file-actions')) openSectionTable(table.id); };
-    const date = table.updated_at ? new Date(table.updated_at).toLocaleString('ru-RU') : '';
-    card.innerHTML = `
-        <div class="file-icon">📊</div>
-        <div class="file-name" title="${escapeHtml(table.title)}">${escapeHtml(table.title)}</div>
-        <div class="file-meta"><span>${sectionType}</span><span>${date}</span></div>
-        <div class="file-actions">
-            <button class="file-action-btn" onclick="event.stopPropagation();openSectionTable(${table.id})">✏️</button>
-            <button class="file-action-btn" onclick="event.stopPropagation();deleteSectionTable(${table.id})">🗑️</button>
-        </div>
-    `;
-    return card;
-}
-
 function openCreateSectionTableModal(sectionType) {
+    currentSectionType = sectionType;
     const titleInput = document.getElementById('newDocTitle');
     if (titleInput) titleInput.value = '';
-    currentSectionType = sectionType;
     showModal('createDocumentModal');
 }
 
@@ -1252,22 +692,12 @@ async function createSectionTable() {
     const sectionType = currentSectionType || 'attendance';
     try {
         const res = await fetch(`${API_BASE}/section-tables/`, {
-            method: 'POST',
-            headers: getAuthHeaders(),
-            body: JSON.stringify({
-                title,
-                section_type: sectionType,
-                content: { luckysheet: [] }
-            })
+            method: 'POST', headers: getAuthHeaders(),
+            body: JSON.stringify({ title, section_type: sectionType, content: { luckysheet: [] } })
         });
-        if (res.ok) {
-            hideModal('createDocumentModal');
-            await loadSectionTable(sectionType);
-        } else {
-            const err = await res.json().catch(() => ({}));
-            alert(`Ошибка: ${err.detail || 'Неизвестная ошибка'}`);
-        }
-    } catch (e) { console.error('Create section table error:', e); alert('Ошибка подключения'); }
+        if (res.ok) { hideModal('createDocumentModal'); await loadSectionTable(sectionType); }
+        else alert('Ошибка создания');
+    } catch (e) { alert('Ошибка подключения'); }
 }
 
 async function openSectionTable(tableId) {
@@ -1277,30 +707,29 @@ async function openSectionTable(tableId) {
             currentDocument = await res.json();
             currentDocument.doc_type = 'spreadsheet';
             showDocumentEditor(currentDocument);
-        } else { alert('Ошибка открытия'); }
-    } catch (e) { console.error('Open section table error:', e); alert('Ошибка'); }
+        } else alert('Ошибка открытия');
+    } catch (e) { console.error('Open table error:', e); alert('Ошибка'); }
 }
 
 async function deleteSectionTable(tableId) {
-    if (!confirm('Удалить таблицу?')) return;
+    if (!confirm('Удалить?')) return;
     try {
         const res = await fetch(`${API_BASE}/section-tables/${tableId}/`, { method: 'DELETE', headers: getAuthHeaders() });
-        if (res.ok || res.status === 204) {
-            await loadSectionTable(currentSectionType || 'attendance');
-        } else { alert('Ошибка'); }
+        if (res.ok || res.status === 204) await loadSectionTable(currentSectionType || 'attendance');
+        else alert('Ошибка');
     } catch { alert('Ошибка подключения'); }
 }
 
-// ✅ ЗАГРУЗКА ОБЩЕГО ДОСТУПА
+// ✅ ОБЩИЙ ДОСТУП
 async function loadShared() {
     try {
+        hideLoading();
         const res = await fetch(`${API_BASE}/permissions/`, { headers: getAuthHeaders() });
         if (res.status === 200) {
             const data = await res.json();
-            const perms = data.results || data || [];
-            renderShared(perms);
-        } else { showEmpty('Не удалось загрузить'); }
-    } catch (e) { console.error('❌ Load shared error:', e); showEmpty('Ошибка'); }
+            renderShared(data.results || data || []);
+        } else { hideLoading(); showEmpty('Нет доступа'); }
+    } catch (e) { console.error('Shared error:', e); hideLoading(); showEmpty('Ошибка'); }
 }
 
 function renderShared(perms) {
@@ -1309,37 +738,28 @@ function renderShared(perms) {
     hideEmpty();
     if (filesGrid) {
         filesGrid.innerHTML = '';
-        perms.forEach((p, i) => filesGrid.appendChild(createSharedCard(p, i)));
+        perms.forEach(p => {
+            const card = document.createElement('div');
+            card.className = 'file-card'; card.style.cursor = 'pointer';
+            const name = p.file_name || `Файл #${p.file}`;
+            const user = p.user?.username || 'Неизвестно';
+            card.innerHTML = `<div class="file-icon">🔗</div><div class="file-name">${escapeHtml(name)}</div><div class="file-meta"><span>${user}</span></div>`;
+            card.onclick = () => downloadFile(p.file);
+            filesGrid.appendChild(card);
+        });
     }
 }
 
-function createSharedCard(perm, index) {
-    const card = document.createElement('div');
-    card.className = 'file-card';
-    card.style.animationDelay = `${index * 0.1}s`;
-    card.style.cursor = 'pointer';
-    card.onclick = (e) => { if (!e.target.closest('.file-actions')) downloadFile(perm.file); };
-    const name = perm.file_name || `Файл #${perm.file}`;
-    const user = perm.user?.username || 'Неизвестно';
-    const badge = perm.permission === 'write' ? '<span style="background:#10B981;color:#fff;padding:2px 8px;border-radius:12px;font-size:0.75rem">✏️</span>' : '<span style="background:#6B7280;color:#fff;padding:2px 8px;border-radius:12px;font-size:0.75rem">👁️</span>';
-    card.innerHTML = `
-        <div class="file-icon">🔗</div>
-        <div class="file-name" title="${escapeHtml(name)}">${escapeHtml(name)}</div>
-        <div class="file-meta">${badge}<span>${user}</span></div>
-        <div class="file-actions"><button class="file-action-btn" onclick="event.stopPropagation();downloadFile(${perm.file})">⬇️</button></div>`;
-    return card;
-}
-
-// ✅ ЗАГРУЗКА ЛОГОВ
+// ✅ ЛОГИ
 async function loadLogs() {
     try {
+        hideLoading();
         const res = await fetch(`${API_BASE}/audit-logs/`, { headers: getAuthHeaders() });
         if (res.status === 200) {
             const data = await res.json();
-            const logs = data.results || data || [];
-            renderLogs(logs);
-        } else { showEmpty('Не удалось загрузить'); }
-    } catch (e) { console.error('❌ Load logs error:', e); showEmpty('Ошибка'); }
+            renderLogs(data.results || data || []);
+        } else { hideLoading(); showEmpty('Нет записей'); }
+    } catch (e) { console.error('Logs error:', e); hideLoading(); showEmpty('Ошибка'); }
 }
 
 function renderLogs(logs) {
@@ -1348,26 +768,20 @@ function renderLogs(logs) {
     hideEmpty();
     if (filesGrid) {
         filesGrid.innerHTML = '';
-        logs.forEach((l, i) => filesGrid.appendChild(createLogCard(l, i)));
+        const icons = { upload:'📤', download:'⬇️', delete:'🗑️', share:'🔗', login:'🔑', logout:'🚪' };
+        logs.forEach(l => {
+            const card = document.createElement('div');
+            card.className = 'file-card';
+            const icon = icons[l.action] || '📝';
+            const date = l.timestamp ? new Date(l.timestamp).toLocaleString('ru-RU') : '';
+            const user = l.user_username || l.user?.username || 'Система';
+            card.innerHTML = `<div class="file-icon">${icon}</div><div class="file-name">${escapeHtml(l.action)}</div><div class="file-meta"><span>${user}</span><span>${date}</span></div>`;
+            filesGrid.appendChild(card);
+        });
     }
 }
 
-function createLogCard(log, index) {
-    const card = document.createElement('div');
-    card.className = 'file-card';
-    card.style.animationDelay = `${index * 0.1}s`;
-    const icons = { upload: '📤', download: '⬇️', delete: '🗑️', share: '🔗', login: '🔑', logout: '🚪' };
-    const icon = icons[log.action] || '📝';
-    const date = log.timestamp ? new Date(log.timestamp).toLocaleString('ru-RU') : '';
-    const user = log.user_username || log.user?.username || 'Система';
-    card.innerHTML = `
-        <div class="file-icon">${icon}</div>
-        <div class="file-name">${escapeHtml(log.action)}</div>
-        <div class="file-meta"><span>${user}</span><span>${date}</span></div>
-        ${log.details ? `<div style="margin-top:0.5rem;font-size:0.75rem;color:var(--text-muted);">${escapeHtml(log.details)}</div>` : ''}`;
-    return card;
-}
-
+// ✅ УТИЛИТЫ
 function showLoading() {
     if (loadingState) { loadingState.classList.add('show'); loadingState.style.display = 'flex'; }
     if (emptyState) emptyState.classList.remove('show');
@@ -1394,17 +808,8 @@ function hideEmpty() {
     if (emptyState) { emptyState.classList.remove('show'); emptyState.style.display = 'none'; }
 }
 
-// ✅ НАСТРОЙКА СОБЫТИЙ
+// ✅ СОБЫТИЯ
 function setupEventListeners() {
-    if (uploadBtn) {
-        uploadBtn.onclick = () => {
-            if (currentView === 'files') { loadFoldersForDropdown(); showModal(uploadModal); }
-            else if (currentView === 'folders') { createFolder(); }
-            else if (currentView === 'documents' || currentView?.startsWith('section-')) {
-                currentView === 'documents' ? openCreateDocumentModal() : openCreateSectionTableModal(currentView.replace('section-', ''));
-            }
-        };
-    }
     if (logoutBtn) logoutBtn.onclick = logout;
     if (uploadForm) uploadForm.onsubmit = handleUpload;
     if (loginForm) loginForm.onsubmit = handleLogin;
@@ -1415,7 +820,7 @@ function setupEventListeners() {
     const tL = document.getElementById('toggleToLogin');
     if (tL) tL.onclick = (e) => { e.preventDefault(); showLoginModal(); };
 
-    navItems.forEach(item => {
+    if (navItems) navItems.forEach(item => {
         item.onclick = (e) => {
             e.preventDefault();
             const view = item.getAttribute('data-view');
@@ -1426,15 +831,4 @@ function setupEventListeners() {
     [uploadModal, loginModal, previewModal, documentModal, createDocumentModalEl].forEach(modal => {
         if (modal) modal.onclick = (e) => { if (e.target === modal) hideModal(modal); };
     });
-}
-
-// ✅ Toast уведомления
-function showToast(message) {
-    const toast = document.createElement('div');
-    toast.className = 'toast';
-    toast.textContent = message;
-    document.body.appendChild(toast);
-    setTimeout(() => {
-        toast.remove();
-    }, 3000);
 }
