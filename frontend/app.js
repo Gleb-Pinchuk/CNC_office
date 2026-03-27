@@ -1,10 +1,11 @@
-// ==================== CNC Office - Frontend App v21.0 ====================
+// ==================== CNC Office - Frontend App v22.0 ====================
 const API_BASE = '/api';
 let currentUser = null, currentFolder = null, currentView = 'files';
 let currentDocument = null, authToken = localStorage.getItem('cnc_auth_token');
 
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('🚀 App v21.0 initialized');
+    console.log('🚀 App v22.0 initialized');
+    console.log('🔍 Luckysheet loaded:', typeof window.luckysheet !== 'undefined');
     setupEventListeners();
     checkAuth();
 });
@@ -343,17 +344,19 @@ function renderDocuments(docs) {
 }
 
 async function openDocument(docId) {
+    console.log('📄 Opening document:', docId);
     try {
         const res = await fetch(`${API_BASE}/documents/${docId}/`, { headers: getAuthHeaders() });
         if (res.ok) {
             currentDocument = await res.json();
+            console.log('📄 Document loaded:', currentDocument);
             showDocumentEditor(currentDocument);
         } else { alert('Ошибка открытия'); }
     } catch (e) { console.error('Open error:', e); alert('Ошибка: ' + e.message); }
 }
 
 function showDocumentEditor(doc) {
-    console.log('📝 Opening:', doc.title);
+    console.log('📝 Opening editor:', doc.title);
     const title = document.getElementById('documentTitle');
     if (title) title.textContent = doc.title || 'Таблица';
     currentDocument = doc;
@@ -372,12 +375,17 @@ function showDocumentEditor(doc) {
             container.style.height = 'calc(100vh - 60px)';
             container.style.width = '100%';
         }
-        if (doc.doc_type === 'spreadsheet') initLuckysheet(doc);
+        if (doc.doc_type === 'spreadsheet') {
+            console.log('📊 Calling initLuckysheet');
+            initLuckysheet(doc);
+        }
     }, 300);
 }
 
 function initLuckysheet(doc) {
     console.log('🔍 [LUCKY] init start');
+    console.log('🔍 [LUCKY] window.luckysheet:', typeof window.luckysheet);
+
     const container = document.getElementById('luckysheet-container');
     if (!container) { console.error('❌ Container not found'); return; }
     if (typeof window.luckysheet === 'undefined') {
@@ -394,26 +402,46 @@ function initLuckysheet(doc) {
         setTimeout(() => {
             let sheetData = doc.content?.luckysheet;
             if (!sheetData || !Array.isArray(sheetData) || sheetData.length === 0) {
+                console.log('🔍 [LUCKY] Creating empty sheet');
                 sheetData = [{
-                    name: 'Sheet1', status: '1', order: '0',
+                    name: 'Sheet1',
+                    status: '1',
+                    order: '0',
                     data: Array(50).fill(null).map(() => Array(30).fill(null)),
-                    rowCount: 50, columnCount: 30
+                    rowCount: 50,
+                    columnCount: 30
                 }];
             }
+
+            console.log('🔍 [LUCKY] Creating with data:', sheetData);
 
             window.luckysheet.create({
                 container: 'luckysheet-container',
                 lang: 'ru',
                 data: sheetData,
                 showtoolbar: true,
-                showtoolbarConfig: { undoRedo: true, image: false, print: false, exportXlsx: true }
+                showtoolbarConfig: {
+                    undoRedo: true,
+                    image: false,
+                    print: false,
+                    exportXlsx: true
+                }
             });
-            console.log('✅ [LUCKY] created');
-            setTimeout(() => { if (window.luckysheet?.refresh) window.luckysheet.refresh(); }, 200);
+            console.log('✅ [LUCKY] created successfully');
+
+            setTimeout(() => {
+                if (window.luckysheet?.refresh) {
+                    window.luckysheet.refresh();
+                    console.log('✅ [LUCKY] refreshed');
+                }
+            }, 200);
         }, 100);
     } catch (e) {
         console.error('❌ [LUCKY] error:', e);
-        container.innerHTML = `<div style="padding:2rem;color:#fff;">⚠️ ${e.message}</div>`;
+        console.error('❌ [LUCKY] stack:', e.stack);
+        if (container) {
+            container.innerHTML = `<div style="padding:2rem;color:#fff;">⚠️ ${e.message}</div>`;
+        }
     }
 }
 
@@ -427,6 +455,7 @@ async function saveDocumentSilent() {
             body: JSON.stringify({ content: { luckysheet: sheetData } })
         });
         currentDocument.content = { luckysheet: sheetData };
+        console.log('✅ Saved silently');
     } catch (e) { console.error('Save error:', e); }
 }
 
@@ -438,8 +467,10 @@ async function saveDocument() {
             method: 'POST', headers: getAuthHeaders(),
             body: JSON.stringify({ content: { luckysheet: sheetData } })
         });
-        if (res.ok) { currentDocument.content = { luckysheet: sheetData }; alert('✅ Сохранено'); }
-        else alert('Ошибка сохранения');
+        if (res.ok) {
+            currentDocument.content = { luckysheet: sheetData };
+            alert('✅ Сохранено');
+        } else { alert('Ошибка сохранения'); }
     } catch (e) { alert('Ошибка подключения'); }
 }
 
@@ -459,6 +490,7 @@ async function exportToExcel() {
         const a = document.createElement('a'); a.href = url; a.download = `${currentDocument?.title||'table'}.csv`;
         document.body.appendChild(a); a.click(); document.body.removeChild(a);
         URL.revokeObjectURL(url);
+        console.log('✅ Exported to CSV');
     } catch (e) { alert('Ошибка экспорта'); }
 }
 

@@ -5,14 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CNC Office — Облачное хранилище</title>
 
-    <!-- ✅ 1. jQuery (ОБЯЗАТЕЛЬНО ПЕРВЫМ!) -->
+    <!-- ✅ 1. jQuery (ПЕРВЫМ!) -->
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 
     <!-- ✅ 2. Luckysheet CSS -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/luckysheet/dist/css/luckysheet.css" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/luckysheet/dist/assets/iconfont/iconfont.css" />
 
-    <!-- ✅ 3. Luckysheet JS (БЕЗ plugin.js - он вызывает ошибку!) -->
+    <!-- ✅ 3. Luckysheet JS (ТОЛЬКО ОСНОВНОЙ ФАЙЛ - БЕЗ plugin.js!) -->
     <script src="https://cdn.jsdelivr.net/npm/luckysheet/dist/luckysheet.umd.js"></script>
 
     <style>
@@ -44,6 +44,7 @@
             height: calc(100vh - 60px);
             margin: 0;
             padding: 0;
+            display: none;
         }
 
         .app { display: flex; min-height: 100vh; }
@@ -305,7 +306,7 @@
         </div>
     </div>
 
-    <!-- ✅ app.js v21.0 -->
-    <script src="/static/app.js?v=21.0"></script>
+    <!-- ✅ app.js v22.0 -->
+    <script src="/static/app.js?v=22.0"></script>
 </body>
 </html>
