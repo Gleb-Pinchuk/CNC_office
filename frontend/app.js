@@ -667,32 +667,63 @@ async function openDocument(docId) {
 }
 
 function showDocumentEditor(doc) {
-    console.log('📝 Opening document:', doc.title, doc.doc_type);
+    console.log('📝 [DEBUG] showDocumentEditor called');
+    console.log('📝 [DEBUG] doc:', doc);
+    console.log('📝 [DEBUG] doc.doc_type:', doc?.doc_type);
+
     const title = document.getElementById('documentTitle');
-    if (!title) return;
-    title.textContent = doc.title;
+    if (title) title.textContent = doc.title || 'Таблица';
+
     currentDocument = doc;
+
+    // Показываем модалку
     showModal('documentModal');
+    console.log('📝 [DEBUG] showModal called');
+
+    // Ждём пока модалка отрисуется
     setTimeout(() => {
-        if (doc.doc_type === 'spreadsheet') { initLuckysheet(doc); }
-        else { initTextEditor(doc); }
-    }, 300);
+        console.log('📝 [DEBUG] setTimeout triggered');
+        console.log('📝 [DEBUG] window.luckysheet:', typeof window.luckysheet);
+        console.log('📝 [DEBUG] container:', document.getElementById('luckysheet-container'));
+
+        const container = document.getElementById('luckysheet-container');
+        if (container) {
+            console.log('📝 [DEBUG] container.style.display:', container.style.display);
+            container.style.display = 'block';
+            container.style.height = 'calc(100vh - 60px)';
+        }
+
+        if (doc.doc_type === 'spreadsheet') {
+            console.log('📝 [DEBUG] Calling initLuckysheet...');
+            initLuckysheet(doc);
+        } else {
+            console.log('📝 [DEBUG] Calling initTextEditor...');
+            initTextEditor(doc);
+        }
+    }, 500); // Увеличил задержку для надёжности
 }
 
-// ✅ ИНИЦИАЛИЗАЦИЯ LUCKYSHEET
 function initLuckysheet(doc) {
-    console.log('🔍 initLuckysheet called');
+    console.log('🔍 [LUCKYSHEET] initLuckysheet START');
+
     const container = document.getElementById('luckysheet-container');
-    if (!container) { console.error('❌ Container not found'); return; }
-    if (typeof window.luckysheet === 'undefined') {
-        console.error('❌ Luckysheet not loaded');
-        container.innerHTML = '<div style="padding:2rem;color:#000;">⚠️ Редактор не загрузился. Проверьте подключение к интернету.</div>';
+    if (!container) {
+        console.error('❌ [LUCKYSHEET] Container #luckysheet-container NOT FOUND');
         return;
     }
+    console.log('🔍 [LUCKYSHEET] Container found:', container);
+
+    if (typeof window.luckysheet === 'undefined') {
+        console.error('❌ [LUCKYSHEET] window.luckysheet is UNDEFINED');
+        container.innerHTML = '<div style="padding:2rem;color:#fff;">⚠️ Luckysheet не загружен</div>';
+        return;
+    }
+    console.log('🔍 [LUCKYSHEET] Luckysheet object exists');
 
     try {
         container.innerHTML = '';
         container.style.display = 'block';
+        container.style.height = 'calc(100vh - 60px)';
 
         let sheetData = doc.content?.luckysheet;
         if (!sheetData || !Array.isArray(sheetData) || sheetData.length === 0) {
