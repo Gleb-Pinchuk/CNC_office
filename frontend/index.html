@@ -45,6 +45,7 @@
             height: calc(100vh - 120px);
             margin: 0;
             padding: 0;
+            display: none; /* Скрыт по умолчанию, показывается при открытии таблицы */
         }
 
         /* ✅ Стили интерфейса */
@@ -59,6 +60,7 @@
             position: fixed;
             height: 100vh;
             overflow-y: auto;
+            z-index: 100;
         }
         .main {
             flex: 1;
@@ -83,6 +85,7 @@
             border-radius: 8px;
             margin-bottom: 0.25rem;
             transition: all 0.2s;
+            cursor: pointer;
         }
         .nav-item:hover, .nav-item.active {
             background: var(--accent);
@@ -266,13 +269,174 @@
     </style>
 </head>
 <body>
-    <!-- ✅ Здесь будет контент приложения -->
-    <div id="app"></div>
+    <!-- ✅ Основной контейнер приложения -->
+    <div class="app">
+        <!-- ✅ Боковая панель -->
+        <aside class="sidebar">
+            <div class="logo">🔧 CNC Office</div>
+            <nav>
+                <a class="nav-item active" data-view="files">📁 Мои файлы</a>
+                <a class="nav-item" data-view="folders">📂 Папки</a>
+                <a class="nav-item" data-view="documents">📄 Документы</a>
+                <a class="nav-item" data-view="section-attendance">📊 Посещаемость</a>
+                <a class="nav-item" data-view="section-rangers">🤖 Рейнджеры</a>
+                <a class="nav-item" data-view="section-statements">📋 Ведомости</a>
+                <a class="nav-item" data-view="shared">🔗 Общий доступ</a>
+                <a class="nav-item" data-view="logs">📋 Журнал</a>
+            </nav>
+            <div style="margin-top: auto; padding-top: 1rem; border-top: 1px solid var(--border);">
+                <div class="user-info">
+                    <span>👤 <span id="username">Гость</span></span>
+                    <button class="btn btn-outline" id="logoutBtn" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;">Выйти</button>
+                </div>
+            </div>
+        </aside>
 
-    <!-- ✅ Luckysheet контейнер -->
+        <!-- ✅ Основной контент -->
+        <main class="main">
+            <div class="header">
+                <h1 id="pageTitle">Мои файлы</h1>
+                <div class="header-actions">
+                    <button class="btn" id="uploadBtn">📤 Загрузить файл</button>
+                </div>
+            </div>
+
+            <!-- ✅ Состояния -->
+            <div class="loading" id="loadingState">
+                <div style="font-size: 2rem;">⏳</div>
+                <p>Загрузка...</p>
+            </div>
+            <div class="empty" id="emptyState" style="display: none;">
+                <div style="font-size: 3rem;">📭</div>
+                <p>Нет данных</p>
+            </div>
+
+            <!-- ✅ Сетка файлов/папок -->
+            <div class="files-grid" id="filesGrid"></div>
+        </main>
+    </div>
+
+    <!-- ✅ Luckysheet контейнер (для редактора таблиц) -->
     <div id="luckysheet-container"></div>
 
-    <!-- ✅ Подключаем app.js -->
-    <script src="app.js"></script>
+    <!-- ✅ Модальные окна -->
+
+    <!-- Загрузка файла -->
+    <div class="modal" id="uploadModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>📤 Загрузить файл</h3>
+                <button class="modal-close" onclick="hideModal('uploadModal')">&times;</button>
+            </div>
+            <form id="uploadForm">
+                <div class="form-group">
+                    <label>Файл</label>
+                    <input type="file" id="fileInput" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label>Папка (необязательно)</label>
+                    <select id="folderSelect" class="form-control">
+                        <option value="">Корневая папка</option>
+                    </select>
+                </div>
+                <button type="submit" class="btn" style="width: 100%;">Загрузить</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Логин / Регистрация -->
+    <div class="modal" id="loginModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>🔐 Вход</h3>
+                <button class="modal-close" onclick="hideModal('loginModal')">&times;</button>
+            </div>
+
+            <!-- Форма входа -->
+            <form id="loginForm">
+                <div class="form-group">
+                    <label>Имя пользователя</label>
+                    <input type="text" id="loginUsername" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label>Пароль</label>
+                    <input type="password" id="loginPassword" class="form-control" required>
+                </div>
+                <button type="submit" class="btn" style="width: 100%;">Войти</button>
+                <p style="text-align: center; margin-top: 1rem; color: var(--text-secondary);">
+                    Нет аккаунта? <a href="#" id="toggleToRegister" style="color: var(--accent);">Зарегистрироваться</a>
+                </p>
+            </form>
+
+            <!-- Форма регистрации (скрыта) -->
+            <form id="registerForm" class="hidden">
+                <div class="form-group">
+                    <label>Имя пользователя</label>
+                    <input type="text" id="registerUsername" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" id="registerEmail" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label>Пароль</label>
+                    <input type="password" id="registerPassword" class="form-control" required minlength="8">
+                </div>
+                <div class="form-group">
+                    <label>Повторите пароль</label>
+                    <input type="password" id="registerPassword2" class="form-control" required>
+                </div>
+                <button type="submit" class="btn" style="width: 100%;">Зарегистрироваться</button>
+                <p style="text-align: center; margin-top: 1rem; color: var(--text-secondary);">
+                    Уже есть аккаунт? <a href="#" id="toggleToLogin" style="color: var(--accent);">Войти</a>
+                </p>
+            </form>
+        </div>
+    </div>
+
+    <!-- Предпросмотр файла -->
+    <div class="modal" id="previewModal">
+        <div class="modal-content" style="max-width: 800px; width: 95%;">
+            <div class="modal-header">
+                <h3 id="previewTitle">Предпросмотр</h3>
+                <button class="modal-close" onclick="hideModal('previewModal')">&times;</button>
+            </div>
+            <div id="previewContent" style="min-height: 200px;"></div>
+        </div>
+    </div>
+
+    <!-- Редактор документа/таблицы -->
+    <div class="modal" id="documentModal" style="width: 100%; height: 100%; max-width: none; max-height: none; padding: 0;">
+        <div class="modal-content" style="width: 100%; height: 100%; max-width: none; max-height: none; border-radius: 0; padding: 0; display: flex; flex-direction: column;">
+            <div class="modal-header" style="margin: 0; padding: 0.75rem 1rem; border-radius: 0;">
+                <h3 id="documentTitle" style="margin: 0;">Таблица</h3>
+                <div style="display: flex; gap: 0.5rem;">
+                    <button class="btn btn-outline" onclick="exportToExcel()">📤 Excel</button>
+                    <button class="btn" onclick="saveDocument()">💾 Сохранить</button>
+                    <button class="modal-close" onclick="hideModal('documentModal')">&times;</button>
+                </div>
+            </div>
+            <!-- Контейнер для Luckysheet или текстового редактора -->
+            <div id="handsontable-container" style="flex: 1; min-height: 0;"></div>
+        </div>
+    </div>
+
+    <!-- Создание документа -->
+    <div class="modal" id="createDocumentModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>📄 Создать таблицу</h3>
+                <button class="modal-close" onclick="hideModal('createDocumentModal')">&times;</button>
+            </div>
+            <div class="form-group">
+                <label>Название</label>
+                <input type="text" id="newDocTitle" class="form-control" placeholder="Моя таблица">
+            </div>
+            <button class="btn" onclick="createDocument()" style="width: 100%;">Создать</button>
+        </div>
+    </div>
+
+    <!-- ✅ Подключаем app.js через /static/ -->
+    <script src="/static/app.js?v=19.0"></script>
 </body>
 </html>
