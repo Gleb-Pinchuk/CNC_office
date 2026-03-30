@@ -1,4 +1,4 @@
-// ==================== CNC Office - Frontend App v18.8 (Full Fixed) ====================
+// ==================== CNC Office - Frontend App v18.9 (Full Fixed) ====================
 const API_BASE = '/api';
 let currentUser = null;
 let currentFolder = null;
@@ -29,7 +29,7 @@ const navItems = document.querySelectorAll('.nav-item');
 
 // ✅ Инициализация
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('🚀 App initialized v18.8');
+    console.log('🚀 App initialized v18.9');
     setupEventListeners();
     checkAuth();
 });
@@ -780,8 +780,9 @@ function initHandsontable(doc) {
             dropdownMenu: false,
             filters: true,
             columnSorting: true,
-            manualColumnResize: true,
-            manualRowResize: true,
+            // Disabled due unstable behavior in this bundled build after resize.
+            manualColumnResize: false,
+            manualRowResize: false,
             manualColumnMove: true,
             manualRowMove: true,
             copyPaste: { pasteMode: 'overwrite', rowsLimit: 1000, columnsLimit: 50 },
@@ -810,7 +811,11 @@ function initHandsontable(doc) {
             preventOverflow: 'horizontal',
             afterRender: () => {
                 console.log('✅ Handsontable rendered');
-            }
+            },
+            afterOnCellMouseDown: () => {
+                // Keep focus in editor to avoid "can't edit by mouse" state.
+                hotInstance.listen();
+            },
         });
         setTimeout(() => {
             if (hotInstance) {
@@ -882,16 +887,19 @@ function setSelectionAlign(align) {
 
 function undoTableEdit() {
     if (!hotInstance) return;
+    hotInstance.listen();
     hotInstance.undo();
 }
 
 function redoTableEdit() {
     if (!hotInstance) return;
+    hotInstance.listen();
     hotInstance.redo();
 }
 
 function insertRowBelow() {
     if (!hotInstance) return;
+    hotInstance.listen();
     const sel = hotInstance.getSelectedLast();
     const row = sel ? Math.max(0, sel[2]) : hotInstance.countRows() - 1;
     hotInstance.alter('insert_row_below', row, 1);
@@ -899,6 +907,7 @@ function insertRowBelow() {
 
 function insertColRight() {
     if (!hotInstance) return;
+    hotInstance.listen();
     const sel = hotInstance.getSelectedLast();
     const col = sel ? Math.max(0, sel[3]) : hotInstance.countCols() - 1;
     hotInstance.alter('insert_col_start', col + 1, 1);

@@ -36,6 +36,7 @@
             margin: 0.5vh 0.5vw;
             display: flex;
             flex-direction: column;
+            z-index: 2101 !important;
         }
         #documentModal .modal-header { flex-shrink: 0; }
         #documentModal .modal-body {
@@ -48,11 +49,39 @@
 
         {# ✅ Убираем pointer-events хак: он ломает клики в Handsontable #}
         #documentModal { pointer-events: auto !important; }
-        #documentModal .modal-backdrop { pointer-events: auto !important; }
-        #documentModal .modal-content { z-index: 1050 !important; }
+        #documentModal .modal-backdrop { pointer-events: auto !important; z-index: 2100 !important; }
         #documentModal .modal-body { z-index: 10 !important; }
-        #handsontable-container { z-index: 20 !important; }
-        #handsontable-container .handsontable { z-index: 30 !important; }
+        #handsontable-container {
+            z-index: 20 !important;
+            pointer-events: auto !important;
+        }
+        #handsontable-container .handsontable,
+        #handsontable-container .wtHolder,
+        #handsontable-container .wtHider,
+        #handsontable-container .wtSpreader,
+        #handsontable-container table.htCore,
+        #handsontable-container table.htCore td,
+        #handsontable-container table.htCore th {
+            z-index: 30 !important;
+            pointer-events: auto !important;
+        }
+
+        .sheet-ribbon {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            margin-right: 10px;
+        }
+        .sheet-ribbon-tabs,
+        .sheet-ribbon-tools {
+            display: inline-flex;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+        .sheet-ribbon .btn.btn-sm {
+            padding: 0.45rem 0.75rem;
+            border-radius: 0.6rem;
+        }
     </style>
 </head>
 <body>
@@ -275,17 +304,24 @@
             <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;padding:0.5rem 1rem;">
                 <h2 id="documentTitle" style="margin:0;font-size:1.1rem;">Редактор</h2>
                 <div>
-                    <span class="btn-group" style="margin-right:10px;display:inline-flex;gap:6px;vertical-align:middle;">
-                        <button class="btn btn-secondary btn-sm" onclick="undoTableEdit()" title="Отменить">Отменить</button>
-                        <button class="btn btn-secondary btn-sm" onclick="redoTableEdit()" title="Повторить">Повтор</button>
-                        <button class="btn btn-secondary btn-sm" onclick="toggleSelectionBold()" title="Жирный">Жирный</button>
-                        <button class="btn btn-secondary btn-sm" onclick="toggleSelectionItalic()" title="Курсив">Курсив</button>
-                        <button class="btn btn-secondary btn-sm" onclick="setSelectionAlign('left')" title="По левому краю">Влево</button>
-                        <button class="btn btn-secondary btn-sm" onclick="setSelectionAlign('center')" title="По центру">Центр</button>
-                        <button class="btn btn-secondary btn-sm" onclick="setSelectionAlign('right')" title="По правому краю">Вправо</button>
-                        <button class="btn btn-secondary btn-sm" onclick="insertRowBelow()" title="Вставить строку ниже">Строка +</button>
-                        <button class="btn btn-secondary btn-sm" onclick="insertColRight()" title="Вставить столбец справа">Столбец +</button>
-                    </span>
+                    <div class="sheet-ribbon" aria-label="Панель инструментов таблицы">
+                        <div class="sheet-ribbon-tabs">
+                            <button class="btn btn-secondary btn-sm">Главная</button>
+                            <button class="btn btn-secondary btn-sm">Вставка</button>
+                            <button class="btn btn-secondary btn-sm">Данные</button>
+                        </div>
+                        <div class="sheet-ribbon-tools">
+                            <button class="btn btn-secondary btn-sm" onclick="undoTableEdit()" title="Отменить">Отменить</button>
+                            <button class="btn btn-secondary btn-sm" onclick="redoTableEdit()" title="Повторить">Повтор</button>
+                            <button class="btn btn-secondary btn-sm" onclick="toggleSelectionBold()" title="Жирный">Жирный</button>
+                            <button class="btn btn-secondary btn-sm" onclick="toggleSelectionItalic()" title="Курсив">Курсив</button>
+                            <button class="btn btn-secondary btn-sm" onclick="setSelectionAlign('left')" title="По левому краю">Влево</button>
+                            <button class="btn btn-secondary btn-sm" onclick="setSelectionAlign('center')" title="По центру">Центр</button>
+                            <button class="btn btn-secondary btn-sm" onclick="setSelectionAlign('right')" title="По правому краю">Вправо</button>
+                            <button class="btn btn-secondary btn-sm" onclick="insertRowBelow()" title="Вставить строку ниже">Строка +</button>
+                            <button class="btn btn-secondary btn-sm" onclick="insertColRight()" title="Вставить столбец справа">Столбец +</button>
+                        </div>
+                    </div>
                     <button class="btn btn-secondary btn-sm" onclick="shareCurrentDocument()" style="margin-right:8px;">🔗 Поделиться</button>
                     <button class="btn btn-success btn-sm" onclick="exportToExcel()" style="margin-right:8px;">📥 Excel</button>
                     <button class="btn btn-primary btn-sm" onclick="saveDocument()">💾 Сохранить</button>
@@ -322,6 +358,6 @@
 
     {# ✅ Все пути к JS #}
     <script src="{% static 'vendor/univer/handsontable.js' %}"></script>
-    <script src="{% static 'app.js' %}?v=18.8"></script>
+    <script src="{% static 'app.js' %}?v=18.9"></script>
 </body>
 </html>
