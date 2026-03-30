@@ -1,4 +1,4 @@
-// ==================== CNC Office - Frontend App v11.0 (Jspreadsheet) ====================
+// ==================== CNC Office - Frontend App v11.1 (Jspreadsheet) ====================
 const API_BASE = '/api';
 let currentUser = null;
 let currentFolder = null;
@@ -26,7 +26,7 @@ const folderSelect = document.getElementById('folderSelect');
 const navItems = document.querySelectorAll('.nav-item');
 
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('🚀 App initialized v11.0 with Jspreadsheet');
+    console.log('🚀 App initialized v11.1 with Jspreadsheet');
     setupEventListeners();
     checkAuth();
 });
