@@ -4,6 +4,7 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from datetime import timedelta
 from django.db import models
+from django.db.models import Count
 from django.contrib.auth import get_user_model
 from django.http import FileResponse
 from rest_framework import viewsets, permissions, status
@@ -256,7 +257,8 @@ class StorageFolderViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        return StorageFolder.objects.filter(owner=user).order_by('name')
+        # Annotate counts to avoid N+1 queries in serializer.
+        return StorageFolder.objects.filter(owner=user).annotate(files_count=Count('files')).order_by('name')
 
     def get_serializer_context(self):
         context = super().get_serializer_context()

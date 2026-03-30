@@ -35,6 +35,9 @@ class StorageFolderSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'owner', 'created_at', 'files_count']
 
     def get_files_count(self, obj):
+        # If view annotated `files_count`, use it directly to prevent N+1 queries.
+        if hasattr(obj, '__dict__') and 'files_count' in obj.__dict__:
+            return obj.__dict__['files_count']
         return obj.files.count()
 
 

@@ -232,17 +232,41 @@ function initJspreadsheet(doc) {
     const container = document.getElementById('jspreadsheet-container');
     if (!container) { console.error('❌ Container not found'); return; }
 
+    // Clean up previous editor instance (when switching documents)
+    if (jspreadsheetInstance && typeof jspreadsheetInstance.destroy === 'function') {
+        try { jspreadsheetInstance.destroy(); } catch (e) {}
+    }
+    jspreadsheetInstance = null;
+    container.innerHTML = '';
+
     if (typeof jspreadsheet === 'undefined') {
         console.error('❌ Jspreadsheet not loaded');
         container.innerHTML = '<div style="padding:2rem;color:#000;">⚠️ Редактор не загрузился</div>';
         return;
     }
 
-    container.innerHTML = '';
-
     try {
-        let data = doc.content?.jspreadsheet;
-        if (!data || !Array.isArray(data)) {
+        // Normalize spreadsheet data into a 2D array:
+        // - backend: { content: { jspreadsheet: [...] } }
+        // - sometimes it may arrive as JSON string or nested object
+        let raw = doc?.content?.jspreadsheet;
+
+        if (typeof raw === 'string') {
+            try { raw = JSON.parse(raw); } catch (e) {}
+        }
+
+        if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+            if (Array.isArray(raw.data)) raw = raw.data;
+            else if (Array.isArray(raw.cells)) raw = raw.cells;
+        }
+
+        const minRows = 3;
+        const minCols = 10;
+
+        let data = Array.isArray(raw) ? raw : null;
+
+        if (!data || data.length === 0) {
+            // Fallback template to avoid "empty sheet" feeling.
             data = [
                 ['A1', 'B1', 'C1'],
                 ['A2', 'B2', 'C2'],
@@ -250,15 +274,28 @@ function initJspreadsheet(doc) {
             ];
         }
 
+        // Detect real column count from existing data
+        let detectedCols = 0;
+        for (const row of data) {
+            if (Array.isArray(row)) detectedCols = Math.max(detectedCols, row.length);
+        }
+
+        const cols = Math.max(detectedCols, minCols);
+        const rows = Math.max((data?.length || 0), minRows);
+
+        // Make the grid rectangular and safe for jspreadsheet
+        const normalized = Array.from({ length: rows }, (_, r) => {
+            const row = Array.isArray(data[r]) ? data[r] : [];
+            return Array.from({ length: cols }, (_, c) => row[c] ?? '');
+        });
+
+        const columns = Array.from({ length: cols }, () => ({ type: 'text', width: 120 }));
+
         jspreadsheetInstance = jspreadsheet(container, {
-            data: data,
-            columns: [
-                { type: 'text', width: 120 },
-                { type: 'text', width: 120 },
-                { type: 'text', width: 120 },
-            ],
+            data: normalized,
+            columns: columns,
             language: 'ru',
-            minDimensions: [3, 10],
+            minDimensions: [minRows, minCols],
         });
 
         console.log('✅ Jspreadsheet created');
