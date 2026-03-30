@@ -1,4 +1,4 @@
-// ==================== CNC Office - Frontend App v18.9 (Full Fixed) ====================
+// ==================== CNC Office - Frontend App v19.0 (Custom Sheet Editor) ====================
 const API_BASE = '/api';
 let currentUser = null;
 let currentFolder = null;
@@ -7,6 +7,7 @@ let currentDocument = null;
 let currentSectionType = null;
 let authToken = localStorage.getItem('cnc_auth_token');
 let hotInstance = null;
+let sheetEditor = null;
 
 // DOM Elements
 const filesGrid = document.getElementById('filesGrid');
@@ -29,7 +30,7 @@ const navItems = document.querySelectorAll('.nav-item');
 
 // ✅ Инициализация
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('🚀 App initialized v18.9');
+    console.log('🚀 App initialized v19.0');
     setupEventListeners();
     checkAuth();
 });
@@ -87,10 +88,7 @@ function showModal(modal) {
         el.style.display = 'flex';
         document.body.style.overflow = 'hidden';
         setTimeout(() => {
-            if (hotInstance) {
-                hotInstance.render();
-                hotInstance.refreshDimensions();
-            }
+            if (sheetEditor) sheetEditor.focus();
         }, 100);
     }
 }
@@ -100,7 +98,8 @@ function hideModal(modal) {
     const el = typeof modal === 'string' ? document.getElementById(modal) : modal;
     if (el) {
         if (el.id === 'documentModal') {
-            if (currentDocument && hotInstance) saveDocumentSilent();
+            if (currentDocument && (hotInstance || sheetEditor)) saveDocumentSilent();
+            if (sheetEditor) { sheetEditor.destroy(); sheetEditor = null; }
             if (hotInstance) { hotInstance.destroy(); hotInstance = null; }
             currentDocument = null;
         }
@@ -505,13 +504,13 @@ function showPreviewModal(file) {
 
 // ✅ ЭКСПОРТ В EXCEL (CSV)
 async function exportToExcel() {
-    if (!hotInstance || !currentDocument) {
+    if ((!hotInstance && !sheetEditor) || !currentDocument) {
         alert('Нет данных для экспорта');
         return;
     }
     try {
-        const data = hotInstance.getData();
-        const headers = hotInstance.getColHeader();
+        const data = sheetEditor ? sheetEditor.export().data : hotInstance.getData();
+        const headers = data[0] ? data[0].map((_, i) => String.fromCharCode(65 + (i % 26))) : [];
         let csv = [];
         if (headers && headers.length > 0) {
             csv.push(headers.map(h => `"${h || ''}"`).join(';'));
@@ -697,220 +696,222 @@ function showDocumentEditor(doc) {
     }, 400);
 }
 
-// ✅ ИНИЦИАЛИЗАЦИЯ HANDSONTABLE (ИСПРАВЛЕНО: русский язык, кликабельные ячейки)
+class CustomSheetEditor {
+    constructor(container, payload) {
+        this.container = container;
+        this.undoStack = [];
+        this.redoStack = [];
+        this.selection = { r1: 0, c1: 0, r2: 0, c2: 0 };
+        this.isSelecting = false;
+
+        const data = Array.isArray(payload?.data) ? payload.data : [];
+        const rows = Math.max(payload?.rows || data.length || 20, 20);
+        let detectedCols = payload?.cols || 0;
+        for (const row of data) if (Array.isArray(row)) detectedCols = Math.max(detectedCols, row.length);
+        const cols = Math.max(detectedCols || 10, 10);
+
+        this.data = Array.from({ length: rows }, (_, r) => {
+            const row = Array.isArray(data[r]) ? data[r] : [];
+            return Array.from({ length: cols }, (_, c) => String(row[c] ?? ''));
+        });
+        this.styles = payload?.styles && typeof payload.styles === 'object' ? payload.styles : {};
+        this.render();
+    }
+
+    _cellKey(r, c) { return `${r}:${c}`; }
+    _colName(idx) {
+        let n = idx;
+        let s = '';
+        while (n >= 0) { s = String.fromCharCode((n % 26) + 65) + s; n = Math.floor(n / 26) - 1; }
+        return s;
+    }
+    _normalizeSelection() {
+        const { r1, c1, r2, c2 } = this.selection;
+        return { r1: Math.min(r1, r2), r2: Math.max(r1, r2), c1: Math.min(c1, c2), c2: Math.max(c1, c2) };
+    }
+    _pushUndo() {
+        this.undoStack.push(JSON.stringify({ data: this.data, styles: this.styles }));
+        if (this.undoStack.length > 50) this.undoStack.shift();
+        this.redoStack = [];
+    }
+    _applySnapshot(snapshot) {
+        const parsed = JSON.parse(snapshot);
+        this.data = parsed.data || this.data;
+        this.styles = parsed.styles || {};
+        this.render();
+    }
+    _setSelection(r, c, keepAnchor = false) {
+        if (!keepAnchor) { this.selection = { r1: r, c1: c, r2: r, c2: c }; }
+        else { this.selection.r2 = r; this.selection.c2 = c; }
+        this._paintSelection();
+    }
+    _forEachSelectedCell(cb) {
+        const s = this._normalizeSelection();
+        for (let r = s.r1; r <= s.r2; r++) for (let c = s.c1; c <= s.c2; c++) cb(r, c);
+    }
+    _paintSelection() {
+        this.container.querySelectorAll('.sheet-cell').forEach(el => el.classList.remove('selected'));
+        const s = this._normalizeSelection();
+        this._forEachSelectedCell((r, c) => {
+            const el = this.container.querySelector(`[data-r="${r}"][data-c="${c}"]`);
+            if (el) el.classList.add('selected');
+        });
+    }
+    _applyCellStyle(el, styleObj) {
+        el.style.fontWeight = styleObj?.bold ? '700' : '400';
+        el.style.fontStyle = styleObj?.italic ? 'italic' : 'normal';
+        el.style.textAlign = styleObj?.align || 'left';
+    }
+
+    render() {
+        const rows = this.data.length;
+        const cols = this.data[0]?.length || 0;
+        let html = '<div class="sheet-wrap"><table class="sheet-table"><thead><tr><th class="corner"></th>';
+        for (let c = 0; c < cols; c++) html += `<th>${this._colName(c)}</th>`;
+        html += '</tr></thead><tbody>';
+        for (let r = 0; r < rows; r++) {
+            html += `<tr><th>${r + 1}</th>`;
+            for (let c = 0; c < cols; c++) {
+                html += `<td class="sheet-cell" contenteditable="true" data-r="${r}" data-c="${c}">${escapeHtml(this.data[r][c])}</td>`;
+            }
+            html += '</tr>';
+        }
+        html += '</tbody></table></div>';
+        this.container.innerHTML = html;
+
+        this.container.querySelectorAll('.sheet-cell').forEach((cell) => {
+            const r = Number(cell.dataset.r); const c = Number(cell.dataset.c);
+            const styleObj = this.styles[this._cellKey(r, c)] || {};
+            this._applyCellStyle(cell, styleObj);
+
+            cell.addEventListener('focus', () => this._setSelection(r, c));
+            cell.addEventListener('mousedown', (e) => { e.preventDefault(); this.isSelecting = true; this._setSelection(r, c); cell.focus(); });
+            cell.addEventListener('mouseenter', () => { if (this.isSelecting) this._setSelection(r, c, true); });
+            cell.addEventListener('input', () => { this.data[r][c] = cell.textContent || ''; });
+            cell.addEventListener('blur', () => { this.data[r][c] = cell.textContent || ''; });
+        });
+        document.addEventListener('mouseup', () => { this.isSelecting = false; }, { once: true });
+        this._paintSelection();
+    }
+
+    focus() {
+        const s = this._normalizeSelection();
+        const el = this.container.querySelector(`[data-r="${s.r1}"][data-c="${s.c1}"]`);
+        if (el) el.focus();
+    }
+    destroy() { this.container.innerHTML = ''; }
+    export() { return { rows: this.data.length, cols: this.data[0]?.length || 0, data: this.data, styles: this.styles }; }
+
+    toggleBold() {
+        this._pushUndo();
+        this._forEachSelectedCell((r, c) => {
+            const k = this._cellKey(r, c);
+            const s = { ...(this.styles[k] || {}) };
+            s.bold = !s.bold;
+            this.styles[k] = s;
+        });
+        this.render();
+    }
+    toggleItalic() {
+        this._pushUndo();
+        this._forEachSelectedCell((r, c) => {
+            const k = this._cellKey(r, c);
+            const s = { ...(this.styles[k] || {}) };
+            s.italic = !s.italic;
+            this.styles[k] = s;
+        });
+        this.render();
+    }
+    setAlign(align) {
+        this._pushUndo();
+        this._forEachSelectedCell((r, c) => {
+            const k = this._cellKey(r, c);
+            const s = { ...(this.styles[k] || {}) };
+            s.align = align;
+            this.styles[k] = s;
+        });
+        this.render();
+    }
+    insertRowBelow() {
+        this._pushUndo();
+        const s = this._normalizeSelection();
+        const idx = s.r2 + 1;
+        this.data.splice(idx, 0, Array.from({ length: this.data[0].length }, () => ''));
+        const shifted = {};
+        Object.entries(this.styles).forEach(([k, v]) => {
+            const [r, c] = k.split(':').map(Number);
+            shifted[`${r >= idx ? r + 1 : r}:${c}`] = v;
+        });
+        this.styles = shifted;
+        this.render();
+    }
+    insertColRight() {
+        this._pushUndo();
+        const s = this._normalizeSelection();
+        const idx = s.c2 + 1;
+        this.data.forEach(row => row.splice(idx, 0, ''));
+        const shifted = {};
+        Object.entries(this.styles).forEach(([k, v]) => {
+            const [r, c] = k.split(':').map(Number);
+            shifted[`${r}:${c >= idx ? c + 1 : c}`] = v;
+        });
+        this.styles = shifted;
+        this.render();
+    }
+    undo() {
+        if (!this.undoStack.length) return;
+        this.redoStack.push(JSON.stringify({ data: this.data, styles: this.styles }));
+        this._applySnapshot(this.undoStack.pop());
+    }
+    redo() {
+        if (!this.redoStack.length) return;
+        this.undoStack.push(JSON.stringify({ data: this.data, styles: this.styles }));
+        this._applySnapshot(this.redoStack.pop());
+    }
+}
+
+// ✅ ИНИЦИАЛИЗАЦИЯ ВСТРОЕННОГО РЕДАКТОРА ТАБЛИЦ
 function initHandsontable(doc) {
-    console.log('🔍 initHandsontable called');
+    console.log('🔍 init custom sheet editor');
     const container = document.getElementById('handsontable-container');
     if (!container) { console.error('❌ Container not found'); return; }
+    hotInstance = null;
+    if (sheetEditor) { sheetEditor.destroy(); sheetEditor = null; }
 
-    if (typeof Handsontable === 'undefined') {
-        console.error('❌ Handsontable not loaded');
-        container.innerHTML = '<div style="padding:2rem;color:#000;">⚠️ Редактор не загрузился</div>';
-        return;
+    let payload = doc?.content?.custom_sheet;
+    if (!payload) {
+        const legacy = Array.isArray(doc?.content?.handsontable) ? doc.content.handsontable : [];
+        payload = { data: legacy, rows: legacy.length || 20, cols: (legacy[0]?.length || 10), styles: {} };
     }
-    container.innerHTML = '';
-    try {
-        // Normalize stored data (may come as JSON-string or nested object).
-        let raw = doc?.content?.handsontable;
-        if (typeof raw === 'string') {
-            try { raw = JSON.parse(raw); } catch (e) {}
-        }
-        if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
-            if (Array.isArray(raw.data)) raw = raw.data;
-            else if (Array.isArray(raw.cells)) raw = raw.cells;
-        }
-
-        let data = Array.isArray(raw) ? raw : null;
-        if (!data || data.length === 0) {
-            data = Array(20).fill(null).map(() => Array(10).fill(''));
-        }
-
-        // Ensure rectangular 2D array (Handsontable expects consistent rows).
-        let detectedCols = 0;
-        for (const row of data) {
-            if (Array.isArray(row)) detectedCols = Math.max(detectedCols, row.length);
-        }
-        const cols = Math.max(detectedCols, 10);
-        const rows = Math.max(data.length, 20);
-        data = Array.from({ length: rows }, (_, r) => {
-            const row = Array.isArray(data[r]) ? data[r] : [];
-            return Array.from({ length: cols }, (_, c) => row[c] ?? '');
-        });
-
-        hotInstance = new Handsontable(container, {
-            data: data,
-            colHeaders: true,
-            rowHeaders: true,
-            height: '100%',
-            width: '100%',
-            licenseKey: 'non-commercial-and-evaluation',
-            // Note: bundled build only ships en-US translations.
-            // We localize the most visible UI pieces via custom menus below.
-            language: 'en-US',
-            readOnly: false,
-            disableVisualSelection: false,
-            contextMenu: {
-                items: {
-                    row_above: { name: 'Вставить строку сверху' },
-                    row_below: { name: 'Вставить строку снизу' },
-                    col_left: { name: 'Вставить столбец слева' },
-                    col_right: { name: 'Вставить столбец справа' },
-                    remove_row: { name: 'Удалить строку(и)' },
-                    remove_col: { name: 'Удалить столбец(ы)' },
-                    clear_column: { name: 'Очистить столбец' },
-                    undo: { name: 'Отменить' },
-                    redo: { name: 'Повторить' },
-                    read_only: { name: 'Только чтение' },
-                    alignment: {
-                        name: 'Выравнивание',
-                        submenu: {
-                            items: [
-                                { key: 'alignment:left', name: 'По левому краю', callback: () => setSelectionAlign('left') },
-                                { key: 'alignment:center', name: 'По центру', callback: () => setSelectionAlign('center') },
-                                { key: 'alignment:right', name: 'По правому краю', callback: () => setSelectionAlign('right') },
-                            ]
-                        }
-                    },
-                    copy: { name: 'Копировать' },
-                    cut: { name: 'Вырезать' },
-                }
-            },
-            // Built-in filter menu remains English in this bundled build.
-            // Keep it disabled to avoid mixed-language UX.
-            dropdownMenu: false,
-            filters: true,
-            columnSorting: true,
-            // Disabled due unstable behavior in this bundled build after resize.
-            manualColumnResize: false,
-            manualRowResize: false,
-            manualColumnMove: true,
-            manualRowMove: true,
-            copyPaste: { pasteMode: 'overwrite', rowsLimit: 1000, columnsLimit: 50 },
-            fillHandle: { autoInsertRow: false, autoDirection: 'both' },
-            search: true,
-            comments: true,
-            selectionMode: 'range',
-            navigableHeaders: true,
-            autoColumnSize: true,
-            autoRowSize: false,
-            cells: function (row, col) {
-                const cellProperties = {
-                    type: 'text',
-                    allowEmpty: true,
-                    className: 'htLeft',
-                    readOnly: false
-                };
-                if (row === 0) {
-                    cellProperties.className = 'htCenter htMiddle htBold';
-                }
-                return cellProperties;
-            },
-            tabNavigation: true,
-            undo: true,
-            cellMerge: true,
-            preventOverflow: 'horizontal',
-            afterRender: () => {
-                console.log('✅ Handsontable rendered');
-            },
-            afterOnCellMouseDown: () => {
-                // Keep focus in editor to avoid "can't edit by mouse" state.
-                hotInstance.listen();
-            },
-        });
-        setTimeout(() => {
-            if (hotInstance) {
-                hotInstance.render();
-                hotInstance.refreshDimensions();
-                console.log('✅ Handsontable dimensions refreshed');
-            }
-        }, 200);
-        console.log('✅ Handsontable initialized');
-    } catch (e) {
-        console.error('❌ Error:', e);
-        container.innerHTML = `<div style="padding:2rem;color:#000;">⚠️ ${e.message}</div>`;
-    }
-}
-
-function _getSelectedRanges() {
-    if (!hotInstance) return [];
-    const ranges = hotInstance.getSelectedRange?.() || [];
-    return Array.isArray(ranges) ? ranges : [];
-}
-
-function _applyClassToSelection(transformFn) {
-    if (!hotInstance) return;
-    const ranges = _getSelectedRanges();
-    if (!ranges.length) return;
-
-    hotInstance.batch(() => {
-        ranges.forEach(range => {
-            // Handsontable can include headers in selection (-1 index). Skip them.
-            const fromRow = Math.max(0, Math.min(range.from.row, range.to.row));
-            const toRow = Math.max(0, Math.max(range.from.row, range.to.row));
-            const fromCol = Math.max(0, Math.min(range.from.col, range.to.col));
-            const toCol = Math.max(0, Math.max(range.from.col, range.to.col));
-
-            for (let r = fromRow; r <= toRow; r++) {
-                for (let c = fromCol; c <= toCol; c++) {
-                    const meta = hotInstance.getCellMeta(r, c) || {};
-                    const next = transformFn(meta.className || '');
-                    hotInstance.setCellMeta(r, c, 'className', next);
-                }
-            }
-        });
-    });
-    hotInstance.render();
-}
-
-function _toggleToken(className, token) {
-    const parts = String(className || '').split(/\s+/).filter(Boolean);
-    const has = parts.includes(token);
-    const next = has ? parts.filter(p => p !== token) : parts.concat([token]);
-    return next.join(' ');
+    sheetEditor = new CustomSheetEditor(container, payload);
 }
 
 function toggleSelectionBold() {
-    _applyClassToSelection((cls) => _toggleToken(cls, 'htBold'));
+    if (sheetEditor) sheetEditor.toggleBold();
 }
 
 function toggleSelectionItalic() {
-    _applyClassToSelection((cls) => _toggleToken(cls, 'htItalic'));
+    if (sheetEditor) sheetEditor.toggleItalic();
 }
 
 function setSelectionAlign(align) {
-    const token = align === 'center' ? 'htCenter' : align === 'right' ? 'htRight' : 'htLeft';
-    _applyClassToSelection((cls) => {
-        const parts = String(cls || '').split(/\s+/).filter(Boolean).filter(p => !['htLeft', 'htCenter', 'htRight'].includes(p));
-        return parts.concat([token]).join(' ');
-    });
+    if (sheetEditor) sheetEditor.setAlign(align);
 }
 
 function undoTableEdit() {
-    if (!hotInstance) return;
-    hotInstance.listen();
-    hotInstance.undo();
+    if (sheetEditor) sheetEditor.undo();
 }
 
 function redoTableEdit() {
-    if (!hotInstance) return;
-    hotInstance.listen();
-    hotInstance.redo();
+    if (sheetEditor) sheetEditor.redo();
 }
 
 function insertRowBelow() {
-    if (!hotInstance) return;
-    hotInstance.listen();
-    const sel = hotInstance.getSelectedLast();
-    const row = sel ? Math.max(0, sel[2]) : hotInstance.countRows() - 1;
-    hotInstance.alter('insert_row_below', row, 1);
+    if (sheetEditor) sheetEditor.insertRowBelow();
 }
 
 function insertColRight() {
-    if (!hotInstance) return;
-    hotInstance.listen();
-    const sel = hotInstance.getSelectedLast();
-    const col = sel ? Math.max(0, sel[3]) : hotInstance.countCols() - 1;
-    hotInstance.alter('insert_col_start', col + 1, 1);
+    if (sheetEditor) sheetEditor.insertColRight();
 }
 
 function initTextEditor(doc) {
@@ -923,10 +924,14 @@ function initTextEditor(doc) {
 async function saveDocumentSilent() {
     if (!currentDocument) return;
     let content = {};
-    if (currentDocument.doc_type === 'spreadsheet' && hotInstance) {
+    if (currentDocument.doc_type === 'spreadsheet' && (sheetEditor || hotInstance)) {
         try {
-            const data = hotInstance.getData();
-            content = { handsontable: data };
+            if (sheetEditor) {
+                content = { custom_sheet: sheetEditor.export() };
+            } else {
+                const data = hotInstance.getData();
+                content = { handsontable: data };
+            }
         } catch(e) { console.error('❌ Silent save error:', e); return; }
     } else if (currentDocument.doc_type === 'text') {
         const textEl = document.getElementById('docText');
@@ -945,10 +950,14 @@ async function saveDocumentSilent() {
 async function saveDocument() {
     if (!currentDocument) return;
     let content = {};
-    if (currentDocument.doc_type === 'spreadsheet' && hotInstance) {
+    if (currentDocument.doc_type === 'spreadsheet' && (sheetEditor || hotInstance)) {
         try {
-            const data = hotInstance.getData();
-            content = { handsontable: data };
+            if (sheetEditor) {
+                content = { custom_sheet: sheetEditor.export() };
+            } else {
+                const data = hotInstance.getData();
+                content = { handsontable: data };
+            }
             console.log('💾 Saving spreadsheet');
         } catch(e) { console.error('❌ Save error:', e); alert('Ошибка сохранения'); return; }
     } else if (currentDocument.doc_type === 'text') {
