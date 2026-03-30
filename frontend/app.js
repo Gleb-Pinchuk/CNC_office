@@ -1,4 +1,4 @@
-// ==================== CNC Office - Frontend App v18.6 (Full Fixed) ====================
+// ==================== CNC Office - Frontend App v18.7 (Full Fixed) ====================
 const API_BASE = '/api';
 let currentUser = null;
 let currentFolder = null;
@@ -29,7 +29,7 @@ const navItems = document.querySelectorAll('.nav-item');
 
 // ✅ Инициализация
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('🚀 App initialized v18.6');
+    console.log('🚀 App initialized v18.7');
     setupEventListeners();
     checkAuth();
 });
@@ -775,12 +775,9 @@ function initHandsontable(doc) {
                     cut: { name: 'Вырезать' },
                 }
             },
-            dropdownMenu: [
-                'alignment',
-                'filter_by_condition',
-                'filter_by_value',
-                'filter_action_bar',
-            ],
+            // Built-in filter menu remains English in this bundled build.
+            // Keep it disabled to avoid mixed-language UX.
+            dropdownMenu: false,
             filters: true,
             columnSorting: true,
             manualColumnResize: true,
@@ -881,6 +878,30 @@ function setSelectionAlign(align) {
         const parts = String(cls || '').split(/\s+/).filter(Boolean).filter(p => !['htLeft', 'htCenter', 'htRight'].includes(p));
         return parts.concat([token]).join(' ');
     });
+}
+
+function undoTableEdit() {
+    if (!hotInstance) return;
+    hotInstance.undo();
+}
+
+function redoTableEdit() {
+    if (!hotInstance) return;
+    hotInstance.redo();
+}
+
+function insertRowBelow() {
+    if (!hotInstance) return;
+    const sel = hotInstance.getSelectedLast();
+    const row = sel ? Math.max(0, sel[2]) : hotInstance.countRows() - 1;
+    hotInstance.alter('insert_row_below', row, 1);
+}
+
+function insertColRight() {
+    if (!hotInstance) return;
+    const sel = hotInstance.getSelectedLast();
+    const col = sel ? Math.max(0, sel[3]) : hotInstance.countCols() - 1;
+    hotInstance.alter('insert_col_end', col, 1);
 }
 
 function initTextEditor(doc) {

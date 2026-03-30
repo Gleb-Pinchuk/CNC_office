@@ -13,7 +13,7 @@
     <link rel="stylesheet" href="{% static 'style.css' %}">
     <link rel="stylesheet" href="{% static 'landing.css' %}">
     <link rel="stylesheet" href="{% static 'vendor/univer/handsontable.css' %}">
-    <link rel="icon" type="image/x-icon" href="{% static 'favicon.ico' %}">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230a0a0f'/%3E%3Ctext x='32' y='40' font-size='30' text-anchor='middle' fill='%2300f5ff'%3EC%3C/text%3E%3C/svg%3E">
 
     <style>
         .hidden { display: none !important; }
@@ -276,11 +276,15 @@
                 <h2 id="documentTitle" style="margin:0;font-size:1.1rem;">Редактор</h2>
                 <div>
                     <span class="btn-group" style="margin-right:10px;display:inline-flex;gap:6px;vertical-align:middle;">
+                        <button class="btn btn-secondary btn-sm" onclick="undoTableEdit()" title="Отменить">↶</button>
+                        <button class="btn btn-secondary btn-sm" onclick="redoTableEdit()" title="Повторить">↷</button>
                         <button class="btn btn-secondary btn-sm" onclick="toggleSelectionBold()" title="Жирный">B</button>
                         <button class="btn btn-secondary btn-sm" onclick="toggleSelectionItalic()" title="Курсив"><i>I</i></button>
                         <button class="btn btn-secondary btn-sm" onclick="setSelectionAlign('left')" title="По левому краю">⟸</button>
                         <button class="btn btn-secondary btn-sm" onclick="setSelectionAlign('center')" title="По центру">≡</button>
                         <button class="btn btn-secondary btn-sm" onclick="setSelectionAlign('right')" title="По правому краю">⟹</button>
+                        <button class="btn btn-secondary btn-sm" onclick="insertRowBelow()" title="Вставить строку ниже">+Стр</button>
+                        <button class="btn btn-secondary btn-sm" onclick="insertColRight()" title="Вставить столбец справа">+Стл</button>
                     </span>
                     <button class="btn btn-secondary btn-sm" onclick="shareCurrentDocument()" style="margin-right:8px;">🔗 Поделиться</button>
                     <button class="btn btn-success btn-sm" onclick="exportToExcel()" style="margin-right:8px;">📥 Excel</button>
@@ -318,6 +322,6 @@
 
     {# ✅ Все пути к JS #}
     <script src="{% static 'vendor/univer/handsontable.js' %}"></script>
-    <script src="{% static 'app.js' %}?v=18.6"></script>
+    <script src="{% static 'app.js' %}?v=18.7"></script>
 </body>
 </html>
