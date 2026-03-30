@@ -111,18 +111,58 @@
         .sheet-ribbon {
             display: flex;
             flex-direction: column;
-            gap: 6px;
-            margin-right: 10px;
+            gap: 10px;
+            margin-right: 12px;
+            padding: 10px;
+            border: 1px solid rgba(0, 245, 255, 0.25);
+            border-radius: 12px;
+            background: linear-gradient(180deg, rgba(12, 16, 34, 0.95), rgba(8, 10, 20, 0.95));
+            box-shadow: inset 0 0 18px rgba(0, 245, 255, 0.08);
         }
         .sheet-ribbon-tabs,
-        .sheet-ribbon-tools {
+        .sheet-ribbon-groups {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        .sheet-ribbon-tab {
+            border: 1px solid rgba(0, 245, 255, 0.25);
+            color: #d7ecff;
+            background: rgba(20, 28, 52, 0.8);
+            padding: 6px 12px;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .sheet-ribbon-group {
             display: inline-flex;
             gap: 6px;
-            flex-wrap: wrap;
+            align-items: center;
+            padding: 6px;
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .sheet-ribbon-group-title {
+            font-size: 11px;
+            color: #a9b8d9;
+            margin-right: 4px;
         }
         .sheet-ribbon .btn.btn-sm {
-            padding: 0.45rem 0.75rem;
-            border-radius: 0.6rem;
+            padding: 0.42rem 0.7rem;
+            border-radius: 0.55rem;
+            min-height: 30px;
+            font-size: 12px;
+        }
+        .sheet-color-input {
+            width: 34px;
+            height: 30px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            background: transparent;
+            cursor: pointer;
+            padding: 2px;
         }
     </style>
 </head>
@@ -348,20 +388,35 @@
                 <div>
                     <div class="sheet-ribbon" aria-label="Панель инструментов таблицы">
                         <div class="sheet-ribbon-tabs">
-                            <button class="btn btn-secondary btn-sm">Главная</button>
-                            <button class="btn btn-secondary btn-sm">Вставка</button>
-                            <button class="btn btn-secondary btn-sm">Данные</button>
+                            <span class="sheet-ribbon-tab">Главная</span>
+                            <span class="sheet-ribbon-tab">Вставка</span>
+                            <span class="sheet-ribbon-tab">Формат</span>
+                            <span class="sheet-ribbon-tab">Данные</span>
                         </div>
-                        <div class="sheet-ribbon-tools">
-                            <button class="btn btn-secondary btn-sm" onclick="undoTableEdit()" title="Отменить">Отменить</button>
-                            <button class="btn btn-secondary btn-sm" onclick="redoTableEdit()" title="Повторить">Повтор</button>
-                            <button class="btn btn-secondary btn-sm" onclick="toggleSelectionBold()" title="Жирный">Жирный</button>
-                            <button class="btn btn-secondary btn-sm" onclick="toggleSelectionItalic()" title="Курсив">Курсив</button>
-                            <button class="btn btn-secondary btn-sm" onclick="setSelectionAlign('left')" title="По левому краю">Влево</button>
-                            <button class="btn btn-secondary btn-sm" onclick="setSelectionAlign('center')" title="По центру">Центр</button>
-                            <button class="btn btn-secondary btn-sm" onclick="setSelectionAlign('right')" title="По правому краю">Вправо</button>
-                            <button class="btn btn-secondary btn-sm" onclick="insertRowBelow()" title="Вставить строку ниже">Строка +</button>
-                            <button class="btn btn-secondary btn-sm" onclick="insertColRight()" title="Вставить столбец справа">Столбец +</button>
+                        <div class="sheet-ribbon-groups">
+                            <div class="sheet-ribbon-group">
+                                <span class="sheet-ribbon-group-title">Правка</span>
+                                <button class="btn btn-secondary btn-sm" onclick="undoTableEdit()" title="Отменить">Отменить</button>
+                                <button class="btn btn-secondary btn-sm" onclick="redoTableEdit()" title="Повторить">Повтор</button>
+                            </div>
+                            <div class="sheet-ribbon-group">
+                                <span class="sheet-ribbon-group-title">Шрифт</span>
+                                <button class="btn btn-secondary btn-sm" onclick="toggleSelectionBold()" title="Жирный">Жирный</button>
+                                <button class="btn btn-secondary btn-sm" onclick="toggleSelectionItalic()" title="Курсив">Курсив</button>
+                                <label title="Цвет текста"><input class="sheet-color-input" type="color" value="#111111" onchange="setSelectionTextColor(this.value)"></label>
+                                <label title="Цвет ячейки"><input class="sheet-color-input" type="color" value="#ffffff" onchange="setSelectionFillColor(this.value)"></label>
+                            </div>
+                            <div class="sheet-ribbon-group">
+                                <span class="sheet-ribbon-group-title">Выравнивание</span>
+                                <button class="btn btn-secondary btn-sm" onclick="setSelectionAlign('left')" title="По левому краю">Влево</button>
+                                <button class="btn btn-secondary btn-sm" onclick="setSelectionAlign('center')" title="По центру">Центр</button>
+                                <button class="btn btn-secondary btn-sm" onclick="setSelectionAlign('right')" title="По правому краю">Вправо</button>
+                            </div>
+                            <div class="sheet-ribbon-group">
+                                <span class="sheet-ribbon-group-title">Вставка</span>
+                                <button class="btn btn-secondary btn-sm" onclick="insertRowBelow()" title="Вставить строку ниже">Строка +</button>
+                                <button class="btn btn-secondary btn-sm" onclick="insertColRight()" title="Вставить столбец справа">Столбец +</button>
+                            </div>
                         </div>
                     </div>
                     <button class="btn btn-secondary btn-sm" onclick="shareCurrentDocument()" style="margin-right:8px;">🔗 Поделиться</button>
@@ -400,6 +455,6 @@
 
     {# ✅ Все пути к JS #}
     <script src="{% static 'vendor/univer/handsontable.js' %}"></script>
-    <script src="{% static 'app.js' %}?v=19.0"></script>
+    <script src="{% static 'app.js' %}?v=19.1"></script>
 </body>
 </html>

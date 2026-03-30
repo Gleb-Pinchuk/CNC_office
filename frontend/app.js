@@ -1,4 +1,4 @@
-// ==================== CNC Office - Frontend App v19.0 (Custom Sheet Editor) ====================
+// ==================== CNC Office - Frontend App v19.1 (Custom Sheet Editor) ====================
 const API_BASE = '/api';
 let currentUser = null;
 let currentFolder = null;
@@ -30,7 +30,7 @@ const navItems = document.querySelectorAll('.nav-item');
 
 // ✅ Инициализация
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('🚀 App initialized v19.0');
+    console.log('🚀 App initialized v19.1');
     setupEventListeners();
     checkAuth();
 });
@@ -703,6 +703,9 @@ class CustomSheetEditor {
         this.redoStack = [];
         this.selection = { r1: 0, c1: 0, r2: 0, c2: 0 };
         this.isSelecting = false;
+        this._onGlobalMouseUp = () => { this.isSelecting = false; };
+        window.addEventListener('mouseup', this._onGlobalMouseUp);
+        window.addEventListener('blur', this._onGlobalMouseUp);
 
         const data = Array.isArray(payload?.data) ? payload.data : [];
         const rows = Math.max(payload?.rows || data.length || 20, 20);
@@ -761,6 +764,8 @@ class CustomSheetEditor {
         el.style.fontWeight = styleObj?.bold ? '700' : '400';
         el.style.fontStyle = styleObj?.italic ? 'italic' : 'normal';
         el.style.textAlign = styleObj?.align || 'left';
+        el.style.color = styleObj?.textColor || '#111111';
+        el.style.backgroundColor = styleObj?.fillColor || '#ffffff';
     }
 
     render() {
@@ -790,7 +795,6 @@ class CustomSheetEditor {
             cell.addEventListener('input', () => { this.data[r][c] = cell.textContent || ''; });
             cell.addEventListener('blur', () => { this.data[r][c] = cell.textContent || ''; });
         });
-        document.addEventListener('mouseup', () => { this.isSelecting = false; }, { once: true });
         this._paintSelection();
     }
 
@@ -799,7 +803,11 @@ class CustomSheetEditor {
         const el = this.container.querySelector(`[data-r="${s.r1}"][data-c="${s.c1}"]`);
         if (el) el.focus();
     }
-    destroy() { this.container.innerHTML = ''; }
+    destroy() {
+        window.removeEventListener('mouseup', this._onGlobalMouseUp);
+        window.removeEventListener('blur', this._onGlobalMouseUp);
+        this.container.innerHTML = '';
+    }
     export() { return { rows: this.data.length, cols: this.data[0]?.length || 0, data: this.data, styles: this.styles }; }
 
     toggleBold() {
@@ -828,6 +836,26 @@ class CustomSheetEditor {
             const k = this._cellKey(r, c);
             const s = { ...(this.styles[k] || {}) };
             s.align = align;
+            this.styles[k] = s;
+        });
+        this.render();
+    }
+    setTextColor(color) {
+        this._pushUndo();
+        this._forEachSelectedCell((r, c) => {
+            const k = this._cellKey(r, c);
+            const s = { ...(this.styles[k] || {}) };
+            s.textColor = color;
+            this.styles[k] = s;
+        });
+        this.render();
+    }
+    setFillColor(color) {
+        this._pushUndo();
+        this._forEachSelectedCell((r, c) => {
+            const k = this._cellKey(r, c);
+            const s = { ...(this.styles[k] || {}) };
+            s.fillColor = color;
             this.styles[k] = s;
         });
         this.render();
@@ -896,6 +924,12 @@ function toggleSelectionItalic() {
 
 function setSelectionAlign(align) {
     if (sheetEditor) sheetEditor.setAlign(align);
+}
+function setSelectionTextColor(color) {
+    if (sheetEditor) sheetEditor.setTextColor(color);
+}
+function setSelectionFillColor(color) {
+    if (sheetEditor) sheetEditor.setFillColor(color);
 }
 
 function undoTableEdit() {
@@ -978,10 +1012,15 @@ function openCreateDocumentModal() {
     const typeSelect = document.getElementById('newDocType');
     if (titleInput) titleInput.value = '';
     if (typeSelect) typeSelect.value = 'spreadsheet';
+    currentSectionType = null;
     showModal('createDocumentModal');
 }
 
 async function createDocument() {
+    // If opened from section, create section table instead of common document.
+    if (currentSectionType) {
+        return createSectionTable();
+    }
     const title = document.getElementById('newDocTitle')?.value || 'Без названия';
     const docType = document.getElementById('newDocType')?.value;
     try {
@@ -1014,6 +1053,7 @@ async function shareCurrentDocument() {
 // ✅ ЗАГРУЗКА ТАБЛИЦ РАЗДЕЛОВ (ИСПРАВЛЕНО: таблицы создаются в разделах)
 async function loadSectionTable(sectionType) {
     console.log(`📊 Loading ${sectionType} tables...`);
+    currentSectionType = sectionType;
     try {
         const res = await fetch(`${API_BASE}/section-tables/?section_type=${sectionType}`, { headers: getAuthHeaders() });
         if (res.status === 200) {
@@ -1058,7 +1098,9 @@ function createSectionTableCard(table, index, sectionType) {
 
 function openCreateSectionTableModal(sectionType) {
     const titleInput = document.getElementById('newDocTitle');
+    const typeSelect = document.getElementById('newDocType');
     if (titleInput) titleInput.value = '';
+    if (typeSelect) typeSelect.value = 'spreadsheet';
     currentSectionType = sectionType;
     showModal('createDocumentModal');
 }
