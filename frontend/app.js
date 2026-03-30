@@ -840,21 +840,23 @@ function _applyClassToSelection(transformFn) {
     const ranges = _getSelectedRanges();
     if (!ranges.length) return;
 
-    ranges.forEach(range => {
-        const fromRow = Math.min(range.from.row, range.to.row);
-        const toRow = Math.max(range.from.row, range.to.row);
-        const fromCol = Math.min(range.from.col, range.to.col);
-        const toCol = Math.max(range.from.col, range.to.col);
+    hotInstance.batch(() => {
+        ranges.forEach(range => {
+            // Handsontable can include headers in selection (-1 index). Skip them.
+            const fromRow = Math.max(0, Math.min(range.from.row, range.to.row));
+            const toRow = Math.max(0, Math.max(range.from.row, range.to.row));
+            const fromCol = Math.max(0, Math.min(range.from.col, range.to.col));
+            const toCol = Math.max(0, Math.max(range.from.col, range.to.col));
 
-        for (let r = fromRow; r <= toRow; r++) {
-            for (let c = fromCol; c <= toCol; c++) {
-                const meta = hotInstance.getCellMeta(r, c) || {};
-                const next = transformFn(meta.className || '');
-                hotInstance.setCellMeta(r, c, 'className', next);
+            for (let r = fromRow; r <= toRow; r++) {
+                for (let c = fromCol; c <= toCol; c++) {
+                    const meta = hotInstance.getCellMeta(r, c) || {};
+                    const next = transformFn(meta.className || '');
+                    hotInstance.setCellMeta(r, c, 'className', next);
+                }
             }
-        }
+        });
     });
-
     hotInstance.render();
 }
 
