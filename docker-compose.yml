@@ -83,6 +83,27 @@ services:
         max-size: '10m'
         max-file: '3'
 
+  vk_bot:
+    build:
+      context: ./vk_student_bot
+      dockerfile: Dockerfile
+    container_name: cnc_vk_bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      CNC_API_BASE: http://web:8000/api
+    depends_on:
+      web:
+        condition: service_healthy
+    networks:
+      - app-network
+    logging:
+      driver: json-file
+      options:
+        max-size: '5m'
+        max-file: '2'
+
 volumes:
   postgres_data:  # ✅ ИСПРАВЛЕНО (было postgres_)
   static_volume:

@@ -1,4 +1,4 @@
-// ==================== CNC Office - Frontend App v19.1 (Custom Sheet Editor) ====================
+// ==================== CNC Office - Frontend App v19.3 (Workbook + section save fix) ====================
 const API_BASE = '/api';
 let currentUser = null;
 let currentFolder = null;
@@ -30,7 +30,7 @@ const navItems = document.querySelectorAll('.nav-item');
 
 // ✅ Инициализация
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('🚀 App initialized v19.1');
+    console.log('🚀 App initialized v19.3');
     setupEventListeners();
     checkAuth();
 });
@@ -41,6 +41,27 @@ function getAuthHeaders(isJson = true) {
     if (authToken) headers['Authorization'] = `Token ${authToken}`;
     if (isJson) headers['Content-Type'] = 'application/json';
     return headers;
+}
+
+/** Таблицы разделов — отдельный API; иначе после «Сохранить» данные не попадали в SectionTable. */
+function isCurrentSectionTable() {
+    return !!(currentDocument && currentDocument.isSectionTable);
+}
+
+function getSaveContentUrl() {
+    if (!currentDocument) return null;
+    if (isCurrentSectionTable()) {
+        return `${API_BASE}/section-tables/${currentDocument.id}/save_content/`;
+    }
+    return `${API_BASE}/documents/${currentDocument.id}/save_content/`;
+}
+
+function getShareUrl() {
+    if (!currentDocument) return null;
+    if (isCurrentSectionTable()) {
+        return `${API_BASE}/section-tables/${currentDocument.id}/share/`;
+    }
+    return `${API_BASE}/documents/${currentDocument.id}/share/`;
 }
 
 // ✅ Экранирование HTML
@@ -509,7 +530,7 @@ async function exportToExcel() {
         return;
     }
     try {
-        const data = sheetEditor ? sheetEditor.export().data : hotInstance.getData();
+        const data = sheetEditor ? (sheetEditor.getActiveGridData ? sheetEditor.getActiveGridData() : sheetEditor.export().data) : hotInstance.getData();
         const headers = data[0] ? data[0].map((_, i) => String.fromCharCode(65 + (i % 26))) : [];
         let csv = [];
         if (headers && headers.length > 0) {
@@ -678,7 +699,11 @@ function createDocumentCard(doc, index) {
 async function openDocument(docId) {
     try {
         const res = await fetch(`${API_BASE}/documents/${docId}/`, { headers: getAuthHeaders() });
-        if (res.ok) { currentDocument = await res.json(); showDocumentEditor(currentDocument); }
+        if (res.ok) {
+            currentDocument = await res.json();
+            delete currentDocument.isSectionTable;
+            showDocumentEditor(currentDocument);
+        }
         else { alert('Ошибка открытия'); }
     } catch (e) { console.error('Open document error:', e); alert('Ошибка'); }
 }
@@ -691,9 +716,52 @@ function showDocumentEditor(doc) {
     currentDocument = doc;
     showModal('documentModal');
     setTimeout(() => {
+        setRibbonTab('home');
         if (doc.doc_type === 'spreadsheet') { initHandsontable(doc); }
         else { initTextEditor(doc); }
     }, 400);
+}
+
+function normalizeSheetPayload(sh) {
+    const data = Array.isArray(sh?.data) ? sh.data : [];
+    const rows = Math.max(sh?.rows || data.length || 20, 20);
+    let cols = sh?.cols || 0;
+    for (const row of data) if (Array.isArray(row)) cols = Math.max(cols, row.length);
+    cols = Math.max(cols || 10, 10);
+    const grid = Array.from({ length: rows }, (_, r) => {
+        const row = Array.isArray(data[r]) ? data[r] : [];
+        return Array.from({ length: cols }, (_, c) => String(row[c] ?? ''));
+    });
+    const cf = {};
+    if (sh?.columnFilters && typeof sh.columnFilters === 'object') {
+        Object.entries(sh.columnFilters).forEach(([k, v]) => {
+            if (Array.isArray(v)) cf[k] = v.slice();
+        });
+    }
+    return {
+        name: sh?.name || 'Лист',
+        rows: grid.length,
+        cols: grid[0]?.length || cols,
+        data: grid,
+        styles: sh?.styles && typeof sh.styles === 'object' ? { ...sh.styles } : {},
+        colWidths: Array.isArray(sh?.colWidths) ? sh.colWidths.slice() : [],
+        rowHeights: Array.isArray(sh?.rowHeights) ? sh.rowHeights.slice() : [],
+        columnFilters: cf,
+    };
+}
+
+function migrateWorkbookPayload(raw) {
+    if (!raw || typeof raw !== 'object') raw = {};
+    if (Array.isArray(raw.sheets) && raw.sheets.length) {
+        const sheets = raw.sheets.map(normalizeSheetPayload);
+        const ai = Math.min(Math.max(0, raw.activeSheetIndex || 0), sheets.length - 1);
+        return { version: 2, activeSheetIndex: ai, sheets };
+    }
+    return {
+        version: 2,
+        activeSheetIndex: 0,
+        sheets: [normalizeSheetPayload(raw)],
+    };
 }
 
 class CustomSheetEditor {
@@ -704,10 +772,7 @@ class CustomSheetEditor {
         this.selection = { r1: 0, c1: 0, r2: 0, c2: 0 };
         this.isSelecting = false;
         this.fillDrag = null;
-        this.colWidths = Array.isArray(payload?.colWidths) ? payload.colWidths.slice() : [];
-        this.rowHeights = Array.isArray(payload?.rowHeights) ? payload.rowHeights.slice() : [];
         this._onGlobalMouseUp = () => { this.isSelecting = false; };
-        this._onGlobalMouseMove = () => {};
         this._onFillEnd = () => {
             if (this.fillDrag) {
                 this._applyFillDrag();
@@ -719,17 +784,14 @@ class CustomSheetEditor {
         window.addEventListener('blur', this._onGlobalMouseUp);
         window.addEventListener('mouseup', this._onFillEnd);
 
-        const data = Array.isArray(payload?.data) ? payload.data : [];
-        const rows = Math.max(payload?.rows || data.length || 20, 20);
-        let detectedCols = payload?.cols || 0;
-        for (const row of data) if (Array.isArray(row)) detectedCols = Math.max(detectedCols, row.length);
-        const cols = Math.max(detectedCols || 10, 10);
-
-        this.data = Array.from({ length: rows }, (_, r) => {
-            const row = Array.isArray(data[r]) ? data[r] : [];
-            return Array.from({ length: cols }, (_, c) => String(row[c] ?? ''));
-        });
-        this.styles = payload?.styles && typeof payload.styles === 'object' ? payload.styles : {};
+        const norm = normalizeSheetPayload(payload || {});
+        this.sheetName = norm.name;
+        this.data = norm.data.map((row) => row.slice());
+        this.styles = norm.styles;
+        this.colWidths = norm.colWidths;
+        this.rowHeights = norm.rowHeights;
+        this.columnFilters = {};
+        Object.entries(norm.columnFilters).forEach(([k, v]) => { this.columnFilters[k] = v.slice(); });
         this.render();
     }
 
@@ -745,7 +807,11 @@ class CustomSheetEditor {
         return { r1: Math.min(r1, r2), r2: Math.max(r1, r2), c1: Math.min(c1, c2), c2: Math.max(c1, c2) };
     }
     _pushUndo() {
-        this.undoStack.push(JSON.stringify({ data: this.data, styles: this.styles }));
+        this.undoStack.push(JSON.stringify({
+            data: this.data,
+            styles: this.styles,
+            columnFilters: this.columnFilters,
+        }));
         if (this.undoStack.length > 50) this.undoStack.shift();
         this.redoStack = [];
     }
@@ -753,7 +819,25 @@ class CustomSheetEditor {
         const parsed = JSON.parse(snapshot);
         this.data = parsed.data || this.data;
         this.styles = parsed.styles || {};
+        this.columnFilters = {};
+        if (parsed.columnFilters && typeof parsed.columnFilters === 'object') {
+            Object.entries(parsed.columnFilters).forEach(([k, v]) => {
+                if (Array.isArray(v)) this.columnFilters[k] = v.slice();
+            });
+        }
         this.render();
+    }
+    _isRowFiltered(r) {
+        if (r === 0) return false;
+        const f = this.columnFilters || {};
+        for (const colStr of Object.keys(f)) {
+            const allowed = f[colStr];
+            if (!Array.isArray(allowed) || !allowed.length) continue;
+            const c = Number(colStr);
+            const v = String(this.data[r]?.[c] ?? '').trim();
+            if (!allowed.includes(v)) return true;
+        }
+        return false;
     }
     _setSelection(r, c, keepAnchor = false) {
         if (!keepAnchor) { this.selection = { r1: r, c1: c, r2: r, c2: c }; }
@@ -779,6 +863,9 @@ class CustomSheetEditor {
         el.style.textAlign = styleObj?.align || 'left';
         el.style.color = styleObj?.textColor || '#111111';
         el.style.backgroundColor = styleObj?.fillColor || '#ffffff';
+        el.style.fontFamily = styleObj?.fontFamily || "'Segoe UI', system-ui, sans-serif";
+        const fs = styleObj?.fontSize;
+        el.style.fontSize = fs ? `${Number(fs)}px` : '14px';
     }
 
     render() {
@@ -787,12 +874,15 @@ class CustomSheetEditor {
         let html = '<div class="sheet-wrap"><table class="sheet-table"><thead><tr><th class="corner"></th>';
         for (let c = 0; c < cols; c++) {
             const w = this.colWidths[c] || 90;
-            html += `<th data-col-header="${c}" style="width:${w}px;min-width:${w}px;max-width:${w}px;">${this._colName(c)}<span class="col-resizer" data-col-resizer="${c}"></span></th>`;
+            const hasF = Array.isArray(this.columnFilters[String(c)]) && this.columnFilters[String(c)].length > 0;
+            const filtMark = hasF ? ' <span class="sheet-filter-dot" title="Активен фильтр">🔽</span>' : '';
+            html += `<th data-col-header="${c}" style="width:${w}px;min-width:${w}px;max-width:${w}px;" title="Двойной клик — фильтр столбца">${this._colName(c)}${filtMark}<span class="col-resizer" data-col-resizer="${c}"></span></th>`;
         }
         html += '</tr></thead><tbody>';
         for (let r = 0; r < rows; r++) {
             const h = this.rowHeights[r] || 28;
-            html += `<tr style="height:${h}px;"><th data-row-header="${r}" style="height:${h}px;min-height:${h}px;max-height:${h}px;">${r + 1}<span class="row-resizer" data-row-resizer="${r}"></span></th>`;
+            const hid = this._isRowFiltered(r) ? ' filter-hidden' : '';
+            html += `<tr class="sheet-row${hid}" style="height:${h}px;"><th data-row-header="${r}" style="height:${h}px;min-height:${h}px;max-height:${h}px;">${r + 1}<span class="row-resizer" data-row-resizer="${r}"></span></th>`;
             for (let c = 0; c < cols; c++) {
                 const w = this.colWidths[c] || 90;
                 html += `<td class="sheet-cell" contenteditable="true" data-r="${r}" data-c="${c}" style="width:${w}px;min-width:${w}px;max-width:${w}px;height:${h}px;">${escapeHtml(this.data[r][c])}</td>`;
@@ -822,8 +912,87 @@ class CustomSheetEditor {
             cell.addEventListener('blur', () => { this.data[r][c] = cell.textContent || ''; });
         });
         this._bindResizers();
+        this._bindColumnHeaderFilters();
         this._ensureFillHandle();
         this._paintSelection();
+    }
+    _bindColumnHeaderFilters() {
+        this.container.querySelectorAll('[data-col-header]').forEach((th) => {
+            th.addEventListener('dblclick', (e) => {
+                if (e.target.closest('.col-resizer')) return;
+                const col = Number(th.dataset.colHeader);
+                if (Number.isFinite(col)) this.openColumnFilter(col);
+            });
+        });
+    }
+    openFilterForSelection() {
+        const s = this._normalizeSelection();
+        this.openColumnFilter(s.c1);
+    }
+    openColumnFilter(colIdx) {
+        const uniques = new Set();
+        for (let r = 1; r < this.data.length; r++) {
+            uniques.add(String(this.data[r][colIdx] ?? '').trim());
+        }
+        const allVals = [...uniques].sort((a, b) => a.localeCompare(b, 'ru'));
+        const key = String(colIdx);
+        const prev = this.columnFilters[key];
+        const overlay = document.createElement('div');
+        overlay.className = 'sheet-filter-overlay';
+        overlay.innerHTML = `
+            <div class="sheet-filter-dialog">
+                <h4>Фильтр: столбец ${this._colName(colIdx)}</h4>
+                <p class="sheet-filter-hint">Как в Excel: снимите галочки со значений, которые нужно скрыть.</p>
+                <div class="sheet-filter-list" id="sheetFilterList"></div>
+                <div class="sheet-filter-actions">
+                    <button type="button" class="btn btn-secondary btn-sm" id="sheetFilterAll">Выделить все</button>
+                    <button type="button" class="btn btn-secondary btn-sm" id="sheetFilterClear">Сбросить фильтр</button>
+                    <button type="button" class="btn btn-primary btn-sm" id="sheetFilterOk">Применить</button>
+                </div>
+            </div>`;
+        document.body.appendChild(overlay);
+        const listEl = overlay.querySelector('#sheetFilterList');
+        const selectedSet = prev && prev.length ? new Set(prev) : new Set(allVals);
+        allVals.forEach((val) => {
+            const row = document.createElement('label');
+            row.className = 'sheet-filter-item';
+            row.setAttribute('data-val', val);
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.checked = selectedSet.has(val);
+            const display = val === '' ? '(пусто)' : val;
+            row.appendChild(cb);
+            row.appendChild(document.createTextNode(` ${display}`));
+            listEl.appendChild(row);
+        });
+        const close = () => overlay.remove();
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+        overlay.querySelector('#sheetFilterAll').onclick = () => {
+            listEl.querySelectorAll('input[type=checkbox]').forEach((c) => { c.checked = true; });
+        };
+        overlay.querySelector('#sheetFilterClear').onclick = () => {
+            this._pushUndo();
+            delete this.columnFilters[key];
+            close();
+            this.render();
+        };
+        overlay.querySelector('#sheetFilterOk').onclick = () => {
+            const allowed = [];
+            listEl.querySelectorAll('label.sheet-filter-item').forEach((lab) => {
+                const cb = lab.querySelector('input');
+                if (cb?.checked) allowed.push(lab.getAttribute('data-val') ?? '');
+            });
+            this._pushUndo();
+            if (!allowed.length || allowed.length === allVals.length) delete this.columnFilters[key];
+            else this.columnFilters[key] = allowed;
+            close();
+            this.render();
+        };
+    }
+    clearAllColumnFilters() {
+        this._pushUndo();
+        this.columnFilters = {};
+        this.render();
     }
     _bindResizers() {
         this.container.querySelectorAll('[data-col-resizer]').forEach((el) => {
@@ -965,15 +1134,24 @@ class CustomSheetEditor {
         }
         this.container.innerHTML = '';
     }
-    export() {
+    exportSheet() {
+        const cf = {};
+        Object.entries(this.columnFilters || {}).forEach(([k, v]) => {
+            if (Array.isArray(v) && v.length) cf[k] = v.slice();
+        });
         return {
+            name: this.sheetName || 'Лист',
             rows: this.data.length,
             cols: this.data[0]?.length || 0,
-            data: this.data,
-            styles: this.styles,
-            colWidths: this.colWidths,
-            rowHeights: this.rowHeights,
+            data: this.data.map((row) => row.slice()),
+            styles: { ...this.styles },
+            colWidths: this.colWidths.slice(),
+            rowHeights: this.rowHeights.slice(),
+            columnFilters: cf,
         };
+    }
+    export() {
+        return this.exportSheet();
     }
 
     toggleBold() {
@@ -1026,6 +1204,29 @@ class CustomSheetEditor {
         });
         this.render();
     }
+    setFontFamily(family) {
+        if (!family) return;
+        this._pushUndo();
+        this._forEachSelectedCell((r, c) => {
+            const k = this._cellKey(r, c);
+            const s = { ...(this.styles[k] || {}) };
+            s.fontFamily = family;
+            this.styles[k] = s;
+        });
+        this.render();
+    }
+    setFontSize(px) {
+        const n = Number(px);
+        if (!Number.isFinite(n) || n < 8 || n > 72) return;
+        this._pushUndo();
+        this._forEachSelectedCell((r, c) => {
+            const k = this._cellKey(r, c);
+            const s = { ...(this.styles[k] || {}) };
+            s.fontSize = n;
+            this.styles[k] = s;
+        });
+        this.render();
+    }
     insertRowBelow() {
         this._pushUndo();
         const s = this._normalizeSelection();
@@ -1054,20 +1255,121 @@ class CustomSheetEditor {
     }
     undo() {
         if (!this.undoStack.length) return;
-        this.redoStack.push(JSON.stringify({ data: this.data, styles: this.styles }));
+        this.redoStack.push(JSON.stringify({ data: this.data, styles: this.styles, columnFilters: this.columnFilters }));
         this._applySnapshot(this.undoStack.pop());
     }
     redo() {
         if (!this.redoStack.length) return;
-        this.undoStack.push(JSON.stringify({ data: this.data, styles: this.styles }));
+        this.undoStack.push(JSON.stringify({ data: this.data, styles: this.styles, columnFilters: this.columnFilters }));
         this._applySnapshot(this.redoStack.pop());
     }
 }
 
-// ✅ ИНИЦИАЛИЗАЦИЯ ВСТРОЕННОГО РЕДАКТОРА ТАБЛИЦ
+class MultiSheetWorkbook {
+    constructor(gridContainer, tabContainer, rawPayload) {
+        this.gridContainer = gridContainer;
+        this.tabContainer = tabContainer;
+        const wb = migrateWorkbookPayload(rawPayload);
+        this.activeIndex = wb.activeSheetIndex;
+        this.sheets = wb.sheets;
+        this._editor = null;
+        this._renderTabs();
+        this._switchSheet(this.activeIndex, true);
+    }
+    _syncActive() {
+        if (this._editor) {
+            const s = this._editor.exportSheet();
+            this.sheets[this.activeIndex] = normalizeSheetPayload(s);
+        }
+    }
+    _switchSheet(i, skipSync = false) {
+        if (!skipSync) this._syncActive();
+        this.activeIndex = Math.max(0, Math.min(i, this.sheets.length - 1));
+        if (this._editor) {
+            this._editor.destroy();
+            this._editor = null;
+        }
+        const sh = this.sheets[this.activeIndex];
+        this._editor = new CustomSheetEditor(this.gridContainer, sh);
+        this._renderTabs();
+    }
+    _renderTabs() {
+        if (!this.tabContainer) return;
+        this.tabContainer.innerHTML = '';
+        this.sheets.forEach((sh, idx) => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'sheet-tab' + (idx === this.activeIndex ? ' active' : '');
+            btn.textContent = sh.name || `Лист${idx + 1}`;
+            btn.onclick = () => this._switchSheet(idx);
+            this.tabContainer.appendChild(btn);
+        });
+        const addBtn = document.createElement('button');
+        addBtn.type = 'button';
+        addBtn.className = 'sheet-tab sheet-tab-add';
+        addBtn.textContent = '+';
+        addBtn.title = 'Добавить лист';
+        addBtn.onclick = () => this.addSheet();
+        this.tabContainer.appendChild(addBtn);
+    }
+    addSheet() {
+        this._syncActive();
+        const n = this.sheets.length + 1;
+        const cols = this.sheets[this.activeIndex]?.data[0]?.length || 10;
+        const blank = Array(20).fill(null).map(() => Array(cols).fill(''));
+        const newSheet = normalizeSheetPayload({
+            name: `Лист${n}`,
+            data: blank,
+            styles: {},
+        });
+        this.sheets.push(newSheet);
+        this._switchSheet(this.sheets.length - 1, true);
+    }
+    export() {
+        this._syncActive();
+        return {
+            version: 2,
+            activeSheetIndex: this.activeIndex,
+            sheets: this.sheets.map((s) => ({
+                ...normalizeSheetPayload(s),
+                data: s.data.map((row) => row.slice()),
+            })),
+        };
+    }
+    getActiveGridData() {
+        this._syncActive();
+        const sh = this.sheets[this.activeIndex];
+        return sh.data.map((row) => row.slice());
+    }
+    focus() { if (this._editor) this._editor.focus(); }
+    destroy() {
+        if (this._editor) {
+            this._editor.destroy();
+            this._editor = null;
+        }
+        if (this.gridContainer) this.gridContainer.innerHTML = '';
+        if (this.tabContainer) this.tabContainer.innerHTML = '';
+    }
+    toggleBold() { if (this._editor) this._editor.toggleBold(); }
+    toggleItalic() { if (this._editor) this._editor.toggleItalic(); }
+    setAlign(a) { if (this._editor) this._editor.setAlign(a); }
+    setTextColor(c) { if (this._editor) this._editor.setTextColor(c); }
+    setFillColor(c) { if (this._editor) this._editor.setFillColor(c); }
+    setFontFamily(f) { if (this._editor) this._editor.setFontFamily(f); }
+    setFontSize(px) { if (this._editor) this._editor.setFontSize(px); }
+    insertRowBelow() { if (this._editor) this._editor.insertRowBelow(); }
+    insertColRight() { if (this._editor) this._editor.insertColRight(); }
+    undo() { if (this._editor) this._editor.undo(); }
+    redo() { if (this._editor) this._editor.redo(); }
+    openFilterForSelection() { if (this._editor) this._editor.openFilterForSelection(); }
+    clearAllColumnFilters() { if (this._editor) this._editor.clearAllColumnFilters(); }
+}
+
+// ✅ ИНИЦИАЛИЗАЦИЯ ВСТРОЕННОГО РЕДАКТОРА ТАБЛИЦ (книга с листами)
 function initHandsontable(doc) {
-    console.log('🔍 init custom sheet editor');
+    console.log('🔍 init sheet workbook');
     const container = document.getElementById('handsontable-container');
+    const tabBar = document.getElementById('sheet-tab-bar');
     if (!container) { console.error('❌ Container not found'); return; }
     hotInstance = null;
     if (sheetEditor) { sheetEditor.destroy(); sheetEditor = null; }
@@ -1077,7 +1379,7 @@ function initHandsontable(doc) {
         const legacy = Array.isArray(doc?.content?.handsontable) ? doc.content.handsontable : [];
         payload = { data: legacy, rows: legacy.length || 20, cols: (legacy[0]?.length || 10), styles: {} };
     }
-    sheetEditor = new CustomSheetEditor(container, payload);
+    sheetEditor = new MultiSheetWorkbook(container, tabBar, payload);
 }
 
 function toggleSelectionBold() {
@@ -1101,6 +1403,25 @@ function setRibbonTab(tabName) {
     document.querySelectorAll('.sheet-ribbon-tab').forEach((el) => {
         el.classList.toggle('active', el.dataset.tab === tabName);
     });
+    document.querySelectorAll('.sheet-ribbon-panel').forEach((panel) => {
+        panel.classList.toggle('active', panel.dataset.panel === tabName);
+    });
+}
+
+function setSelectionFontFamily(font) {
+    if (sheetEditor && sheetEditor.setFontFamily) sheetEditor.setFontFamily(font);
+}
+
+function setSelectionFontSize(px) {
+    if (sheetEditor && sheetEditor.setFontSize) sheetEditor.setFontSize(px);
+}
+
+function openColumnFilterForSelection() {
+    if (sheetEditor && sheetEditor.openFilterForSelection) sheetEditor.openFilterForSelection();
+}
+
+function clearSheetColumnFilters() {
+    if (sheetEditor && sheetEditor.clearAllColumnFilters) sheetEditor.clearAllColumnFilters();
 }
 
 function undoTableEdit() {
@@ -1142,8 +1463,10 @@ async function saveDocumentSilent() {
         const textEl = document.getElementById('docText');
         if (textEl) content = { text: textEl.value };
     }
+    const url = getSaveContentUrl();
+    if (!url) return;
     try {
-        await fetch(`${API_BASE}/documents/${currentDocument.id}/save_content/`, {
+        await fetch(url, {
             method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ content })
         });
         currentDocument.content = content;
@@ -1169,8 +1492,10 @@ async function saveDocument() {
         const textEl = document.getElementById('docText');
         if (textEl) content = { text: textEl.value };
     }
+    const url = getSaveContentUrl();
+    if (!url) return;
     try {
-        const res = await fetch(`${API_BASE}/documents/${currentDocument.id}/save_content/`, {
+        const res = await fetch(url, {
             method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ content })
         });
         if (res.ok) { currentDocument.content = content; alert('✅ Сохранено!'); }
@@ -1215,7 +1540,9 @@ async function shareCurrentDocument() {
     const username = prompt('Имя пользователя:');
     if (!username) return;
     try {
-        const res = await fetch(`${API_BASE}/documents/${currentDocument.id}/share/`, { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ username, permission: 'write' }) });
+        const shareUrl = getShareUrl();
+        if (!shareUrl) return;
+        const res = await fetch(shareUrl, { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ username, permission: 'write' }) });
         const data = await res.json().catch(() => ({}));
         alert(res.ok ? `✅ Доступ предоставлен ${username}` : `❌ ${data.detail || 'Ошибка'}`);
     } catch { alert('Ошибка подключения'); }
@@ -1305,6 +1632,7 @@ async function openSectionTable(tableId) {
         if (res.ok) {
             currentDocument = await res.json();
             currentDocument.doc_type = 'spreadsheet';
+            currentDocument.isSectionTable = true;
             showDocumentEditor(currentDocument);
         } else { alert('Ошибка открытия'); }
     } catch (e) { console.error('Open section table error:', e); alert('Ошибка'); }

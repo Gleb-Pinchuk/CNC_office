@@ -33,7 +33,12 @@ INSTALLED_APPS = [
     'users',
     'documents',
     'sections',
+    'bot_api',
 ]
+
+# Токен для VK-бота (заголовок X-CNC-Bot-Token) и пользователь-владелец таблиц разделов
+CNC_BOT_API_SECRET = os.getenv('CNC_BOT_API_SECRET', '')
+CNC_BOT_TABLE_OWNER_USERNAME = os.getenv('CNC_BOT_TABLE_OWNER_USERNAME', '')
 
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
