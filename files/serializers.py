@@ -52,8 +52,8 @@ class StorageFolderSerializer(serializers.ModelSerializer):
 
     def get_files_count(self, obj):
         # Prefer annotated value from queryset to avoid N+1 DB queries.
-        if hasattr(obj, '__dict__') and 'files_count' in obj.__dict__:
-            return obj.__dict__['files_count']
+        if hasattr(obj, '__dict__') and 'files_count_db' in obj.__dict__:
+            return obj.__dict__['files_count_db']
         # Fallback for safety.
         try:
             return obj.files.count()

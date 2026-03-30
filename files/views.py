@@ -177,7 +177,8 @@ class StorageFolderViewSet(viewsets.ModelViewSet):
         # Annotate counts to avoid N+1 queries when rendering folders.
         return (
             StorageFolder.objects.filter(owner=self.request.user)
-            .annotate(files_count=Count('files'))
+            # Avoid conflict with model @property `files_count`.
+            .annotate(files_count_db=Count('files'))
             .order_by('-created_at')
         )
 

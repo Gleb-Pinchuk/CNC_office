@@ -1,4 +1,4 @@
-// ==================== CNC Office - Frontend App v18.7 (Full Fixed) ====================
+// ==================== CNC Office - Frontend App v18.8 (Full Fixed) ====================
 const API_BASE = '/api';
 let currentUser = null;
 let currentFolder = null;
@@ -29,7 +29,7 @@ const navItems = document.querySelectorAll('.nav-item');
 
 // ✅ Инициализация
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('🚀 App initialized v18.7');
+    console.log('🚀 App initialized v18.8');
     setupEventListeners();
     checkAuth();
 });
@@ -901,7 +901,7 @@ function insertColRight() {
     if (!hotInstance) return;
     const sel = hotInstance.getSelectedLast();
     const col = sel ? Math.max(0, sel[3]) : hotInstance.countCols() - 1;
-    hotInstance.alter('insert_col_end', col, 1);
+    hotInstance.alter('insert_col_start', col + 1, 1);
 }
 
 function initTextEditor(doc) {

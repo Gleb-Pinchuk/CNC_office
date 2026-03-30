@@ -276,15 +276,15 @@
                 <h2 id="documentTitle" style="margin:0;font-size:1.1rem;">Редактор</h2>
                 <div>
                     <span class="btn-group" style="margin-right:10px;display:inline-flex;gap:6px;vertical-align:middle;">
-                        <button class="btn btn-secondary btn-sm" onclick="undoTableEdit()" title="Отменить">↶</button>
-                        <button class="btn btn-secondary btn-sm" onclick="redoTableEdit()" title="Повторить">↷</button>
-                        <button class="btn btn-secondary btn-sm" onclick="toggleSelectionBold()" title="Жирный">B</button>
-                        <button class="btn btn-secondary btn-sm" onclick="toggleSelectionItalic()" title="Курсив"><i>I</i></button>
-                        <button class="btn btn-secondary btn-sm" onclick="setSelectionAlign('left')" title="По левому краю">⟸</button>
-                        <button class="btn btn-secondary btn-sm" onclick="setSelectionAlign('center')" title="По центру">≡</button>
-                        <button class="btn btn-secondary btn-sm" onclick="setSelectionAlign('right')" title="По правому краю">⟹</button>
-                        <button class="btn btn-secondary btn-sm" onclick="insertRowBelow()" title="Вставить строку ниже">+Стр</button>
-                        <button class="btn btn-secondary btn-sm" onclick="insertColRight()" title="Вставить столбец справа">+Стл</button>
+                        <button class="btn btn-secondary btn-sm" onclick="undoTableEdit()" title="Отменить">Отменить</button>
+                        <button class="btn btn-secondary btn-sm" onclick="redoTableEdit()" title="Повторить">Повтор</button>
+                        <button class="btn btn-secondary btn-sm" onclick="toggleSelectionBold()" title="Жирный">Жирный</button>
+                        <button class="btn btn-secondary btn-sm" onclick="toggleSelectionItalic()" title="Курсив">Курсив</button>
+                        <button class="btn btn-secondary btn-sm" onclick="setSelectionAlign('left')" title="По левому краю">Влево</button>
+                        <button class="btn btn-secondary btn-sm" onclick="setSelectionAlign('center')" title="По центру">Центр</button>
+                        <button class="btn btn-secondary btn-sm" onclick="setSelectionAlign('right')" title="По правому краю">Вправо</button>
+                        <button class="btn btn-secondary btn-sm" onclick="insertRowBelow()" title="Вставить строку ниже">Строка +</button>
+                        <button class="btn btn-secondary btn-sm" onclick="insertColRight()" title="Вставить столбец справа">Столбец +</button>
                     </span>
                     <button class="btn btn-secondary btn-sm" onclick="shareCurrentDocument()" style="margin-right:8px;">🔗 Поделиться</button>
                     <button class="btn btn-success btn-sm" onclick="exportToExcel()" style="margin-right:8px;">📥 Excel</button>
@@ -322,6 +322,6 @@
 
     {# ✅ Все пути к JS #}
     <script src="{% static 'vendor/univer/handsontable.js' %}"></script>
-    <script src="{% static 'app.js' %}?v=18.7"></script>
+    <script src="{% static 'app.js' %}?v=18.8"></script>
 </body>
 </html>
