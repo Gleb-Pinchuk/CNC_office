@@ -744,11 +744,43 @@ function initHandsontable(doc) {
             height: '100%',
             width: '100%',
             licenseKey: 'non-commercial-and-evaluation',
-            language: 'ru-RU',
+            // Note: bundled build only ships en-US translations.
+            // We localize the most visible UI pieces via custom menus below.
+            language: 'en-US',
             readOnly: false,
             disableVisualSelection: false,
-            contextMenu: true,
-            dropdownMenu: true,
+            contextMenu: {
+                items: {
+                    row_above: { name: 'Вставить строку сверху' },
+                    row_below: { name: 'Вставить строку снизу' },
+                    col_left: { name: 'Вставить столбец слева' },
+                    col_right: { name: 'Вставить столбец справа' },
+                    remove_row: { name: 'Удалить строку(и)' },
+                    remove_col: { name: 'Удалить столбец(ы)' },
+                    clear_column: { name: 'Очистить столбец' },
+                    undo: { name: 'Отменить' },
+                    redo: { name: 'Повторить' },
+                    read_only: { name: 'Только чтение' },
+                    alignment: {
+                        name: 'Выравнивание',
+                        submenu: {
+                            items: [
+                                { key: 'alignment:left', name: 'По левому краю', callback: () => setSelectionAlign('left') },
+                                { key: 'alignment:center', name: 'По центру', callback: () => setSelectionAlign('center') },
+                                { key: 'alignment:right', name: 'По правому краю', callback: () => setSelectionAlign('right') },
+                            ]
+                        }
+                    },
+                    copy: { name: 'Копировать' },
+                    cut: { name: 'Вырезать' },
+                }
+            },
+            dropdownMenu: [
+                'alignment',
+                'filter_by_condition',
+                'filter_by_value',
+                'filter_action_bar',
+            ],
             filters: true,
             columnSorting: true,
             manualColumnResize: true,
@@ -795,6 +827,58 @@ function initHandsontable(doc) {
         console.error('❌ Error:', e);
         container.innerHTML = `<div style="padding:2rem;color:#000;">⚠️ ${e.message}</div>`;
     }
+}
+
+function _getSelectedRanges() {
+    if (!hotInstance) return [];
+    const ranges = hotInstance.getSelectedRange?.() || [];
+    return Array.isArray(ranges) ? ranges : [];
+}
+
+function _applyClassToSelection(transformFn) {
+    if (!hotInstance) return;
+    const ranges = _getSelectedRanges();
+    if (!ranges.length) return;
+
+    ranges.forEach(range => {
+        const fromRow = Math.min(range.from.row, range.to.row);
+        const toRow = Math.max(range.from.row, range.to.row);
+        const fromCol = Math.min(range.from.col, range.to.col);
+        const toCol = Math.max(range.from.col, range.to.col);
+
+        for (let r = fromRow; r <= toRow; r++) {
+            for (let c = fromCol; c <= toCol; c++) {
+                const meta = hotInstance.getCellMeta(r, c) || {};
+                const next = transformFn(meta.className || '');
+                hotInstance.setCellMeta(r, c, 'className', next);
+            }
+        }
+    });
+
+    hotInstance.render();
+}
+
+function _toggleToken(className, token) {
+    const parts = String(className || '').split(/\s+/).filter(Boolean);
+    const has = parts.includes(token);
+    const next = has ? parts.filter(p => p !== token) : parts.concat([token]);
+    return next.join(' ');
+}
+
+function toggleSelectionBold() {
+    _applyClassToSelection((cls) => _toggleToken(cls, 'htBold'));
+}
+
+function toggleSelectionItalic() {
+    _applyClassToSelection((cls) => _toggleToken(cls, 'htItalic'));
+}
+
+function setSelectionAlign(align) {
+    const token = align === 'center' ? 'htCenter' : align === 'right' ? 'htRight' : 'htLeft';
+    _applyClassToSelection((cls) => {
+        const parts = String(cls || '').split(/\s+/).filter(Boolean).filter(p => !['htLeft', 'htCenter', 'htRight'].includes(p));
+        return parts.concat([token]).join(' ');
+    });
 }
 
 function initTextEditor(doc) {
