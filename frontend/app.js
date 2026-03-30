@@ -703,9 +703,21 @@ class CustomSheetEditor {
         this.redoStack = [];
         this.selection = { r1: 0, c1: 0, r2: 0, c2: 0 };
         this.isSelecting = false;
+        this.fillDrag = null;
+        this.colWidths = Array.isArray(payload?.colWidths) ? payload.colWidths.slice() : [];
+        this.rowHeights = Array.isArray(payload?.rowHeights) ? payload.rowHeights.slice() : [];
         this._onGlobalMouseUp = () => { this.isSelecting = false; };
+        this._onGlobalMouseMove = () => {};
+        this._onFillEnd = () => {
+            if (this.fillDrag) {
+                this._applyFillDrag();
+                this.fillDrag = null;
+                this.render();
+            }
+        };
         window.addEventListener('mouseup', this._onGlobalMouseUp);
         window.addEventListener('blur', this._onGlobalMouseUp);
+        window.addEventListener('mouseup', this._onFillEnd);
 
         const data = Array.isArray(payload?.data) ? payload.data : [];
         const rows = Math.max(payload?.rows || data.length || 20, 20);
@@ -759,6 +771,7 @@ class CustomSheetEditor {
             const el = this.container.querySelector(`[data-r="${r}"][data-c="${c}"]`);
             if (el) el.classList.add('selected');
         });
+        this._positionFillHandle();
     }
     _applyCellStyle(el, styleObj) {
         el.style.fontWeight = styleObj?.bold ? '700' : '400';
@@ -772,17 +785,23 @@ class CustomSheetEditor {
         const rows = this.data.length;
         const cols = this.data[0]?.length || 0;
         let html = '<div class="sheet-wrap"><table class="sheet-table"><thead><tr><th class="corner"></th>';
-        for (let c = 0; c < cols; c++) html += `<th>${this._colName(c)}</th>`;
+        for (let c = 0; c < cols; c++) {
+            const w = this.colWidths[c] || 90;
+            html += `<th data-col-header="${c}" style="width:${w}px;min-width:${w}px;max-width:${w}px;">${this._colName(c)}<span class="col-resizer" data-col-resizer="${c}"></span></th>`;
+        }
         html += '</tr></thead><tbody>';
         for (let r = 0; r < rows; r++) {
-            html += `<tr><th>${r + 1}</th>`;
+            const h = this.rowHeights[r] || 28;
+            html += `<tr style="height:${h}px;"><th data-row-header="${r}" style="height:${h}px;min-height:${h}px;max-height:${h}px;">${r + 1}<span class="row-resizer" data-row-resizer="${r}"></span></th>`;
             for (let c = 0; c < cols; c++) {
-                html += `<td class="sheet-cell" contenteditable="true" data-r="${r}" data-c="${c}">${escapeHtml(this.data[r][c])}</td>`;
+                const w = this.colWidths[c] || 90;
+                html += `<td class="sheet-cell" contenteditable="true" data-r="${r}" data-c="${c}" style="width:${w}px;min-width:${w}px;max-width:${w}px;height:${h}px;">${escapeHtml(this.data[r][c])}</td>`;
             }
             html += '</tr>';
         }
         html += '</tbody></table></div>';
         this.container.innerHTML = html;
+        this.wrapEl = this.container.querySelector('.sheet-wrap');
 
         this.container.querySelectorAll('.sheet-cell').forEach((cell) => {
             const r = Number(cell.dataset.r); const c = Number(cell.dataset.c);
@@ -791,11 +810,145 @@ class CustomSheetEditor {
 
             cell.addEventListener('focus', () => this._setSelection(r, c));
             cell.addEventListener('mousedown', (e) => { e.preventDefault(); this.isSelecting = true; this._setSelection(r, c); cell.focus(); });
-            cell.addEventListener('mouseenter', () => { if (this.isSelecting) this._setSelection(r, c, true); });
+            cell.addEventListener('mouseenter', (e) => {
+                if (this.fillDrag) {
+                    this.fillDrag.target = { r, c };
+                    this._paintFillTarget();
+                    return;
+                }
+                if (this.isSelecting && (e.buttons & 1)) this._setSelection(r, c, true);
+            });
             cell.addEventListener('input', () => { this.data[r][c] = cell.textContent || ''; });
             cell.addEventListener('blur', () => { this.data[r][c] = cell.textContent || ''; });
         });
+        this._bindResizers();
+        this._ensureFillHandle();
         this._paintSelection();
+    }
+    _bindResizers() {
+        this.container.querySelectorAll('[data-col-resizer]').forEach((el) => {
+            el.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const col = Number(el.dataset.colResizer);
+                const startX = e.clientX;
+                const startW = this.colWidths[col] || 90;
+                const onMove = (ev) => {
+                    const w = Math.max(50, startW + (ev.clientX - startX));
+                    this.colWidths[col] = w;
+                    this.render();
+                };
+                const onUp = () => {
+                    window.removeEventListener('mousemove', onMove);
+                    window.removeEventListener('mouseup', onUp);
+                };
+                window.addEventListener('mousemove', onMove);
+                window.addEventListener('mouseup', onUp);
+            });
+        });
+        this.container.querySelectorAll('[data-row-resizer]').forEach((el) => {
+            el.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const row = Number(el.dataset.rowResizer);
+                const startY = e.clientY;
+                const startH = this.rowHeights[row] || 28;
+                const onMove = (ev) => {
+                    const h = Math.max(22, startH + (ev.clientY - startY));
+                    this.rowHeights[row] = h;
+                    this.render();
+                };
+                const onUp = () => {
+                    window.removeEventListener('mousemove', onMove);
+                    window.removeEventListener('mouseup', onUp);
+                };
+                window.addEventListener('mousemove', onMove);
+                window.addEventListener('mouseup', onUp);
+            });
+        });
+    }
+    _ensureFillHandle() {
+        if (!this.wrapEl) return;
+        const handle = document.createElement('div');
+        handle.className = 'sheet-fill-handle';
+        handle.title = 'Протяните для автозаполнения';
+        handle.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            this.fillDrag = { base: this._normalizeSelection(), target: null };
+        });
+        this.wrapEl.appendChild(handle);
+        this.fillHandle = handle;
+    }
+    _positionFillHandle() {
+        if (!this.fillHandle || !this.wrapEl) return;
+        const s = this._normalizeSelection();
+        const endCell = this.container.querySelector(`[data-r="${s.r2}"][data-c="${s.c2}"]`);
+        if (!endCell) return;
+        const r1 = this.wrapEl.getBoundingClientRect();
+        const r2 = endCell.getBoundingClientRect();
+        this.fillHandle.style.left = `${r2.right - r1.left + this.wrapEl.scrollLeft - 4}px`;
+        this.fillHandle.style.top = `${r2.bottom - r1.top + this.wrapEl.scrollTop - 4}px`;
+    }
+    _paintFillTarget() {
+        this.container.querySelectorAll('.sheet-cell').forEach(el => el.classList.remove('fill-target'));
+        if (!this.fillDrag?.target) return;
+        const b = this.fillDrag.base;
+        const t = this.fillDrag.target;
+        const area = {
+            r1: Math.min(b.r1, t.r),
+            r2: Math.max(b.r2, t.r),
+            c1: Math.min(b.c1, t.c),
+            c2: Math.max(b.c2, t.c),
+        };
+        for (let r = area.r1; r <= area.r2; r++) for (let c = area.c1; c <= area.c2; c++) {
+            if (r >= b.r1 && r <= b.r2 && c >= b.c1 && c <= b.c2) continue;
+            const el = this.container.querySelector(`[data-r="${r}"][data-c="${c}"]`);
+            if (el) el.classList.add('fill-target');
+        }
+    }
+    _applyFillDrag() {
+        if (!this.fillDrag?.target) return;
+        this._pushUndo();
+        const b = this.fillDrag.base;
+        const t = this.fillDrag.target;
+        const area = {
+            r1: Math.min(b.r1, t.r),
+            r2: Math.max(b.r2, t.r),
+            c1: Math.min(b.c1, t.c),
+            c2: Math.max(b.c2, t.c),
+        };
+        const baseRows = b.r2 - b.r1 + 1;
+        const baseCols = b.c2 - b.c1 + 1;
+        const oneCol = baseCols === 1;
+        const oneRow = baseRows === 1;
+        let step = null;
+        if (oneCol && baseRows >= 2) {
+            const a = Number(this.data[b.r1][b.c1]); const z = Number(this.data[b.r1 + 1][b.c1]);
+            if (Number.isFinite(a) && Number.isFinite(z)) step = z - a;
+        }
+        if (oneRow && baseCols >= 2) {
+            const a = Number(this.data[b.r1][b.c1]); const z = Number(this.data[b.r1][b.c1 + 1]);
+            if (Number.isFinite(a) && Number.isFinite(z)) step = z - a;
+        }
+        for (let r = area.r1; r <= area.r2; r++) for (let c = area.c1; c <= area.c2; c++) {
+            if (r >= b.r1 && r <= b.r2 && c >= b.c1 && c <= b.c2) continue;
+            let sr = b.r1 + ((r - b.r1) % baseRows + baseRows) % baseRows;
+            let sc = b.c1 + ((c - b.c1) % baseCols + baseCols) % baseCols;
+            let val = this.data[sr][sc];
+            if (step !== null && oneCol) {
+                const idx = r - b.r1;
+                const start = Number(this.data[b.r1][b.c1]);
+                if (Number.isFinite(start)) val = String(start + step * idx);
+            } else if (step !== null && oneRow) {
+                const idx = c - b.c1;
+                const start = Number(this.data[b.r1][b.c1]);
+                if (Number.isFinite(start)) val = String(start + step * idx);
+            }
+            this.data[r][c] = val;
+            const srcStyle = this.styles[this._cellKey(sr, sc)];
+            if (srcStyle) this.styles[this._cellKey(r, c)] = { ...srcStyle };
+        }
     }
 
     focus() {
@@ -806,9 +959,22 @@ class CustomSheetEditor {
     destroy() {
         window.removeEventListener('mouseup', this._onGlobalMouseUp);
         window.removeEventListener('blur', this._onGlobalMouseUp);
+        if (this._onFillEnd) {
+            window.removeEventListener('mouseup', this._onFillEnd);
+            this._onFillEnd = null;
+        }
         this.container.innerHTML = '';
     }
-    export() { return { rows: this.data.length, cols: this.data[0]?.length || 0, data: this.data, styles: this.styles }; }
+    export() {
+        return {
+            rows: this.data.length,
+            cols: this.data[0]?.length || 0,
+            data: this.data,
+            styles: this.styles,
+            colWidths: this.colWidths,
+            rowHeights: this.rowHeights,
+        };
+    }
 
     toggleBold() {
         this._pushUndo();
@@ -930,6 +1096,11 @@ function setSelectionTextColor(color) {
 }
 function setSelectionFillColor(color) {
     if (sheetEditor) sheetEditor.setFillColor(color);
+}
+function setRibbonTab(tabName) {
+    document.querySelectorAll('.sheet-ribbon-tab').forEach((el) => {
+        el.classList.toggle('active', el.dataset.tab === tabName);
+    });
 }
 
 function undoTableEdit() {
@@ -1115,7 +1286,7 @@ async function createSectionTable() {
             body: JSON.stringify({
                 title,
                 section_type: sectionType,
-                content: { handsontable: Array(20).fill(null).map(() => Array(10).fill('')) }
+                content: { custom_sheet: { rows: 20, cols: 10, data: Array(20).fill(null).map(() => Array(10).fill('')), styles: {} } }
             })
         });
         if (res.ok) {
