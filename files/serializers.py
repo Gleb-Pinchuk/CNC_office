@@ -1,5 +1,5 @@
-# files/serializers.py
 from rest_framework import serializers
+
 from .models import StorageFile, StorageFolder, FilePermission, AuditLog
 from users.serializers import UserListSerializer
 
@@ -35,7 +35,7 @@ class StorageFolderSerializer(serializers.ModelSerializer):
     """
     owner = UserListSerializer(read_only=True)
     owner_username = serializers.ReadOnlyField(source='owner.username')
-    files_count = serializers.ReadOnlyField()
+    files_count = serializers.SerializerMethodField()
 
     class Meta:
         model = StorageFolder
@@ -49,6 +49,16 @@ class StorageFolderSerializer(serializers.ModelSerializer):
             'created_at',
         ]
         read_only_fields = ['owner', 'files_count', 'created_at']
+
+    def get_files_count(self, obj):
+        # Prefer annotated value from queryset to avoid N+1 DB queries.
+        if hasattr(obj, '__dict__') and 'files_count' in obj.__dict__:
+            return obj.__dict__['files_count']
+        # Fallback for safety.
+        try:
+            return obj.files.count()
+        except Exception:
+            return 0
 
 
 class FilePermissionSerializer(serializers.ModelSerializer):

@@ -1,4 +1,4 @@
-// ==================== CNC Office - Frontend App v18.5 (Full Fixed) ====================
+// ==================== CNC Office - Frontend App v18.6 (Full Fixed) ====================
 const API_BASE = '/api';
 let currentUser = null;
 let currentFolder = null;
@@ -29,7 +29,7 @@ const navItems = document.querySelectorAll('.nav-item');
 
 // ✅ Инициализация
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('🚀 App initialized v18.5');
+    console.log('🚀 App initialized v18.6');
     setupEventListeners();
     checkAuth();
 });
@@ -702,6 +702,7 @@ function initHandsontable(doc) {
     console.log('🔍 initHandsontable called');
     const container = document.getElementById('handsontable-container');
     if (!container) { console.error('❌ Container not found'); return; }
+
     if (typeof Handsontable === 'undefined') {
         console.error('❌ Handsontable not loaded');
         container.innerHTML = '<div style="padding:2rem;color:#000;">⚠️ Редактор не загрузился</div>';
@@ -709,10 +710,33 @@ function initHandsontable(doc) {
     }
     container.innerHTML = '';
     try {
-        let data = doc.content?.handsontable;
-        if (!data || !Array.isArray(data)) {
+        // Normalize stored data (may come as JSON-string or nested object).
+        let raw = doc?.content?.handsontable;
+        if (typeof raw === 'string') {
+            try { raw = JSON.parse(raw); } catch (e) {}
+        }
+        if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+            if (Array.isArray(raw.data)) raw = raw.data;
+            else if (Array.isArray(raw.cells)) raw = raw.cells;
+        }
+
+        let data = Array.isArray(raw) ? raw : null;
+        if (!data || data.length === 0) {
             data = Array(20).fill(null).map(() => Array(10).fill(''));
         }
+
+        // Ensure rectangular 2D array (Handsontable expects consistent rows).
+        let detectedCols = 0;
+        for (const row of data) {
+            if (Array.isArray(row)) detectedCols = Math.max(detectedCols, row.length);
+        }
+        const cols = Math.max(detectedCols, 10);
+        const rows = Math.max(data.length, 20);
+        data = Array.from({ length: rows }, (_, r) => {
+            const row = Array.isArray(data[r]) ? data[r] : [];
+            return Array.from({ length: cols }, (_, c) => row[c] ?? '');
+        });
+
         hotInstance = new Handsontable(container, {
             data: data,
             colHeaders: true,

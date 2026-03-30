@@ -1,4 +1,4 @@
-# files/views.py
+from django.db.models import Count
 from rest_framework import viewsets, permissions, status
 from rest_framework.response import Response
 from rest_framework.decorators import action
@@ -174,7 +174,12 @@ class StorageFolderViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        return StorageFolder.objects.filter(owner=self.request.user).order_by('-created_at')
+        # Annotate counts to avoid N+1 queries when rendering folders.
+        return (
+            StorageFolder.objects.filter(owner=self.request.user)
+            .annotate(files_count=Count('files'))
+            .order_by('-created_at')
+        )
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
