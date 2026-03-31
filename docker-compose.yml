@@ -95,7 +95,7 @@ services:
       CNC_API_BASE: http://web:8000/api
     depends_on:
       web:
-        condition: service_healthy
+        condition: service_started
     networks:
       - app-network
     logging:
