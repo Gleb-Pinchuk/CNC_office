@@ -13,6 +13,9 @@ DEBUG = os.getenv('DEBUG', 'False').lower() in ('true', '1', 'yes')
 
 ALLOWED_HOSTS_ENV = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1')
 ALLOWED_HOSTS = [h.strip() for h in ALLOWED_HOSTS_ENV.split(',') if h.strip()]
+for local_host in ('localhost', '127.0.0.1', '[::1]'):
+    if local_host not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(local_host)
 if not DEBUG and (not ALLOWED_HOSTS or '*' in ALLOWED_HOSTS):
     raise ImproperlyConfigured('In production set ALLOWED_HOSTS without "*"')
 
