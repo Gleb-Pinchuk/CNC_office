@@ -42,8 +42,7 @@ class TestFileViewSet:
         response = auth_client.patch(
             f'/api/files/{test_file.id}/',
             data,
-            format='json',
-            content_type='application/json'
+            format='json'
         )
         # Depending on serializer, patch may be rejected or ignored.
         assert response.status_code in [status.HTTP_200_OK, status.HTTP_400_BAD_REQUEST]
