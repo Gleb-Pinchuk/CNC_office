@@ -454,17 +454,46 @@ async function downloadFile(fileId) {
 async function shareFile(fileId) {
     const username = prompt('Имя пользователя:');
     if (!username) return;
+    const canWrite = confirm('Разрешить редактирование?\n\nОК = чтение и запись\nОтмена = только чтение');
     try {
         const res = await fetch(`${API_BASE}/files/${fileId}/share/`, {
             method: 'POST',
             headers: getAuthHeaders(),
-            body: JSON.stringify({ username, permission: 'read' })
+            body: JSON.stringify({ username, permission: canWrite ? 'write' : 'read' })
         });
         const data = await res.json().catch(() => ({}));
         alert(res.ok ? `✅ Доступ предоставлен ${username}` : `❌ ${data.detail || 'Ошибка'}`);
     } catch {
         alert('Ошибка подключения');
     }
+}
+
+async function updatePermission(permId, permission) {
+    try {
+        const res = await fetch(`${API_BASE}/permissions/${permId}/`, {
+            method: 'PATCH',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ permission })
+        });
+        if (res.ok) {
+            await loadShared();
+        } else {
+            const err = await res.json().catch(() => ({}));
+            alert(`❌ ${err.detail || 'Не удалось обновить доступ'}`);
+        }
+    } catch { alert('Ошибка подключения'); }
+}
+
+async function revokePermission(permId) {
+    if (!confirm('Снять доступ?')) return;
+    try {
+        const res = await fetch(`${API_BASE}/permissions/${permId}/`, { method: 'DELETE', headers: getAuthHeaders(false) });
+        if (res.ok || res.status === 204) await loadShared();
+        else {
+            const err = await res.json().catch(() => ({}));
+            alert(`❌ ${err.detail || 'Не удалось снять доступ'}`);
+        }
+    } catch { alert('Ошибка подключения'); }
 }
 
 // ✅ УДАЛЕНИЕ ФАЙЛА
@@ -1901,6 +1930,7 @@ function createSharedCard(perm, index) {
     const fileId = perm.file_id ?? perm.file;
     const fileType = perm.file_type || 'storage_file';
     const canWrite = perm.permission === 'write';
+    const canManage = !!perm.can_manage;
     const openShared = async () => {
         if (!fileId) return;
         if (fileType === 'storage_file') return downloadFile(fileId);
@@ -1934,6 +1964,25 @@ function createSharedCard(perm, index) {
         btn.textContent = fileType === 'storage_file' ? '⬇️' : (canWrite ? '✏️' : '👁️');
         btn.onclick = (e) => { e.stopPropagation(); openShared(); };
         actions.appendChild(btn);
+
+        if (canManage) {
+            const toggle = document.createElement('button');
+            toggle.className = 'file-action-btn';
+            toggle.title = 'Переключить read/write';
+            toggle.textContent = canWrite ? '👁️' : '✏️';
+            toggle.onclick = (e) => {
+                e.stopPropagation();
+                updatePermission(perm.id, canWrite ? 'read' : 'write');
+            };
+            actions.appendChild(toggle);
+
+            const del = document.createElement('button');
+            del.className = 'file-action-btn';
+            del.title = 'Снять доступ';
+            del.textContent = '✖';
+            del.onclick = (e) => { e.stopPropagation(); revokePermission(perm.id); };
+            actions.appendChild(del);
+        }
     }
     return card;
 }

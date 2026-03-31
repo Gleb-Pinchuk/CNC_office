@@ -213,6 +213,30 @@ class FilePermission(models.Model):
                 return f'Документ #{self.file_id}'
         return f'{self.file_type} #{self.file_id}'
 
+    def get_object_owner(self):
+        """
+        Возвращает владельца объекта (User) или None.
+        Используется для управления разрешениями (снять доступ/изменить read/write).
+        """
+        if self.file_type == 'storage_file':
+            try:
+                return StorageFile.objects.only('owner').get(id=self.file_id).owner
+            except StorageFile.DoesNotExist:
+                return None
+        if self.file_type == 'section_table':
+            try:
+                from sections.models import SectionTable
+                return SectionTable.objects.only('owner').get(id=self.file_id).owner
+            except Exception:
+                return None
+        if self.file_type == 'document':
+            try:
+                from documents.models import Document
+                return Document.objects.only('owner').get(id=self.file_id).owner
+            except Exception:
+                return None
+        return None
+
 
 class AuditLog(models.Model):
     """

@@ -215,12 +215,13 @@ class StorageFolderViewSet(viewsets.ModelViewSet):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-class FilePermissionViewSet(viewsets.ReadOnlyModelViewSet):
+class FilePermissionViewSet(viewsets.ModelViewSet):
     """
     Просмотр предоставленных доступов (для раздела "Общий доступ")
     """
     serializer_class = FilePermissionSerializer
     permission_classes = [permissions.IsAuthenticated]
+    http_method_names = ['get', 'head', 'options', 'patch', 'delete']
 
     def get_renderer_classes(self):
         """✅ Возвращаем только JSON рендерер"""
@@ -257,6 +258,27 @@ class FilePermissionViewSet(viewsets.ReadOnlyModelViewSet):
 
         # ✅ Объединяем оба запроса
         return (given_to_user | owned_permissions).select_related('user').distinct().order_by('-created_at')
+
+    def partial_update(self, request, *args, **kwargs):
+        perm = self.get_object()
+        owner = perm.get_object_owner()
+        if owner != request.user:
+            return Response({'detail': 'Только владелец может менять права доступа'}, status=status.HTTP_403_FORBIDDEN)
+        new_perm = request.data.get('permission')
+        if new_perm not in ('read', 'write'):
+            return Response({'detail': 'permission должен быть read или write'}, status=status.HTTP_400_BAD_REQUEST)
+        perm.permission = new_perm
+        perm.save(update_fields=['permission'])
+        ser = self.get_serializer(perm)
+        return Response(ser.data)
+
+    def destroy(self, request, *args, **kwargs):
+        perm = self.get_object()
+        owner = perm.get_object_owner()
+        if owner != request.user:
+            return Response({'detail': 'Только владелец может снять доступ'}, status=status.HTTP_403_FORBIDDEN)
+        perm.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):

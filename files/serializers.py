@@ -67,6 +67,7 @@ class FilePermissionSerializer(serializers.ModelSerializer):
     """
     user = UserListSerializer(read_only=True)
     file_name = serializers.ReadOnlyField()
+    can_manage = serializers.SerializerMethodField()
 
     class Meta:
         model = FilePermission
@@ -77,9 +78,21 @@ class FilePermissionSerializer(serializers.ModelSerializer):
             'file_name',
             'user',
             'permission',
+            'can_manage',
             'created_at',
         ]
         read_only_fields = ['file_name', 'created_at']
+
+    def get_can_manage(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user or not request.user.is_authenticated:
+            return False
+        owner = None
+        try:
+            owner = obj.get_object_owner()
+        except Exception:
+            owner = None
+        return bool(owner and owner == request.user)
 
 
 class AuditLogSerializer(serializers.ModelSerializer):
