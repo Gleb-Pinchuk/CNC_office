@@ -1,6 +1,8 @@
 import pytest
 from rest_framework import status
 from django.contrib.auth import get_user_model
+from rest_framework.test import APIClient
+from rest_framework.authtoken.models import Token
 
 from files.models import FilePermission
 
@@ -62,12 +64,10 @@ class TestFilePermissions:
         perm.refresh_from_db()
         assert perm.permission == 'write'
 
-    def test_non_owner_cannot_manage(self, client, user, test_file):
+    def test_non_owner_cannot_manage(self, auth_client, user, test_file):
         other = User.objects.create_user(username='other3', password='pass')
         # owner shares to other
-        owner_client = client
-        owner_client.force_login(user)
-        owner_client.post(
+        auth_client.post(
             f'/api/files/{test_file.id}/share/',
             data={'username': other.username, 'permission': 'read'},
             content_type='application/json'
@@ -75,8 +75,9 @@ class TestFilePermissions:
         perm = FilePermission.objects.get(file_type='storage_file', file_id=test_file.id, user=other)
 
         # other cannot patch/delete
-        other_client = client.__class__()
-        other_client.force_login(other)
+        other_client = APIClient()
+        other_token, _ = Token.objects.get_or_create(user=other)
+        other_client.credentials(HTTP_AUTHORIZATION=f'Token {other_token.key}')
         res_patch = other_client.patch(
             f'/api/permissions/{perm.id}/',
             data={'permission': 'write'},
