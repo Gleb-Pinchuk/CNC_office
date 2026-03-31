@@ -188,6 +188,14 @@ CSP_FRAME_SRC = ("'self'", 'https:', 'http:')
 # ✅ X-Frame-Options
 X_FRAME_OPTIONS = 'SAMEORIGIN'
 
+# Ensure log directory exists (CI/local runs)
+LOG_DIR = BASE_DIR / 'logs'
+try:
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+except Exception:
+    # If the filesystem is read-only, fallback to console-only logging below.
+    LOG_DIR = None
+
 # ✅ Логирование
 LOGGING = {
     'version': 1,
@@ -205,7 +213,7 @@ LOGGING = {
         },
         'file': {
             'class': 'logging.FileHandler',
-            'filename': BASE_DIR / 'logs' / 'django.log',
+            'filename': (BASE_DIR / 'logs' / 'django.log') if LOG_DIR else '/tmp/django.log',
             'formatter': 'verbose',
         },
     },
