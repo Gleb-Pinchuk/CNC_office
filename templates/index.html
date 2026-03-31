@@ -16,6 +16,19 @@
 
     <style>
         .hidden { display: none !important; }
+        .landing-root {
+            position: fixed;
+            inset: 0;
+            z-index: 1800;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            background: #0a0a0f;
+            color: #ffffff;
+            overflow: auto;
+        }
+        .landing-root.show { display: flex; }
+        .landing-root .navbar { position: relative; z-index: 2; }
         .modal-form { transition: opacity 0.2s ease; }
         #previewContent img { border-radius: 8px; }
         .section-divider { margin: 1rem 0 0.5rem 0; padding: 0.5rem 1rem; font-size: 0.75rem; text-transform: uppercase; color: #666; font-weight: 600; }
@@ -292,6 +305,56 @@
     </style>
 </head>
 <body>
+    <div id="landingRoot" class="landing-root">
+        <div style="width:100%;min-height:100vh;">
+            <nav class="navbar">
+                <div class="container">
+                    <div class="logo">
+                        <svg class="logo-icon" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <circle cx="24" cy="24" r="20" stroke="url(#logo-gradient)" stroke-width="2" fill="none"/>
+                            <path d="M24 14 L24 24 L32 28" stroke="url(#logo-gradient)" stroke-width="2" stroke-linecap="round"/>
+                            <circle cx="24" cy="24" r="3" fill="url(#logo-gradient)"/>
+                            <defs>
+                                <linearGradient id="logo-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                                    <stop offset="0%" style="stop-color:#00f5ff"/><stop offset="100%" style="stop-color:#7b2cbf"/>
+                                </linearGradient>
+                            </defs>
+                        </svg>
+                        <span class="logo-text">CNC <span class="highlight">OFFICE</span></span>
+                    </div>
+                    <div class="nav-actions">
+                        <button class="btn btn-outline" type="button" onclick="openModal('loginModal')">Войти</button>
+                        <button class="btn btn-primary" type="button" onclick="openModal('registerModal')">Регистрация</button>
+                    </div>
+                </div>
+            </nav>
+
+            <section class="hero">
+                <div class="container">
+                    <div class="hero-content">
+                        <div class="badge">
+                            <span class="pulse"></span>
+                            <span>Облачные таблицы и файлы</span>
+                        </div>
+                        <h1 class="hero-title">
+                            <span class="gradient-text">CNC</span> <span class="tech-text">Office</span>
+                        </h1>
+                        <p class="hero-subtitle">
+                            Hi-Tech облако: хранение файлов, таблицы и совместная работа.
+                        </p>
+                        <div class="hero-buttons">
+                            <button class="btn btn-primary btn-large" type="button" onclick="openModal('registerModal')">
+                                Начать бесплатно
+                            </button>
+                            <button class="btn btn-outline btn-large" type="button" onclick="openModal('loginModal')">
+                                Войти
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </div>
     <div class="app-container">
         <div class="bg-animation">
             <div class="grid-lines"></div>
@@ -330,15 +393,12 @@
                 <div class="section-divider">📊 Разделы</div>
 
                 <a href="#" class="nav-item" data-view="section-attendance">
-                    <span style="margin-right:0.5rem;">📊</span>
                     <span>Посещаемость</span>
                 </a>
                 <a href="#" class="nav-item" data-view="section-rangers">
-                    <span style="margin-right:0.5rem;">🤖</span>
                     <span>Цифровые рейнджеры</span>
                 </a>
                 <a href="#" class="nav-item" data-view="section-statements">
-                    <span style="margin-right:0.5rem;">📋</span>
                     <span>Ведомости</span>
                 </a>
 
