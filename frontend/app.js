@@ -27,15 +27,12 @@ const registerForm = document.getElementById('registerForm');
 const usernameSpan = document.getElementById('username');
 const folderSelect = document.getElementById('folderSelect');
 const navItems = document.querySelectorAll('.nav-item');
-const landingRoot = document.getElementById('landingRoot');
-const appContainerEl = document.querySelector('.app-container');
 
 // ✅ Инициализация
 document.addEventListener('DOMContentLoaded', () => {
     console.log('🚀 App initialized v19.3');
     setupEventListeners();
     setAuthUI(!!authToken);
-    setLandingUI(!!authToken);
     checkAuth();
 });
 
@@ -47,12 +44,6 @@ function setAuthUI(isAuthed) {
     if (sidebar) sidebar.style.display = isAuthed ? 'flex' : 'none';
     const header = document.querySelector('.header');
     if (header) header.style.display = isAuthed ? 'flex' : 'none';
-}
-
-function setLandingUI(isAuthed) {
-    if (!landingRoot) return;
-    landingRoot.classList.toggle('show', !isAuthed);
-    // Не блокируем клики всей app-container, чтобы модальные окна могли открываться поверх landing.
 }
 
 // ✅ Заголовки для API-запросов
@@ -99,13 +90,12 @@ function clearAuth() {
     authToken = null;
     currentUser = null;
     setAuthUI(false);
-    setLandingUI(false);
 }
 
 // ✅ Проверка авторизации
 async function checkAuth() {
     authToken = localStorage.getItem('cnc_auth_token');
-    if (!authToken) { setAuthUI(false); setLandingUI(false); return; }
+    if (!authToken) { setAuthUI(false); showLoginModal(); return; }
 
     try {
         const res = await fetch(`${API_BASE}/users/me/`, { headers: getAuthHeaders() });
@@ -113,16 +103,15 @@ async function checkAuth() {
             currentUser = await res.json();
             if (usernameSpan) usernameSpan.textContent = currentUser.username;
             setAuthUI(true);
-            setLandingUI(true);
             loadView('files');
         } else {
             clearAuth();
-            setLandingUI(false);
+            showLoginModal();
         }
     } catch (e) {
         console.error('Auth check failed:', e);
         setAuthUI(false);
-        setLandingUI(false);
+        showLoginModal();
     }
 }
 
