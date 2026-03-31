@@ -139,6 +139,15 @@ function showModal(modal) {
     }
 }
 
+// Совместимость с landing: глобальные функции openModal/closeModal
+function openModal(modalId) {
+    showModal(modalId);
+}
+
+function closeModal(modalId) {
+    hideModal(modalId);
+}
+
 // ✅ Скрыть модальное окно
 function hideModal(modal) {
     const el = typeof modal === 'string' ? document.getElementById(modal) : modal;
