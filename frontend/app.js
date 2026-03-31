@@ -1491,8 +1491,12 @@ class MultiSheetWorkbook {
                 while (existing.has(finalName.toLowerCase()) && finalName.toLowerCase() !== oldName.toLowerCase()) {
                     finalName = `${cleaned} (${suffix++})`;
                 }
-                this._syncActive();
                 this.sheets[idx].name = finalName;
+                // Important: keep active editor state in sync with new sheet name.
+                if (idx === this.activeIndex && this._editor) {
+                    this._editor.sheetName = finalName;
+                    this._syncActive();
+                }
                 this._renderTabs();
             };
             this.tabContainer.appendChild(btn);

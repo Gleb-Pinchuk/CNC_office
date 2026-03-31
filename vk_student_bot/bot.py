@@ -217,32 +217,93 @@ def parse_week_columns(headers: List[str], today: date) -> List[Tuple[int, str, 
     """Возвращает список (col_idx, заголовок, start_date, end_date)."""
     out: List[Tuple[int, str, Optional[date], Optional[date]]] = []
     y = today.year
+
+    # dd.mm(.yyyy) — встречается почти везде в заголовках недель
+    ddm = re.compile(r"(\d{1,2})\.(\d{1,2})(?:\.(\d{2,4}))?")
+
+    # Range: (1-я дата) ... dash ... (2-я дата)
+    # Поддерживаем варианты вроде "02.04.-06.04" (dot перед dash) и "02.04-06.04".
+    range_dash = re.compile(
+        r"(\d{1,2}\.\d{1,2}(?:\.\d{2,4})?)\s*\.?\s*[-–]\s*"
+        r"(\d{1,2}\.\d{1,2}(?:\.\d{2,4})?)"
+    )
+
+    def to_date(s: str) -> Optional[date]:
+        s = s.strip()
+        # If contains year explicitly.
+        m = re.match(r"^(\d{1,2})\.(\d{1,2})\.(\d{2,4})$", s)
+        if m:
+            d, mo, yy = m.groups()
+            fmt = "%d.%m.%Y" if len(yy) == 4 else "%d.%m.%y"
+            try:
+                return datetime.strptime(s, fmt).date()
+            except ValueError:
+                return None
+        # No year => use current year and adjust later by comparing.
+        m2 = re.match(r"^(\d{1,2})\.(\d{1,2})$", s)
+        if not m2:
+            return None
+        d, mo = m2.groups()
+        try:
+            return date(int(y), int(mo), int(d))
+        except ValueError:
+            return None
+
     for c, raw in enumerate(headers):
         h = str(raw or "").strip()
         if not h:
             continue
-        # dd.mm.yyyy - dd.mm.yyyy
-        m = re.search(r"(\d{1,2}\.\d{1,2}\.(\d{4}))\s*[-–]\s*(\d{1,2}\.\d{1,2}\.(\d{4}))", h)
+
+        # Prefer "range" match.
+        m = range_dash.search(h)
         if m:
-            try:
-                ds = datetime.strptime(m.group(1), "%d.%m.%Y").date()
-                de = datetime.strptime(m.group(3), "%d.%m.%Y").date()
-                out.append((c, h, ds, de))
-            except ValueError:
+            left, right = m.group(1), m.group(2)
+            ds = to_date(left)
+            de = to_date(right)
+            if ds and de:
+                # If both dates without year -> de < ds means crossing new year.
+                if ds <= de:
+                    out.append((c, h, ds, de))
+                else:
+                    # Adjust end year by +1 where year missing.
+                    if not re.search(r"\.\d{4}\b|\.\d{2}\b", left) and not re.search(r"\.\d{4}\b|\.\d{2}\b", right):
+                        try:
+                            de2 = date(ds.year + 1, de.month, de.day)
+                            out.append((c, h, ds, de2))
+                        except ValueError:
+                            pass
                 continue
+
+        # Fallback: extract all dd.mm(.yyyy) occurrences and take first two
+        parts = ddm.findall(h)
+        if len(parts) < 2:
             continue
-        # dd.mm - dd.mm (год текущий / перенос через Новый год)
-        m2 = re.search(r"(\d{1,2}\.\d{1,2})\s*[-–]\s*(\d{1,2}\.\d{1,2})", h)
-        if m2:
+
+        # Build first two dates with best effort.
+        def build(idx: int) -> Optional[date]:
+            d_s, m_s, y_s = parts[idx]
+            if y_s:
+                fmt = "%d.%m.%Y" if len(y_s) == 4 else "%d.%m.%y"
+                try:
+                    return datetime.strptime(f"{d_s}.{m_s}.{y_s}", fmt).date()
+                except ValueError:
+                    return None
             try:
-                a, b = m2.group(1), m2.group(2)
-                ds = datetime.strptime(f"{a}.{y}", "%d.%m.%Y").date()
-                de = datetime.strptime(f"{b}.{y}", "%d.%m.%Y").date()
-                if de < ds:
-                    de = de.replace(year=y + 1)
-                out.append((c, h, ds, de))
+                return date(y, int(m_s), int(d_s))
+            except ValueError:
+                return None
+
+        ds = build(0)
+        de = build(1)
+        if not ds or not de:
+            continue
+        if de < ds:
+            try:
+                de = date(ds.year + 1, de.month, de.day)
             except ValueError:
                 continue
+        out.append((c, h, ds, de))
+
     return out
 
 
@@ -640,10 +701,11 @@ def main() -> None:
                 if not current_group:
                     send_vk_message(vk, user_id, "⚠️ Сначала выберите группу (лист).", get_main_keyboard())
                     continue
-                students = get_students_list(current_group)
-                if not students:
+                students_map = get_students_map(current_group)
+                if not students_map:
                     send_vk_message(vk, user_id, "❌ Нет студентов", get_back_keyboard())
                     continue
+                students = [(i + 1, fio) for i, (_, fio) in enumerate(students_map)]
                 send_vk_message(
                     vk,
                     user_id,
