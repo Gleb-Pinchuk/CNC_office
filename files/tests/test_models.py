@@ -1,6 +1,6 @@
 import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
-from files.models import StorageFile, StorageFolder, FileAccessPermission, FileLock, AuditLog
+from files.models import StorageFile, StorageFolder, FilePermission, AuditLog
 from django.contrib.auth import get_user_model
 
 @pytest.mark.django_db
@@ -42,21 +42,11 @@ class TestFileAccessPermission:
         storage_file = StorageFile.objects.create(owner=user, folder=folder, file=file, size=4)
 
         other_user = get_user_model().objects.create_user(username='other', password='pass')
-        permission = FileAccessPermission.objects.create(
-            file=storage_file, user=other_user, permission='read'
+        permission = FilePermission.objects.create(
+            file_type='storage_file', file_id=storage_file.id, user=other_user, permission='read'
         )
         assert permission.permission == 'read'
         assert permission.user == other_user
-
-@pytest.mark.django_db
-class TestFileLock:
-    def test_create_lock(self, user, folder):
-        file = SimpleUploadedFile("locked.txt", b"data", content_type="text/plain")
-        storage_file = StorageFile.objects.create(owner=user, folder=folder, file=file, size=4)
-
-        lock = FileLock.objects.create(file=storage_file, locked_by=user)
-        assert lock.locked_by == user
-        assert lock.file == storage_file
 
 
 @pytest.mark.django_db
