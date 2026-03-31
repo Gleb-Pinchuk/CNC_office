@@ -85,8 +85,10 @@ class TestFileViewSet:
         response = auth_client.get(f'/api/files/?folder={folder_a.id}')
 
         assert response.status_code == status.HTTP_200_OK
-        assert len(response.data) == 1
-        assert response.data[0]['folder'] == folder_a.id
+        payload = response.data
+        items = payload.get('results', payload) if isinstance(payload, dict) else payload
+        assert len(items) == 1
+        assert items[0]['folder'] == folder_a.id
 
     def test_share_requires_username(self, auth_client, test_file):
         response = auth_client.post(
