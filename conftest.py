@@ -1,5 +1,7 @@
 import pytest
 from django.contrib.auth import get_user_model
+from rest_framework.test import APIClient
+from rest_framework.authtoken.models import Token
 from files.models import StorageFile, StorageFolder
 
 User = get_user_model()
@@ -10,9 +12,12 @@ def user():
 
 @pytest.fixture
 def auth_client(client, user):
-    client.force_login(user)
-    client.force_user = user
-    return client
+    api_client = APIClient()
+    token, _ = Token.objects.get_or_create(user=user)
+    api_client.credentials(HTTP_AUTHORIZATION=f'Token {token.key}')
+    # keep compatibility with existing tests that access force_user
+    api_client.force_user = user
+    return api_client
 
 @pytest.fixture
 def folder(user):
