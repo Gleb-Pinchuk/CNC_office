@@ -1,4 +1,4 @@
-// ==================== CNC Office - Frontend App v19.3 (Workbook + section save fix) ====================
+// ==================== CNC Office - Frontend App v19.4 (Landing overlay + nav polish) ====================
 const API_BASE = '/api';
 let currentUser = null;
 let currentFolder = null;
