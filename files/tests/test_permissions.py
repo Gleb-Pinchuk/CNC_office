@@ -29,8 +29,10 @@ class TestFilePermissions:
         # list permissions includes managed one for owner
         res_list = auth_client.get('/api/permissions/')
         assert res_list.status_code == status.HTTP_200_OK
+        payload = res_list.data
+        items = payload.get('results', payload) if isinstance(payload, dict) else payload
         perm_id = None
-        for item in res_list.data:
+        for item in items:
             if item['file_type'] == 'storage_file' and item['file_id'] == test_file.id and item['user']['username'] == other.username:
                 perm_id = item['id']
                 assert item['can_manage'] is True
