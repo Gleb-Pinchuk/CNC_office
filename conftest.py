@@ -3,6 +3,8 @@ from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient
 from rest_framework.authtoken.models import Token
 from files.models import StorageFile, StorageFolder
+from documents.models import Document
+from sections.models import SectionTable
 
 User = get_user_model()
 
@@ -34,3 +36,13 @@ def test_file(user, folder):
         size=12,
         mime_type='text/plain'
     )
+
+
+@pytest.fixture
+def document(user):
+    return Document.objects.create(owner=user, title='Doc1', doc_type='spreadsheet', content={})
+
+
+@pytest.fixture
+def section_table(user):
+    return SectionTable.objects.create(owner=user, title='Table1', section_type='attendance', content={})
