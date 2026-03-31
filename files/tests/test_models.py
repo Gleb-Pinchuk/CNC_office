@@ -17,12 +17,14 @@ class TestStorageFolderModel:
 @pytest.mark.django_db
 class TestStorageFileModel:
     def test_create_file(self, user, folder):
-        file = SimpleUploadedFile("doc.pdf", b"content", content_type="application/pdf")
+        content = b"content"
+        file = SimpleUploadedFile("doc.pdf", content, content_type="application/pdf")
         storage_file = StorageFile.objects.create(
             owner=user, folder=folder, file=file, size=100, mime_type='application/pdf'
         )
         assert storage_file.file.name
-        assert storage_file.size == 100
+        # StorageFile.save() normalizes size from uploaded file bytes
+        assert storage_file.size == len(content)
 
     def test_file_string_representation(self, user, folder):
         file = SimpleUploadedFile("readme.txt", b"txt", content_type="text/plain")
