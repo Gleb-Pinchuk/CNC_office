@@ -41,6 +41,43 @@ docker compose logs web --tail=200
 docker compose ps
 ```
 
+### HTTPS (чтобы браузер показывал "Безопасно")
+- Для IP `http://213.165.214.241:8002` браузер будет показывать "небезопасно". Нужен домен и TLS-сертификат.
+- Выпустите сертификат Let's Encrypt для домена (например, `app.example.com`), затем используйте HTTPS-конфиг из репозитория.
+
+1. Привяжите домен к серверу:
+```bash
+# DNS A-record
+app.example.com -> 213.165.214.241
+```
+
+2. Получите сертификат на сервере:
+```bash
+sudo apt update
+sudo apt install -y certbot
+sudo certbot certonly --standalone -d app.example.com
+```
+
+3. В файле `nginx/nginx.https.conf` замените `YOUR_DOMAIN` на ваш домен.
+
+4. Запускайте проект с HTTPS override:
+```bash
+docker compose -f docker-compose.yml -f docker-compose.https.yml up -d --build
+```
+
+5. В `.env` для production включите HTTPS-настройки:
+```env
+ALLOWED_HOSTS=app.example.com,213.165.214.241,localhost,127.0.0.1
+CORS_ALLOWED_ORIGINS=https://app.example.com
+CSRF_TRUSTED_ORIGINS=https://app.example.com
+SECURE_SSL_REDIRECT=True
+SESSION_COOKIE_SECURE=True
+CSRF_COOKIE_SECURE=True
+SECURE_HSTS_SECONDS=31536000
+SECURE_HSTS_INCLUDE_SUBDOMAINS=True
+SECURE_HSTS_PRELOAD=True
+```
+
 ### Управление общим доступом (read/write + revoke)
 - **Выдать доступ**: в UI “Поделиться” → ввод username → выбрать режим (confirm) → `read` или `write`.
 - **Снять доступ**: вкладка “Общий доступ” → кнопка `✖` у нужного элемента.
