@@ -32,8 +32,19 @@ const navItems = document.querySelectorAll('.nav-item');
 document.addEventListener('DOMContentLoaded', () => {
     console.log('🚀 App initialized v19.3');
     setupEventListeners();
+    setAuthUI(!!authToken);
     checkAuth();
 });
+
+function setAuthUI(isAuthed) {
+    if (logoutBtn) logoutBtn.style.display = isAuthed ? 'inline-flex' : 'none';
+    const userProfile = document.querySelector('.user-profile');
+    if (userProfile) userProfile.style.display = isAuthed ? 'flex' : 'none';
+    const sidebar = document.querySelector('.sidebar');
+    if (sidebar) sidebar.style.display = isAuthed ? 'flex' : 'none';
+    const header = document.querySelector('.header');
+    if (header) header.style.display = isAuthed ? 'flex' : 'none';
+}
 
 // ✅ Заголовки для API-запросов
 function getAuthHeaders(isJson = true) {
@@ -78,18 +89,20 @@ function clearAuth() {
     localStorage.removeItem('cnc_username');
     authToken = null;
     currentUser = null;
+    setAuthUI(false);
 }
 
 // ✅ Проверка авторизации
 async function checkAuth() {
     authToken = localStorage.getItem('cnc_auth_token');
-    if (!authToken) { showLoginModal(); return; }
+    if (!authToken) { setAuthUI(false); showLoginModal(); return; }
 
     try {
         const res = await fetch(`${API_BASE}/users/me/`, { headers: getAuthHeaders() });
         if (res.ok) {
             currentUser = await res.json();
             if (usernameSpan) usernameSpan.textContent = currentUser.username;
+            setAuthUI(true);
             loadView('files');
         } else {
             clearAuth();
@@ -97,6 +110,7 @@ async function checkAuth() {
         }
     } catch (e) {
         console.error('Auth check failed:', e);
+        setAuthUI(false);
         showLoginModal();
     }
 }
@@ -530,17 +544,32 @@ async function exportToExcel() {
         return;
     }
     try {
+        // Prefer real XLSX export from backend (keeps sheets + basic formatting).
+        if (currentDocument.doc_type === 'spreadsheet') {
+            const base = isCurrentSectionTable()
+                ? `${API_BASE}/section-tables/${currentDocument.id}/export_xlsx/`
+                : `${API_BASE}/documents/${currentDocument.id}/export_xlsx/`;
+            const res = await fetch(base, { headers: getAuthHeaders(false) });
+            if (!res.ok) throw new Error(`export_xlsx failed: ${res.status}`);
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `${currentDocument.title || 'table'}.xlsx`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+            return;
+        }
+
+        // Fallback for non-spreadsheets: CSV
         const data = sheetEditor ? (sheetEditor.getActiveGridData ? sheetEditor.getActiveGridData() : sheetEditor.export().data) : hotInstance.getData();
         const headers = data[0] ? data[0].map((_, i) => String.fromCharCode(65 + (i % 26))) : [];
         let csv = [];
-        if (headers && headers.length > 0) {
-            csv.push(headers.map(h => `"${h || ''}"`).join(';'));
-        }
-        data.forEach(row => {
-            csv.push(row.map(cell => `"${cell || ''}"`).join(';'));
-        });
-        const csvContent = csv.join('\n');
-        const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
+        if (headers && headers.length > 0) csv.push(headers.map(h => `"${h || ''}"`).join(';'));
+        data.forEach(row => csv.push(row.map(cell => `"${cell || ''}"`).join(';')));
+        const blob = new Blob(['\ufeff' + csv.join('\n')], { type: 'text/csv;charset=utf-8;' });
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
@@ -549,7 +578,6 @@ async function exportToExcel() {
         link.click();
         document.body.removeChild(link);
         URL.revokeObjectURL(url);
-        console.log('✅ Exported to Excel (CSV)');
     } catch (e) {
         console.error('❌ Export error:', e);
         alert('Ошибка экспорта: ' + e.message);
@@ -714,6 +742,8 @@ function showDocumentEditor(doc) {
     if (!title) return;
     title.textContent = doc.title;
     currentDocument = doc;
+    // Read-only mode for shared access.
+    currentDocument.is_readonly = currentDocument.shared_permission === 'read';
     showModal('documentModal');
     setTimeout(() => {
         setRibbonTab('home');
@@ -1035,8 +1065,32 @@ class CustomSheetEditor {
         });
         this._bindResizers();
         this._bindColumnHeaderFilters();
+        this._bindHeaderSelection();
         this._ensureFillHandle();
         this._paintSelection();
+    }
+    _bindHeaderSelection() {
+        // Click on column header: select whole column. Click on row header: select whole row.
+        this.container.querySelectorAll('[data-col-header]').forEach((th) => {
+            th.addEventListener('click', (e) => {
+                if (e.target.closest('.col-resizer')) return;
+                const c = Number(th.dataset.colHeader);
+                if (!Number.isFinite(c)) return;
+                this.isSelecting = true;
+                this.selection = { r1: 0, c1: c, r2: this.data.length - 1, c2: c };
+                this._paintSelection();
+            });
+        });
+        this.container.querySelectorAll('[data-row-header]').forEach((th) => {
+            th.addEventListener('click', (e) => {
+                if (e.target.closest('.row-resizer')) return;
+                const r = Number(th.dataset.rowHeader);
+                if (!Number.isFinite(r)) return;
+                this.isSelecting = true;
+                this.selection = { r1: r, c1: 0, r2: r, c2: (this.data[0]?.length || 1) - 1 };
+                this._paintSelection();
+            });
+        });
     }
     _bindColumnHeaderFilters() {
         this.container.querySelectorAll('[data-col-header]').forEach((th) => {
@@ -1424,6 +1478,23 @@ class MultiSheetWorkbook {
             btn.className = 'sheet-tab' + (idx === this.activeIndex ? ' active' : '');
             btn.textContent = sh.name || `Лист${idx + 1}`;
             btn.onclick = () => this._switchSheet(idx);
+            btn.ondblclick = () => {
+                const oldName = (this.sheets[idx]?.name || `Лист${idx + 1}`).trim();
+                const next = prompt('Переименовать лист', oldName);
+                if (!next) return;
+                const cleaned = String(next).trim().slice(0, 40);
+                if (!cleaned) return;
+                // Ensure unique sheet names (case-insensitive).
+                const existing = new Set(this.sheets.map(s => String(s.name || '').trim().toLowerCase()).filter(Boolean));
+                let finalName = cleaned;
+                let suffix = 2;
+                while (existing.has(finalName.toLowerCase()) && finalName.toLowerCase() !== oldName.toLowerCase()) {
+                    finalName = `${cleaned} (${suffix++})`;
+                }
+                this._syncActive();
+                this.sheets[idx].name = finalName;
+                this._renderTabs();
+            };
             this.tabContainer.appendChild(btn);
         });
         const addBtn = document.createElement('button');
@@ -1446,6 +1517,12 @@ class MultiSheetWorkbook {
         });
         this.sheets.push(newSheet);
         this._switchSheet(this.sheets.length - 1, true);
+    }
+    renameActiveSheet(name) {
+        const cleaned = String(name || '').trim();
+        if (!cleaned) return;
+        this.sheets[this.activeIndex].name = cleaned.slice(0, 40);
+        this._renderTabs();
     }
     export() {
         this._syncActive();
@@ -1502,6 +1579,14 @@ function initHandsontable(doc) {
         payload = { data: legacy, rows: legacy.length || 20, cols: (legacy[0]?.length || 10), styles: {} };
     }
     sheetEditor = new MultiSheetWorkbook(container, tabBar, payload);
+    if (doc?.is_readonly && container) {
+        // Disable editing for shared read-only.
+        setTimeout(() => {
+            container.querySelectorAll('.sheet-cell').forEach((cell) => {
+                cell.setAttribute('contenteditable', 'false');
+            });
+        }, 0);
+    }
 }
 
 function toggleSelectionBold() {
@@ -1571,6 +1656,7 @@ function initTextEditor(doc) {
 // ✅ ТИХОЕ СОХРАНЕНИЕ
 async function saveDocumentSilent() {
     if (!currentDocument) return;
+    if (currentDocument.is_readonly) return;
     let content = {};
     if (currentDocument.doc_type === 'spreadsheet' && (sheetEditor || hotInstance)) {
         try {
@@ -1599,6 +1685,7 @@ async function saveDocumentSilent() {
 // ✅ СОХРАНЕНИЕ ПО КНОПКЕ
 async function saveDocument() {
     if (!currentDocument) return;
+    if (currentDocument.is_readonly) { alert('Только чтение: нет прав на сохранение'); return; }
     let content = {};
     if (currentDocument.doc_type === 'spreadsheet' && (sheetEditor || hotInstance)) {
         try {
@@ -1798,15 +1885,43 @@ function createSharedCard(perm, index) {
     card.className = 'file-card';
     card.style.animationDelay = `${index * 0.1}s`;
     card.style.cursor = 'pointer';
-    card.onclick = (e) => { if (!e.target.closest('.file-actions')) downloadFile(perm.file); };
-    const name = perm.file_name || `Файл #${perm.file}`;
+    const fileId = perm.file_id ?? perm.file;
+    const fileType = perm.file_type || 'storage_file';
+    const canWrite = perm.permission === 'write';
+    const openShared = async () => {
+        if (!fileId) return;
+        if (fileType === 'storage_file') return downloadFile(fileId);
+        if (fileType === 'document') {
+            await openDocument(fileId);
+            if (currentDocument) {
+                currentDocument.shared_permission = perm.permission;
+            }
+            return;
+        }
+        if (fileType === 'section_table') {
+            await openSectionTable(fileId);
+            if (currentDocument) {
+                currentDocument.shared_permission = perm.permission;
+            }
+        }
+    };
+    card.onclick = (e) => { if (!e.target.closest('.file-actions')) openShared(); };
+    const name = perm.file_name || `Объект #${fileId}`;
     const user = perm.user?.username || 'Неизвестно';
     const badge = perm.permission === 'write' ? '<span style="background:#10B981;color:#fff;padding:2px 8px;border-radius:12px;font-size:0.75rem">✏️</span>' : '<span style="background:#6B7280;color:#fff;padding:2px 8px;border-radius:12px;font-size:0.75rem">👁️</span>';
     card.innerHTML = `
         <div class="file-icon">🔗</div>
         <div class="file-name" title="${escapeHtml(name)}">${escapeHtml(name)}</div>
         <div class="file-meta">${badge}<span>${user}</span></div>
-        <div class="file-actions"><button class="file-action-btn" onclick="event.stopPropagation();downloadFile(${perm.file})">⬇️</button></div>`;
+        <div class="file-actions"></div>`;
+    const actions = card.querySelector('.file-actions');
+    if (actions) {
+        const btn = document.createElement('button');
+        btn.className = 'file-action-btn';
+        btn.textContent = fileType === 'storage_file' ? '⬇️' : (canWrite ? '✏️' : '👁️');
+        btn.onclick = (e) => { e.stopPropagation(); openShared(); };
+        actions.appendChild(btn);
+    }
     return card;
 }
 

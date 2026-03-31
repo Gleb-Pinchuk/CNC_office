@@ -31,7 +31,9 @@ DIRS_RAW = os.getenv("CNC_DIRECTION_SHEETS", "ЧПУ,РОБО,Аэро,микр�
 SPREADSHEETS = [x.strip() for x in DIRS_RAW.split(",") if x.strip()]
 TZ_NAME = os.getenv("TIMEZONE", "Europe/Moscow")
 
-FIO_COL = 2  # колонка ФИО (0-based), как в исходном боте
+FIO_COL_DEFAULT = 2  # 3-й столбец
+GROUP_COL_DEFAULT = 1  # 2-й столбец (Группа)
+STATUS_COL_DEFAULT = 11  # 12-й столбец (учится/отчислен)
 
 
 def _tz_now() -> datetime:
@@ -260,37 +262,95 @@ def find_status_column_index(headers: List[str]) -> Optional[int]:
     return None
 
 
-def get_students_list(group_name: Optional[str]) -> List[Tuple[int, str]]:
-    tid = _table_id()
-    rows = api.get_sheet_data(tid, group_name or current_group or current_spreadsheet)
+def _sheet_rows() -> List[List[Any]]:
+    """Текущий лист-направление (worksheet)."""
+    if not current_spreadsheet:
+        return []
+    return api.get_sheet_data(_table_id(), current_spreadsheet)
+
+
+def _detect_col(headers: List[str], keywords: List[str], default_idx: int) -> int:
+    low = [str(h or "").strip().lower() for h in headers]
+    for i, h in enumerate(low):
+        for kw in keywords:
+            if kw in h:
+                return i
+    return default_idx
+
+
+def _group_col(headers: List[str]) -> int:
+    return _detect_col(headers, ["груп"], GROUP_COL_DEFAULT)
+
+
+def _fio_col(headers: List[str]) -> int:
+    return _detect_col(headers, ["фио"], FIO_COL_DEFAULT)
+
+
+def _status_col(headers: List[str]) -> int:
+    # если нет явного совпадения — используем 12-й столбец по ТЗ
+    idx = _detect_col(headers, ["учится", "отчисл", "статус"], STATUS_COL_DEFAULT)
+    return idx
+
+
+def get_groups_list() -> List[str]:
+    """Группы берём из 2-го столбца (B) текущего листа."""
+    rows = _sheet_rows()
     if len(rows) < 2:
         return []
-    students = []
-    for i, row in enumerate(rows[1:], 1):
-        if len(row) > FIO_COL:
-            fio = str(row[FIO_COL]).strip()
-            if fio:
-                students.append((i, fio))
-    return students
+    headers = [str(x or "").strip() for x in (rows[0] or [])]
+    gc = _group_col(headers)
+    groups = []
+    seen = set()
+    for r in rows[1:]:
+        if gc < len(r):
+            g = str(r[gc] or "").strip()
+            if g and g.lower() not in seen:
+                seen.add(g.lower())
+                groups.append(g)
+    return groups
 
 
-def header_row(sheet_name: Optional[str]) -> List[str]:
-    rows = api.get_sheet_data(_table_id(), sheet_name or current_group or current_spreadsheet)
+def get_students_map(group_value: Optional[str]) -> List[Tuple[int, str]]:
+    """
+    Возвращает список (sheet_row_index, fio). sheet_row_index — индекс строки в листе (0-based).
+    """
+    rows = _sheet_rows()
+    if len(rows) < 2:
+        return []
+    headers = [str(x or "").strip() for x in (rows[0] or [])]
+    gc = _group_col(headers)
+    fc = _fio_col(headers)
+    target = (group_value or "").strip().lower()
+    out: List[Tuple[int, str]] = []
+    for idx in range(1, len(rows)):
+        r = rows[idx] or []
+        g = str(r[gc] or "").strip().lower() if gc < len(r) else ""
+        if target and g != target:
+            continue
+        fio = str(r[fc] or "").strip() if fc < len(r) else ""
+        if fio:
+            out.append((idx, fio))
+    return out
+
+
+def header_row(_: Optional[str] = None) -> List[str]:
+    rows = _sheet_rows()
     if not rows:
         return []
-    return [str(x or "").strip() for x in rows[0]]
+    return [str(x or "").strip() for x in (rows[0] or [])]
 
 
-def get_student_by_number(row_number: int, group_name: Optional[str], note_col: Optional[int] = None) -> str:
-    tid = _table_id()
-    sh = group_name or current_group or current_spreadsheet
-    rows = api.get_sheet_data(tid, sh)
+def get_student_by_number(row_number: int, _unused: Optional[str], note_col: Optional[int] = None) -> str:
+    sh = current_spreadsheet
+    rows = _sheet_rows()
     if len(rows) < 2:
         return "❌ В таблице нет данных!"
-    if row_number < 1 or row_number >= len(rows):
-        return f"❌ Студент #{row_number} не найден. Всего строк: {len(rows)-1}"
+    students_map = get_students_map(current_group)
+    if row_number < 1 or row_number > len(students_map):
+        return f"❌ Студент #{row_number} не найден. Всего: {len(students_map)}"
     headers = rows[0] if rows[0] else []
-    student_row = rows[row_number]
+    sheet_row_idx = students_map[row_number - 1][0]
+    student_row = rows[sheet_row_idx]
     data = {}
     for i, header in enumerate(headers):
         if i < len(student_row):
@@ -304,7 +364,8 @@ def get_student_by_number(row_number: int, group_name: Optional[str], note_col: 
     phone = data.get("Номер телефона") or data.get("Телефон") or "-"
     msg = (
         f"🔍 Студент #{row_number}\n\n"
-        f"📋 Лист: {sh or '—'}\n"
+        f"🎓 Направление (лист): {sh or '—'}\n"
+        f"📋 Группа: {current_group or '—'}\n"
         f"👤 ФИО: {data.get('ФИО', '-')}\n"
         f"📱 Телефон: {phone}\n"
         f"📱 Telegram: {data.get('Телеграм', '-')}\n"
@@ -323,11 +384,12 @@ def write_note(
     user_id: Optional[int] = None,
 ) -> str:
     tid = _table_id()
-    sh = group_name or current_group or current_spreadsheet
-    rows = api.get_sheet_data(tid, sh)
+    sh = current_spreadsheet
+    rows = _sheet_rows()
     if len(rows) < 2:
         return "❌ В таблице нет данных!"
-    if row_number < 1 or row_number >= len(rows):
+    students_map = get_students_map(current_group)
+    if row_number < 1 or row_number > len(students_map):
         return f"❌ Студент #{row_number} не найден!"
     hdr_list = [str(h or "") for h in (rows[0] or [])]
     col_num, week_range = get_current_week_column_meta(hdr_list)
@@ -336,29 +398,34 @@ def write_note(
         c = col_num
     if c is None:
         return "❌ Не выбрана колонка недели. Нажмите «📅 Колонка даты»."
-    api.set_cell(tid, sh, row_number, c, note_text)
-    fio = rows[row_number][FIO_COL] if len(rows[row_number]) > FIO_COL else "—"
+    sheet_row_idx = students_map[row_number - 1][0]
+    api.set_cell(tid, sh, sheet_row_idx, c, note_text)
+    headers = [str(h or "") for h in (rows[0] or [])]
+    fio = students_map[row_number - 1][1]
     return (
         f"✅ Замечание записано!\n\n"
-        f"📋 Лист: {sh}\n"
+        f"🎓 Лист: {sh}\n"
+        f"📋 Группа: {current_group or '—'}\n"
         f"👤 Студент: {fio}\n"
-        f"📅 Колонка: {hdr_list[c] if c < len(hdr_list) else c}\n"
+        f"📅 Колонка: {headers[c] if c < len(headers) else c}\n"
         f"📝 Текст: {note_text}"
     )
 
 
 def write_status(row_number: int, status_text: str, group_name: Optional[str]) -> str:
     tid = _table_id()
-    sh = group_name or current_group or current_spreadsheet
-    rows = api.get_sheet_data(tid, sh)
+    sh = current_spreadsheet
+    rows = _sheet_rows()
     if len(rows) < 2:
         return "❌ В таблице нет данных!"
     hdr = [str(h or "") for h in (rows[0] or [])]
-    c = find_status_column_index(hdr)
-    if c is None:
-        return "❌ Не найдена колонка статуса (ожидаются слова «учится» / «отчисл» в заголовке)."
-    api.set_cell(tid, sh, row_number, c, status_text)
-    fio = rows[row_number][FIO_COL] if len(rows[row_number]) > FIO_COL else "—"
+    c = _status_col(hdr)
+    students_map = get_students_map(current_group)
+    if row_number < 1 or row_number > len(students_map):
+        return f"❌ Студент #{row_number} не найден!"
+    sheet_row_idx = students_map[row_number - 1][0]
+    api.set_cell(tid, sh, sheet_row_idx, c, status_text)
+    fio = students_map[row_number - 1][1]
     return f"✅ Статус обновлён: {status_text}\n👤 {fio}\n📋 {hdr[c]}"
 
 
@@ -542,19 +609,14 @@ def main() -> None:
                 send_vk_message(vk, user_id, "🎓 Выберите направление (лист):", get_directions_keyboard(names))
 
             elif text_lower in ("📋 группы", "/groups"):
-                try:
-                    info = api.lookup_table()
-                    _table_cache.update(info)
-                    names = info.get("sheet_names") or []
-                except Exception as e:
-                    send_vk_message(vk, user_id, f"❌ {e}", get_main_keyboard())
+                if not current_spreadsheet:
+                    send_vk_message(vk, user_id, "⚠️ Сначала выберите направление (лист).", get_main_keyboard())
                     continue
-                main_set = {s.lower() for s in SPREADSHEETS}
-                groups = [n for n in names if n.lower() not in main_set] or names
+                groups = get_groups_list()
                 if groups:
-                    send_vk_message(vk, user_id, "📋 Выберите группу (лист):", get_groups_keyboard(groups))
+                    send_vk_message(vk, user_id, f"📋 Группы ({current_spreadsheet}):", get_groups_keyboard(groups))
                 else:
-                    send_vk_message(vk, user_id, "❌ Нет листов", get_main_keyboard())
+                    send_vk_message(vk, user_id, "❌ Не найдены группы в столбце B", get_main_keyboard())
 
             elif text_lower in ("📅 колонка даты",):
                 hdr = header_row(current_group or current_spreadsheet)
@@ -591,10 +653,11 @@ def main() -> None:
                 user_states[user_id] = {"action": "pick_student_status", "students": students}
 
             elif text_lower in ("👤 студент", "/get"):
-                if not current_group:
-                    send_vk_message(vk, user_id, "⚠️ Сначала выберите направление/группу.", get_main_keyboard())
+                if not current_spreadsheet or not current_group:
+                    send_vk_message(vk, user_id, "⚠️ Сначала выберите направление и группу.", get_main_keyboard())
                     continue
-                students = get_students_list(current_group)
+                students_map = get_students_map(current_group)
+                students = [(i + 1, fio) for i, (_, fio) in enumerate(students_map)]
                 if students:
                     user_states[user_id] = {"action": "get_student", "students": students, "page": 0}
                     send_vk_message(
@@ -607,10 +670,11 @@ def main() -> None:
                     send_vk_message(vk, user_id, "❌ Нет студентов", get_back_keyboard())
 
             elif text_lower in ("📝 замечание", "/note"):
-                if not current_group:
-                    send_vk_message(vk, user_id, "⚠️ Сначала выберите группу.", get_main_keyboard())
+                if not current_spreadsheet or not current_group:
+                    send_vk_message(vk, user_id, "⚠️ Сначала выберите направление и группу.", get_main_keyboard())
                     continue
-                students = get_students_list(current_group)
+                students_map = get_students_map(current_group)
+                students = [(i + 1, fio) for i, (_, fio) in enumerate(students_map)]
                 if not students:
                     send_vk_message(vk, user_id, "❌ Нет студентов", get_back_keyboard())
                     continue
@@ -638,7 +702,7 @@ def main() -> None:
             elif text_lower in ("🔙 назад", "🔙 в меню"):
                 send_vk_message(vk, user_id, "Меню", get_main_keyboard())
 
-            elif text.isdigit() and current_group:
+            elif text.isdigit() and current_spreadsheet and current_group:
                 try:
                     row = int(text)
                     send_vk_message(
@@ -651,13 +715,21 @@ def main() -> None:
                     send_vk_message(vk, user_id, "Ошибка", get_main_keyboard())
 
             else:
-                chosen = _resolve_sheet_click(text)
-                if chosen:
-                    current_spreadsheet = chosen
-                    current_group = chosen
-                    send_vk_message(vk, user_id, f"✅ Выбран лист: {chosen}", get_main_keyboard())
-                else:
-                    send_vk_message(vk, user_id, "Используйте кнопки или /помощь", get_main_keyboard())
+                # Выбор листа-направления
+                chosen_sheet = _resolve_sheet_click(text)
+                if chosen_sheet:
+                    current_spreadsheet = chosen_sheet
+                    current_group = None
+                    send_vk_message(vk, user_id, f"✅ Направление (лист): {chosen_sheet}\nТеперь выберите группу.", get_main_keyboard())
+                    continue
+                # Выбор группы (значение в столбце B)
+                if current_spreadsheet:
+                    groups = get_groups_list()
+                    if text in groups:
+                        current_group = text
+                        send_vk_message(vk, user_id, f"✅ Группа: {text}", get_main_keyboard())
+                        continue
+                send_vk_message(vk, user_id, "⚠️ Используйте кнопки или /помощь", get_main_keyboard())
 
         except Exception as e:
             print("❌", e)

@@ -4,6 +4,9 @@ from rest_framework.response import Response
 from rest_framework.decorators import action
 from .models import Document
 from .serializers import DocumentSerializer
+from django.db.models import Q
+from django.http import HttpResponse
+from api.xlsx_export import export_custom_sheet_to_xlsx_bytes
 
 
 class DocumentViewSet(viewsets.ModelViewSet):
@@ -16,9 +19,17 @@ class DocumentViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         """
-        Показываем документы пользователя
+        Показываем документы пользователя + документы с общим доступом
         """
-        return Document.objects.filter(owner=self.request.user).order_by('-updated_at')
+        user = self.request.user
+        from files.models import FilePermission
+        permitted_ids = FilePermission.objects.filter(
+            file_type='document',
+            user=user
+        ).values_list('file_id', flat=True)
+        return Document.objects.filter(
+            Q(owner=user) | Q(id__in=permitted_ids)
+        ).distinct().order_by('-updated_at')
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
@@ -37,6 +48,16 @@ class DocumentViewSet(viewsets.ModelViewSet):
         Сохранение содержимого документа
         """
         doc = self.get_object()
+        if doc.owner != request.user:
+            from files.models import FilePermission
+            can_write = FilePermission.objects.filter(
+                file_type='document',
+                file_id=doc.id,
+                user=request.user,
+                permission='write'
+            ).exists()
+            if not can_write:
+                return Response({'detail': 'Нет прав на редактирование'}, status=status.HTTP_403_FORBIDDEN)
         content = request.data.get('content', {})
 
         if not isinstance(content, dict):
@@ -53,6 +74,19 @@ class DocumentViewSet(viewsets.ModelViewSet):
             'document_id': doc.id,
             'content_keys': list(content.keys())
         })
+
+    @action(detail=True, methods=['get'], url_path='export_xlsx')
+    def export_xlsx(self, request, pk=None):
+        doc = self.get_object()
+        # Read is allowed by get_queryset; write not required.
+        xlsx = export_custom_sheet_to_xlsx_bytes(doc.title, doc.content if isinstance(doc.content, dict) else {})
+        resp = HttpResponse(
+            xlsx,
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        filename = (doc.title or 'table').replace('/', '_').replace('\\', '_')
+        resp['Content-Disposition'] = f'attachment; filename=\"{filename}.xlsx\"'
+        return resp
 
     @action(detail=True, methods=['post'], url_path='share')
     def share(self, request, pk=None):

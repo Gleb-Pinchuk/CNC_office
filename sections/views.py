@@ -4,6 +4,9 @@ from rest_framework.response import Response
 from rest_framework.decorators import action
 from .models import SectionTable
 from .serializers import SectionTableSerializer
+from django.db.models import Q
+from django.http import HttpResponse
+from api.xlsx_export import export_custom_sheet_to_xlsx_bytes
 
 
 class SectionTableViewSet(viewsets.ModelViewSet):
@@ -16,9 +19,18 @@ class SectionTableViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         """
-        Фильтруем таблицы по section_type из query параметра И по владельцу
+        Фильтруем таблицы по section_type из query параметра.
+        Показываем таблицы владельца + таблицы с общим доступом.
         """
-        queryset = SectionTable.objects.filter(owner=self.request.user)
+        user = self.request.user
+        from files.models import FilePermission
+        permitted_ids = FilePermission.objects.filter(
+            file_type='section_table',
+            user=user
+        ).values_list('file_id', flat=True)
+        queryset = SectionTable.objects.filter(
+            Q(owner=user) | Q(id__in=permitted_ids)
+        ).distinct()
         section_type = self.request.query_params.get('section_type', None)
         if section_type:
             queryset = queryset.filter(section_type=section_type)
@@ -42,6 +54,16 @@ class SectionTableViewSet(viewsets.ModelViewSet):
         Сохранение содержимого таблицы (Handsontable data)
         """
         table = self.get_object()
+        if table.owner != request.user:
+            from files.models import FilePermission
+            can_write = FilePermission.objects.filter(
+                file_type='section_table',
+                file_id=table.id,
+                user=request.user,
+                permission='write'
+            ).exists()
+            if not can_write:
+                return Response({'detail': 'Нет прав на редактирование'}, status=status.HTTP_403_FORBIDDEN)
         content = request.data.get('content', {})
 
         if not isinstance(content, dict):
@@ -58,6 +80,18 @@ class SectionTableViewSet(viewsets.ModelViewSet):
             'table_id': table.id,
             'content_keys': list(content.keys())
         })
+
+    @action(detail=True, methods=['get'], url_path='export_xlsx')
+    def export_xlsx(self, request, pk=None):
+        table = self.get_object()
+        xlsx = export_custom_sheet_to_xlsx_bytes(table.title, table.content if isinstance(table.content, dict) else {})
+        resp = HttpResponse(
+            xlsx,
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        filename = (table.title or 'table').replace('/', '_').replace('\\', '_')
+        resp['Content-Disposition'] = f'attachment; filename=\"{filename}.xlsx\"'
+        return resp
 
     @action(detail=True, methods=['post'], url_path='share')
     def share(self, request, pk=None):

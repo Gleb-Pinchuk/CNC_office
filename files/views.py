@@ -38,9 +38,20 @@ class StorageFileViewSet(viewsets.ModelViewSet):
             user=user
         ).values_list('file_id', flat=True)
 
-        return StorageFile.objects.filter(
+        qs = StorageFile.objects.filter(
             Q(owner=user) | Q(id__in=permitted_file_ids)
         ).distinct().order_by('-uploaded_at')
+
+        # ✅ Фильтр по папке (для отображения содержимого выбранной папки)
+        folder_id = self.request.query_params.get('folder')
+        if folder_id is not None and str(folder_id).strip() != '':
+            try:
+                folder_id_int = int(folder_id)
+                qs = qs.filter(folder_id=folder_id_int)
+            except (TypeError, ValueError):
+                pass
+
+        return qs
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
