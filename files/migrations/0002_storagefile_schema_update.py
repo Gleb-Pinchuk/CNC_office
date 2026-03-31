@@ -31,8 +31,10 @@ def _index_exists(schema_editor, table_name, index_name):
 class AddFieldIfMissing(migrations.AddField):
     def database_forwards(self, app_label, schema_editor, from_state, to_state):
         model = to_state.apps.get_model(app_label, self.model_name)
-        _, column_name = self.field.get_attname_column()
-        column_name = column_name or self.field.db_column or self.name
+        if getattr(self.field, "remote_field", None) is not None:
+            column_name = self.field.db_column or f"{self.name}_id"
+        else:
+            column_name = self.field.db_column or self.name
         if _column_exists(schema_editor, model._meta.db_table, column_name):
             return
         super().database_forwards(app_label, schema_editor, from_state, to_state)
