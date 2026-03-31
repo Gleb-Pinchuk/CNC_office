@@ -1,5 +1,7 @@
 import pytest
 
+pytest.importorskip("openpyxl")
+
 from api.xlsx_export import export_custom_sheet_to_xlsx_bytes
 
 
