@@ -65,4 +65,6 @@ class TestUserViews:
     def test_user_list_returns_authenticated_users(self, auth_client, user):
         response = auth_client.get("/api/users/")
         assert response.status_code == status.HTTP_200_OK
-        assert any(item["username"] == user.username for item in response.data)
+        payload = response.data
+        items = payload.get("results", payload) if isinstance(payload, dict) else payload
+        assert any(item["username"] == user.username for item in items)
