@@ -16,7 +16,9 @@ def _column_exists(schema_editor, table_name, column_name):
     if not _table_exists(schema_editor, table_name):
         return False
     with schema_editor.connection.cursor() as cursor:
-        description = schema_editor.connection.introspection.get_table_description(cursor, table_name)
+        description = schema_editor.connection.introspection.get_table_description(
+            cursor, table_name
+        )
     return any(col.name == column_name for col in description)
 
 
@@ -24,7 +26,9 @@ def _index_exists(schema_editor, table_name, index_name):
     if not _table_exists(schema_editor, table_name):
         return False
     with schema_editor.connection.cursor() as cursor:
-        constraints = schema_editor.connection.introspection.get_constraints(cursor, table_name)
+        constraints = schema_editor.connection.introspection.get_constraints(
+            cursor, table_name
+        )
     return index_name in constraints
 
 
@@ -82,17 +86,23 @@ class Migration(migrations.Migration):
         AddFieldIfMissing(
             model_name="storagefile",
             name="file_name",
-            field=models.CharField(blank=True, default="", max_length=255, verbose_name="РРјСЏ С„Р°Р№Р»Р°"),
+            field=models.CharField(
+                blank=True, default="", max_length=255, verbose_name="РРјСЏ С„Р°Р№Р»Р°"
+            ),
         ),
         migrations.AlterField(
             model_name="storagefile",
             name="mime_type",
-            field=models.CharField(blank=True, default="", max_length=100, verbose_name="MIME С‚РёРї"),
+            field=models.CharField(
+                blank=True, default="", max_length=100, verbose_name="MIME С‚РёРї"
+            ),
         ),
         migrations.AlterField(
             model_name="storagefile",
             name="size",
-            field=models.BigIntegerField(default=0, verbose_name="Р Р°Р·РјРµСЂ (Р±Р°Р№С‚С‹)"),
+            field=models.BigIntegerField(
+                default=0, verbose_name="Р Р°Р·РјРµСЂ (Р±Р°Р№С‚С‹)"
+            ),
         ),
         migrations.AlterField(
             model_name="storagefile",
@@ -108,7 +118,11 @@ class Migration(migrations.Migration):
         ),
         migrations.AlterModelOptions(
             name="storagefile",
-            options={"ordering": ["-uploaded_at"], "verbose_name": "Р¤Р°Р№Р»", "verbose_name_plural": "Р¤Р°Р№Р»С‹"},
+            options={
+                "ordering": ["-uploaded_at"],
+                "verbose_name": "Р¤Р°Р№Р»",
+                "verbose_name_plural": "Р¤Р°Р№Р»С‹",
+            },
         ),
         migrations.AlterModelOptions(
             name="storagefolder",
@@ -178,16 +192,26 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name="storagefile",
             name="file",
-            field=models.FileField(upload_to="files.models.file_upload_path", verbose_name="Р¤Р°Р№Р»"),
+            field=models.FileField(
+                upload_to="files.models.file_upload_path", verbose_name="Р¤Р°Р№Р»"
+            ),
         ),
-        RemoveIndexIfExists(model_name="storagefile", name="files_stora_is_shar_abe3ba_idx"),
+        RemoveIndexIfExists(
+            model_name="storagefile", name="files_stora_is_shar_abe3ba_idx"
+        ),
         AddIndexIfMissing(
             model_name="storagefile",
-            index=models.Index(fields=["owner", "-uploaded_at"], name="files_stora_owner_upl_6d1d12_idx"),
+            index=models.Index(
+                fields=["owner", "-uploaded_at"],
+                name="files_stora_owner_upl_6d1d12_idx",
+            ),
         ),
         AddIndexIfMissing(
             model_name="storagefile",
-            index=models.Index(fields=["folder", "-uploaded_at"], name="files_stora_folder_upl_1a2b34_idx"),
+            index=models.Index(
+                fields=["folder", "-uploaded_at"],
+                name="files_stora_folder_upl_1a2b34_idx",
+            ),
         ),
         migrations.RunPython(_noop, reverse_code=_noop),
     ]

@@ -51,7 +51,10 @@ class TestUserViews:
 
     def test_profile_requires_authentication(self, client):
         response = client.get("/api/users/me/")
-        assert response.status_code in [status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN]
+        assert response.status_code in [
+            status.HTTP_401_UNAUTHORIZED,
+            status.HTTP_403_FORBIDDEN,
+        ]
 
     def test_profile_returns_current_user(self, auth_client, user):
         response = auth_client.get("/api/users/me/")
@@ -60,11 +63,16 @@ class TestUserViews:
 
     def test_user_list_requires_authentication(self, client):
         response = client.get("/api/users/")
-        assert response.status_code in [status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN]
+        assert response.status_code in [
+            status.HTTP_401_UNAUTHORIZED,
+            status.HTTP_403_FORBIDDEN,
+        ]
 
     def test_user_list_returns_authenticated_users(self, auth_client, user):
         response = auth_client.get("/api/users/")
         assert response.status_code == status.HTTP_200_OK
         payload = response.data
-        items = payload.get("results", payload) if isinstance(payload, dict) else payload
+        items = (
+            payload.get("results", payload) if isinstance(payload, dict) else payload
+        )
         assert any(item["username"] == user.username for item in items)

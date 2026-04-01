@@ -1,19 +1,17 @@
-from django.db.models import Count
-from rest_framework import viewsets, permissions, status
-from rest_framework.response import Response
-from rest_framework.decorators import action
-from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
-from rest_framework.renderers import JSONRenderer
-from django.db.models import Q
-from django.utils import timezone
+from django.db.models import Count, Q
 from django.http import FileResponse
-import os
-from .models import StorageFile, StorageFolder, FilePermission, AuditLog
+from rest_framework import permissions, status, viewsets
+from rest_framework.decorators import action
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
+from rest_framework.renderers import JSONRenderer
+from rest_framework.response import Response
+
+from .models import AuditLog, FilePermission, StorageFile, StorageFolder
 from .serializers import (
+    AuditLogSerializer,
+    FilePermissionSerializer,
     StorageFileSerializer,
     StorageFolderSerializer,
-    FilePermissionSerializer,
-    AuditLogSerializer
 )
 
 
@@ -21,6 +19,7 @@ class StorageFileViewSet(viewsets.ModelViewSet):
     """
     CRUD для файлов
     """
+
     queryset = StorageFile.objects.all()
     serializer_class = StorageFileSerializer
     parser_classes = [MultiPartParser, FormParser, JSONParser]
@@ -34,17 +33,18 @@ class StorageFileViewSet(viewsets.ModelViewSet):
 
         # ✅ Получаем ID файлов, к которым есть доступ через FilePermission
         permitted_file_ids = FilePermission.objects.filter(
-            file_type='storage_file',
-            user=user
-        ).values_list('file_id', flat=True)
+            file_type="storage_file", user=user
+        ).values_list("file_id", flat=True)
 
-        qs = StorageFile.objects.filter(
-            Q(owner=user) | Q(id__in=permitted_file_ids)
-        ).distinct().order_by('-uploaded_at')
+        qs = (
+            StorageFile.objects.filter(Q(owner=user) | Q(id__in=permitted_file_ids))
+            .distinct()
+            .order_by("-uploaded_at")
+        )
 
         # ✅ Фильтр по папке (для отображения содержимого выбранной папки)
-        folder_id = self.request.query_params.get('folder')
-        if folder_id is not None and str(folder_id).strip() != '':
+        folder_id = self.request.query_params.get("folder")
+        if folder_id is not None and str(folder_id).strip() != "":
             try:
                 folder_id_int = int(folder_id)
                 qs = qs.filter(folder_id=folder_id_int)
@@ -55,94 +55,93 @@ class StorageFileViewSet(viewsets.ModelViewSet):
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
-        context['request'] = self.request
+        context["request"] = self.request
         return context
 
     def perform_create(self, serializer):
         file = serializer.save(owner=self.request.user)
         AuditLog.objects.create(
             user=self.request.user,
-            action='upload',
+            action="upload",
             file=file,
-            details=f'Загружен файл: {file.file_name}'
+            details=f"Загружен файл: {file.file_name}",
         )
 
-    @action(detail=True, methods=['get'], url_path='download')
+    @action(detail=True, methods=["get"], url_path="download")
     def download(self, request, pk=None):
         file = self.get_object()
 
-        if file.owner != request.user and not FilePermission.objects.filter(
-                file_type='storage_file',
-                file_id=file.id,
-                user=request.user
-        ).exists():
+        if (
+            file.owner != request.user
+            and not FilePermission.objects.filter(
+                file_type="storage_file", file_id=file.id, user=request.user
+            ).exists()
+        ):
             return Response(
-                {'detail': 'Нет доступа к файлу'},
-                status=status.HTTP_403_FORBIDDEN
+                {"detail": "Нет доступа к файлу"}, status=status.HTTP_403_FORBIDDEN
             )
 
         AuditLog.objects.create(
             user=request.user,
-            action='download',
+            action="download",
             file=file,
-            details=f'Скачан файл: {file.file_name}'
+            details=f"Скачан файл: {file.file_name}",
         )
 
         try:
             response = FileResponse(
-                open(file.file.path, 'rb'),
-                as_attachment=True,
-                filename=file.file_name
+                open(file.file.path, "rb"), as_attachment=True, filename=file.file_name
             )
-            response['Content-Length'] = file.size
+            response["Content-Length"] = file.size
             return response
         except FileNotFoundError:
             return Response(
-                {'detail': 'Файл не найден на сервере'},
-                status=status.HTTP_404_NOT_FOUND
+                {"detail": "Файл не найден на сервере"},
+                status=status.HTTP_404_NOT_FOUND,
             )
 
-    @action(detail=True, methods=['post'], url_path='share')
+    @action(detail=True, methods=["post"], url_path="share")
     def share(self, request, pk=None):
         file = self.get_object()
 
         if file.owner != request.user:
             return Response(
-                {'detail': 'Только владелец может предоставлять доступ'},
-                status=status.HTTP_403_FORBIDDEN
+                {"detail": "Только владелец может предоставлять доступ"},
+                status=status.HTTP_403_FORBIDDEN,
             )
 
-        username = request.data.get('username')
-        permission = request.data.get('permission', 'read')
+        username = request.data.get("username")
+        permission = request.data.get("permission", "read")
 
         if not username:
             return Response(
-                {'detail': 'Укажите имя пользователя'},
-                status=status.HTTP_400_BAD_REQUEST
+                {"detail": "Укажите имя пользователя"},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         from django.contrib.auth import get_user_model
+
         User = get_user_model()
 
         try:
             user = User.objects.get(username=username)
         except User.DoesNotExist:
             return Response(
-                {'detail': f'Пользователь {username} не найден'},
-                status=status.HTTP_404_NOT_FOUND
+                {"detail": f"Пользователь {username} не найден"},
+                status=status.HTTP_404_NOT_FOUND,
             )
 
         if user == file.owner:
             return Response(
-                {'detail': 'Вы уже владелец этого файла'},
-                status=status.HTTP_400_BAD_REQUEST
+                {"detail": "Вы уже владелец этого файла"},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         perm, created = FilePermission.objects.get_or_create(
-            file_type='storage_file',
+            file_type="storage_file",
             file_id=file.id,
             user=user,
-            defaults={'permission': permission}
+            defaults={"permission": permission},
         )
 
         if not created:
@@ -151,16 +150,14 @@ class StorageFileViewSet(viewsets.ModelViewSet):
 
         AuditLog.objects.create(
             user=request.user,
-            action='share',
+            action="share",
             file=file,
-            details=f'Предоставлен доступ {username} ({permission})'
+            details=f"Предоставлен доступ {username} ({permission})",
         )
 
-        return Response({
-            'status': 'shared',
-            'username': username,
-            'permission': permission
-        })
+        return Response(
+            {"status": "shared", "username": username, "permission": permission}
+        )
 
     def destroy(self, request, *args, **kwargs):
         file = self.get_object()
@@ -168,9 +165,7 @@ class StorageFileViewSet(viewsets.ModelViewSet):
         self.perform_destroy(file)
 
         AuditLog.objects.create(
-            user=request.user,
-            action='delete',
-            details=f'Удалён файл: {file_name}'
+            user=request.user, action="delete", details=f"Удалён файл: {file_name}"
         )
 
         return Response(status=status.HTTP_204_NO_CONTENT)
@@ -180,6 +175,7 @@ class StorageFolderViewSet(viewsets.ModelViewSet):
     """
     CRUD для папок
     """
+
     queryset = StorageFolder.objects.all()
     serializer_class = StorageFolderSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -189,13 +185,12 @@ class StorageFolderViewSet(viewsets.ModelViewSet):
         return (
             StorageFolder.objects.filter(owner=self.request.user)
             # Avoid conflict with model @property `files_count`.
-            .annotate(files_count_db=Count('files'))
-            .order_by('-created_at')
+            .annotate(files_count_db=Count("files")).order_by("-created_at")
         )
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
-        context['request'] = self.request
+        context["request"] = self.request
         return context
 
     def perform_create(self, serializer):
@@ -207,9 +202,7 @@ class StorageFolderViewSet(viewsets.ModelViewSet):
         self.perform_destroy(folder)
 
         AuditLog.objects.create(
-            user=request.user,
-            action='delete',
-            details=f'Удалена папка: {folder_name}'
+            user=request.user, action="delete", details=f"Удалена папка: {folder_name}"
         )
 
         return Response(status=status.HTTP_204_NO_CONTENT)
@@ -219,9 +212,10 @@ class FilePermissionViewSet(viewsets.ModelViewSet):
     """
     Просмотр предоставленных доступов (для раздела "Общий доступ")
     """
+
     serializer_class = FilePermissionSerializer
     permission_classes = [permissions.IsAuthenticated]
-    http_method_names = ['get', 'head', 'options', 'patch', 'delete']
+    http_method_names = ["get", "head", "options", "patch", "delete"]
 
     def get_renderer_classes(self):
         """✅ Возвращаем только JSON рендерер"""
@@ -242,33 +236,49 @@ class FilePermissionViewSet(viewsets.ModelViewSet):
 
         # 2️⃣ Доступы к объектам, которыми владеет этот пользователь
         # (т.к. GenericForeignKey — фильтруем по file_type + file_id)
-        from .models import StorageFile
         from documents.models import Document
         from sections.models import SectionTable
 
-        file_ids = list(StorageFile.objects.filter(owner=user).values_list('id', flat=True))
-        doc_ids = list(Document.objects.filter(owner=user).values_list('id', flat=True))
-        table_ids = list(SectionTable.objects.filter(owner=user).values_list('id', flat=True))
+        from .models import StorageFile
+
+        file_ids = list(
+            StorageFile.objects.filter(owner=user).values_list("id", flat=True)
+        )
+        doc_ids = list(Document.objects.filter(owner=user).values_list("id", flat=True))
+        table_ids = list(
+            SectionTable.objects.filter(owner=user).values_list("id", flat=True)
+        )
 
         owned_permissions = FilePermission.objects.filter(
-            Q(file_type='storage_file', file_id__in=file_ids) |
-            Q(file_type='document', file_id__in=doc_ids) |
-            Q(file_type='section_table', file_id__in=table_ids)
+            Q(file_type="storage_file", file_id__in=file_ids)
+            | Q(file_type="document", file_id__in=doc_ids)
+            | Q(file_type="section_table", file_id__in=table_ids)
         )
 
         # ✅ Объединяем оба запроса
-        return (given_to_user | owned_permissions).select_related('user').distinct().order_by('-created_at')
+        return (
+            (given_to_user | owned_permissions)
+            .select_related("user")
+            .distinct()
+            .order_by("-created_at")
+        )
 
     def partial_update(self, request, *args, **kwargs):
         perm = self.get_object()
         owner = perm.get_object_owner()
         if owner != request.user:
-            return Response({'detail': 'Только владелец может менять права доступа'}, status=status.HTTP_403_FORBIDDEN)
-        new_perm = request.data.get('permission')
-        if new_perm not in ('read', 'write'):
-            return Response({'detail': 'permission должен быть read или write'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "Только владелец может менять права доступа"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        new_perm = request.data.get("permission")
+        if new_perm not in ("read", "write"):
+            return Response(
+                {"detail": "permission должен быть read или write"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         perm.permission = new_perm
-        perm.save(update_fields=['permission'])
+        perm.save(update_fields=["permission"])
         ser = self.get_serializer(perm)
         return Response(ser.data)
 
@@ -276,7 +286,10 @@ class FilePermissionViewSet(viewsets.ModelViewSet):
         perm = self.get_object()
         owner = perm.get_object_owner()
         if owner != request.user:
-            return Response({'detail': 'Только владелец может снять доступ'}, status=status.HTTP_403_FORBIDDEN)
+            return Response(
+                {"detail": "Только владелец может снять доступ"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         perm.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -285,6 +298,7 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     """
     Просмотр логов аудита (для раздела "Логи")
     """
+
     serializer_class = AuditLogSerializer
     permission_classes = [permissions.IsAuthenticated]
 
@@ -296,4 +310,4 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
         """
         Показываем логи текущего пользователя
         """
-        return AuditLog.objects.filter(user=self.request.user).order_by('-timestamp')
+        return AuditLog.objects.filter(user=self.request.user).order_by("-timestamp")

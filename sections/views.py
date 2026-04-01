@@ -1,18 +1,21 @@
 # sections/views.py
-from rest_framework import viewsets, permissions, status
-from rest_framework.response import Response
-from rest_framework.decorators import action
-from .models import SectionTable
-from .serializers import SectionTableSerializer
 from django.db.models import Q
 from django.http import HttpResponse
+from rest_framework import permissions, status, viewsets
+from rest_framework.decorators import action
+from rest_framework.response import Response
+
 from api.xlsx_export import export_custom_sheet_to_xlsx_bytes
+
+from .models import SectionTable
+from .serializers import SectionTableSerializer
 
 
 class SectionTableViewSet(viewsets.ModelViewSet):
     """
     CRUD для таблиц разделов (Посещаемость, Рейнджеры, Ведомости)
     """
+
     queryset = SectionTable.objects.all()
     serializer_class = SectionTableSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -24,31 +27,31 @@ class SectionTableViewSet(viewsets.ModelViewSet):
         """
         user = self.request.user
         from files.models import FilePermission
+
         permitted_ids = FilePermission.objects.filter(
-            file_type='section_table',
-            user=user
-        ).values_list('file_id', flat=True)
+            file_type="section_table", user=user
+        ).values_list("file_id", flat=True)
         queryset = SectionTable.objects.filter(
             Q(owner=user) | Q(id__in=permitted_ids)
         ).distinct()
-        section_type = self.request.query_params.get('section_type', None)
+        section_type = self.request.query_params.get("section_type", None)
         if section_type:
             queryset = queryset.filter(section_type=section_type)
-        return queryset.order_by('-updated_at')
+        return queryset.order_by("-updated_at")
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
-        context['request'] = self.request
+        context["request"] = self.request
         return context
 
     def perform_create(self, serializer):
         """
         При создании таблицы автоматически устанавливаем owner и section_type
         """
-        section_type = self.request.data.get('section_type', 'attendance')
+        section_type = self.request.data.get("section_type", "attendance")
         serializer.save(owner=self.request.user, section_type=section_type)
 
-    @action(detail=True, methods=['post'], url_path='save_content')
+    @action(detail=True, methods=["post"], url_path="save_content")
     def save_content(self, request, pk=None):
         """
         Сохранение содержимого таблицы (Handsontable data)
@@ -56,44 +59,52 @@ class SectionTableViewSet(viewsets.ModelViewSet):
         table = self.get_object()
         if table.owner != request.user:
             from files.models import FilePermission
+
             can_write = FilePermission.objects.filter(
-                file_type='section_table',
+                file_type="section_table",
                 file_id=table.id,
                 user=request.user,
-                permission='write'
+                permission="write",
             ).exists()
             if not can_write:
-                return Response({'detail': 'Нет прав на редактирование'}, status=status.HTTP_403_FORBIDDEN)
-        content = request.data.get('content', {})
+                return Response(
+                    {"detail": "Нет прав на редактирование"},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+        content = request.data.get("content", {})
 
         if not isinstance(content, dict):
             return Response(
-                {'detail': 'content должен быть объектом'},
-                status=status.HTTP_400_BAD_REQUEST
+                {"detail": "content должен быть объектом"},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         table.content = content
-        table.save(update_fields=['content', 'updated_at'])
+        table.save(update_fields=["content", "updated_at"])
 
-        return Response({
-            'status': 'saved',
-            'table_id': table.id,
-            'content_keys': list(content.keys())
-        })
+        return Response(
+            {
+                "status": "saved",
+                "table_id": table.id,
+                "content_keys": list(content.keys()),
+            }
+        )
 
-    @action(detail=True, methods=['get'], url_path='export_xlsx')
+    @action(detail=True, methods=["get"], url_path="export_xlsx")
     def export_xlsx(self, request, pk=None):
         table = self.get_object()
-        xlsx = export_custom_sheet_to_xlsx_bytes(table.title, table.content if isinstance(table.content, dict) else {})
+        xlsx = export_custom_sheet_to_xlsx_bytes(
+            table.title, table.content if isinstance(table.content, dict) else {}
+        )
         resp = HttpResponse(
             xlsx,
-            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
-        filename = (table.title or 'table').replace('/', '_').replace('\\', '_')
-        resp['Content-Disposition'] = f'attachment; filename=\"{filename}.xlsx\"'
+        filename = (table.title or "table").replace("/", "_").replace("\\", "_")
+        resp["Content-Disposition"] = f'attachment; filename="{filename}.xlsx"'
         return resp
 
-    @action(detail=True, methods=['post'], url_path='share')
+    @action(detail=True, methods=["post"], url_path="share")
     def share(self, request, pk=None):
         """
         Поделиться таблицей с другим пользователем
@@ -102,62 +113,63 @@ class SectionTableViewSet(viewsets.ModelViewSet):
 
         if table.owner != request.user:
             return Response(
-                {'detail': 'Только владелец может предоставлять доступ'},
-                status=status.HTTP_403_FORBIDDEN
+                {"detail": "Только владелец может предоставлять доступ"},
+                status=status.HTTP_403_FORBIDDEN,
             )
 
-        username = request.data.get('username')
-        permission = request.data.get('permission', 'read')
+        username = request.data.get("username")
+        permission = request.data.get("permission", "read")
 
         if not username:
             return Response(
-                {'detail': 'Укажите имя пользователя'},
-                status=status.HTTP_400_BAD_REQUEST
+                {"detail": "Укажите имя пользователя"},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         from django.contrib.auth import get_user_model
+
         User = get_user_model()
 
         try:
             user = User.objects.get(username=username)
         except User.DoesNotExist:
             return Response(
-                {'detail': f'Пользователь {username} не найден'},
-                status=status.HTTP_404_NOT_FOUND
+                {"detail": f"Пользователь {username} не найден"},
+                status=status.HTTP_404_NOT_FOUND,
             )
 
         if user == table.owner:
             return Response(
-                {'detail': 'Вы уже владелец этой таблицы'},
-                status=status.HTTP_400_BAD_REQUEST
+                {"detail": "Вы уже владелец этой таблицы"},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         from files.models import FilePermission
+
         perm, created = FilePermission.objects.get_or_create(
-            file_type='section_table',
+            file_type="section_table",
             file_id=table.id,
             user=user,
-            defaults={'permission': permission}
+            defaults={"permission": permission},
         )
 
         if not created:
             perm.permission = permission
             perm.save()
 
-        return Response({
-            'status': 'shared',
-            'username': username,
-            'permission': permission
-        })
+        return Response(
+            {"status": "shared", "username": username, "permission": permission}
+        )
 
-    @action(detail=False, methods=['get'], url_path='by_section/(?P<section_type>[^/.]+)')
+    @action(
+        detail=False, methods=["get"], url_path="by_section/(?P<section_type>[^/.]+)"
+    )
     def by_section(self, request, section_type=None):
         """
         Получить все таблицы для конкретного раздела
         """
         tables = SectionTable.objects.filter(
-            section_type=section_type,
-            owner=request.user
-        ).order_by('-updated_at')
+            section_type=section_type, owner=request.user
+        ).order_by("-updated_at")
         serializer = self.get_serializer(tables, many=True)
         return Response(serializer.data)

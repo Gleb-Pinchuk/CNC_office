@@ -2,18 +2,19 @@
 VK-бот: работа с таблицей CNC Office (SectionTable) через /api/bot/gateway/.
 Секреты только из переменных окружения.
 """
+
 from __future__ import annotations
 
 import json
 import os
 import random
 import re
-from datetime import datetime, date
+from datetime import date, datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 import vk_api
-from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
+from vk_api.bot_longpoll import VkBotEventType, VkBotLongPoll
 
 try:
     from zoneinfo import ZoneInfo
@@ -24,9 +25,13 @@ except ImportError:
 VK_TOKEN = os.getenv("VK_TOKEN", "").strip()
 VK_GROUP_ID = int(os.getenv("VK_GROUP_ID", "0"))
 CNC_API_BASE = os.getenv("CNC_API_BASE", "http://web:8000/api").rstrip("/")
-CNC_BOT_SECRET = os.getenv("CNC_BOT_SECRET", os.getenv("CNC_BOT_API_SECRET", "")).strip()
+CNC_BOT_SECRET = os.getenv(
+    "CNC_BOT_SECRET", os.getenv("CNC_BOT_API_SECRET", "")
+).strip()
 CNC_SECTION_TYPE = os.getenv("CNC_SECTION_TYPE", "rangers").strip()
-CNC_TABLE_TITLE_FRAGMENT = os.getenv("CNC_TABLE_TITLE_FRAGMENT", "киберрейнджеры").strip()
+CNC_TABLE_TITLE_FRAGMENT = os.getenv(
+    "CNC_TABLE_TITLE_FRAGMENT", "киберрейнджеры"
+).strip()
 DIRS_RAW = os.getenv("CNC_DIRECTION_SHEETS", "ЧПУ,РОБО,Аэро,микро")
 SPREADSHEETS = [x.strip() for x in DIRS_RAW.split(",") if x.strip()]
 TZ_NAME = os.getenv("TIMEZONE", "Europe/Moscow")
@@ -52,7 +57,9 @@ class CNCApi:
 
     def post(self, action: str, payload: dict) -> dict:
         body = {"action": action, **payload}
-        r = requests.post(f"{self.base}/bot/gateway/", json=body, headers=_headers(), timeout=60)
+        r = requests.post(
+            f"{self.base}/bot/gateway/", json=body, headers=_headers(), timeout=60
+        )
         if r.status_code >= 400:
             raise RuntimeError(r.text or str(r.status_code))
         return r.json()
@@ -60,17 +67,24 @@ class CNCApi:
     def lookup_table(self) -> dict:
         return self.post(
             "lookup_table",
-            {"section_type": CNC_SECTION_TYPE, "title_contains": CNC_TABLE_TITLE_FRAGMENT},
+            {
+                "section_type": CNC_SECTION_TYPE,
+                "title_contains": CNC_TABLE_TITLE_FRAGMENT,
+            },
         )
 
-    def get_sheet_data(self, table_id: int, sheet_name: Optional[str]) -> List[List[Any]]:
+    def get_sheet_data(
+        self, table_id: int, sheet_name: Optional[str]
+    ) -> List[List[Any]]:
         data = self.post(
             "get_sheet_data",
             {"table_id": table_id, "sheet_name": sheet_name or ""},
         )
         return data.get("data") or []
 
-    def set_cell(self, table_id: int, sheet_name: Optional[str], row: int, col: int, value: str) -> None:
+    def set_cell(
+        self, table_id: int, sheet_name: Optional[str], row: int, col: int, value: str
+    ) -> None:
         self.post(
             "set_cell",
             {
@@ -86,7 +100,9 @@ class CNCApi:
 api = CNCApi(CNC_API_BASE)
 
 # глобальное состояние сессии (как в исходном скрипте)
-current_spreadsheet: Optional[str] = None  # имя листа-«файла» направления; в CNC = выбранный лист
+current_spreadsheet: Optional[str] = (
+    None  # имя листа-«файла» направления; в CNC = выбранный лист
+)
 current_group: Optional[str] = None  # в CNC совпадает с листом или под-листом
 user_states: Dict[int, dict] = {}
 user_note_col: Dict[int, int] = {}
@@ -112,17 +128,36 @@ def _table_id() -> int:
 
 # --- клавиатуры VK ---
 
+
 def get_main_keyboard() -> str:
     keyboard = {
         "one_time": False,
         "inline": False,
         "buttons": [
-            [{"action": {"type": "text", "label": "🎓 Направления"}, "color": "primary"},
-             {"action": {"type": "text", "label": "📋 Группы"}, "color": "primary"}],
-            [{"action": {"type": "text", "label": "👤 Студент"}, "color": "primary"},
-             {"action": {"type": "text", "label": "📝 Замечание"}, "color": "primary"}],
-            [{"action": {"type": "text", "label": "📅 Колонка даты"}, "color": "primary"},
-             {"action": {"type": "text", "label": "🎓 Статус учёбы"}, "color": "primary"}],
+            [
+                {
+                    "action": {"type": "text", "label": "🎓 Направления"},
+                    "color": "primary",
+                },
+                {"action": {"type": "text", "label": "📋 Группы"}, "color": "primary"},
+            ],
+            [
+                {"action": {"type": "text", "label": "👤 Студент"}, "color": "primary"},
+                {
+                    "action": {"type": "text", "label": "📝 Замечание"},
+                    "color": "primary",
+                },
+            ],
+            [
+                {
+                    "action": {"type": "text", "label": "📅 Колонка даты"},
+                    "color": "primary",
+                },
+                {
+                    "action": {"type": "text", "label": "🎓 Статус учёбы"},
+                    "color": "primary",
+                },
+            ],
             [{"action": {"type": "text", "label": "ℹ️ Помощь"}, "color": "secondary"}],
         ],
     }
@@ -133,19 +168,32 @@ def get_directions_keyboard(sheet_names: List[str]) -> str:
     dirs = [n for n in sheet_names if n.lower() in {s.lower() for s in SPREADSHEETS}]
     if not dirs:
         dirs = sheet_names[:4] or sheet_names
-    buttons = [[{"action": {"type": "text", "label": n}, "color": "primary"} for n in dirs]]
-    buttons.append([{"action": {"type": "text", "label": "🔙 Назад"}, "color": "secondary"}])
-    return json.dumps({"one_time": False, "inline": False, "buttons": buttons}, ensure_ascii=False)
+    buttons = [
+        [{"action": {"type": "text", "label": n}, "color": "primary"} for n in dirs]
+    ]
+    buttons.append(
+        [{"action": {"type": "text", "label": "🔙 Назад"}, "color": "secondary"}]
+    )
+    return json.dumps(
+        {"one_time": False, "inline": False, "buttons": buttons}, ensure_ascii=False
+    )
 
 
 def get_groups_keyboard(groups: List[str]) -> str:
     buttons = []
     for i in range(0, len(groups), 2):
-        row = [{"action": {"type": "text", "label": groups[i + j]}, "color": "primary"}
-               for j in range(2) if i + j < len(groups)]
+        row = [
+            {"action": {"type": "text", "label": groups[i + j]}, "color": "primary"}
+            for j in range(2)
+            if i + j < len(groups)
+        ]
         buttons.append(row)
-    buttons.append([{"action": {"type": "text", "label": "🔙 Назад"}, "color": "secondary"}])
-    return json.dumps({"one_time": False, "inline": False, "buttons": buttons}, ensure_ascii=False)
+    buttons.append(
+        [{"action": {"type": "text", "label": "🔙 Назад"}, "color": "secondary"}]
+    )
+    return json.dumps(
+        {"one_time": False, "inline": False, "buttons": buttons}, ensure_ascii=False
+    )
 
 
 def get_students_keyboard(students, page=0, per_page=10) -> str:
@@ -159,22 +207,46 @@ def get_students_keyboard(students, page=0, per_page=10) -> str:
             if i + j < len(page_students):
                 num, name = page_students[i + j]
                 display_name = name[:20] + "..." if len(name) > 20 else name
-                row.append({"action": {"type": "text", "label": f"{num}. {display_name}"}, "color": "primary"})
+                row.append(
+                    {
+                        "action": {"type": "text", "label": f"{num}. {display_name}"},
+                        "color": "primary",
+                    }
+                )
         buttons.append(row)
     nav_row = []
     if page > 0:
-        nav_row.append({"action": {"type": "text", "label": "⬅️ Назад"}, "color": "secondary"})
+        nav_row.append(
+            {"action": {"type": "text", "label": "⬅️ Назад"}, "color": "secondary"}
+        )
     if end < len(students):
-        nav_row.append({"action": {"type": "text", "label": "Вперёд ➡️"}, "color": "secondary"})
+        nav_row.append(
+            {"action": {"type": "text", "label": "Вперёд ➡️"}, "color": "secondary"}
+        )
     if nav_row:
         buttons.append(nav_row)
-    buttons.append([{"action": {"type": "text", "label": "🔙 В меню"}, "color": "secondary"}])
-    return json.dumps({"one_time": False, "inline": False, "buttons": buttons}, ensure_ascii=False)
+    buttons.append(
+        [{"action": {"type": "text", "label": "🔙 В меню"}, "color": "secondary"}]
+    )
+    return json.dumps(
+        {"one_time": False, "inline": False, "buttons": buttons}, ensure_ascii=False
+    )
 
 
 def get_back_keyboard() -> str:
     return json.dumps(
-        {"one_time": False, "inline": False, "buttons": [[{"action": {"type": "text", "label": "🔙 Назад"}, "color": "secondary"}]]},
+        {
+            "one_time": False,
+            "inline": False,
+            "buttons": [
+                [
+                    {
+                        "action": {"type": "text", "label": "🔙 Назад"},
+                        "color": "secondary",
+                    }
+                ]
+            ],
+        },
         ensure_ascii=False,
     )
 
@@ -184,36 +256,66 @@ def get_week_choice_keyboard(options: List[Tuple[int, str]]) -> str:
     row = []
     for i, (col, label) in enumerate(options[:8]):
         short = (label[:28] + "…") if len(label) > 30 else label
-        row.append({"action": {"type": "text", "label": f"{i+1}. {short}"}, "color": "primary"})
+        row.append(
+            {"action": {"type": "text", "label": f"{i+1}. {short}"}, "color": "primary"}
+        )
         if len(row) == 2:
             buttons.append(row)
             row = []
     if row:
         buttons.append(row)
-    buttons.append([{"action": {"type": "text", "label": "🔙 Назад"}, "color": "secondary"}])
-    return json.dumps({"one_time": False, "inline": False, "buttons": buttons}, ensure_ascii=False)
+    buttons.append(
+        [{"action": {"type": "text", "label": "🔙 Назад"}, "color": "secondary"}]
+    )
+    return json.dumps(
+        {"one_time": False, "inline": False, "buttons": buttons}, ensure_ascii=False
+    )
 
 
 def get_status_keyboard() -> str:
     return json.dumps(
-        {"one_time": False, "inline": False,
-         "buttons": [
-             [{"action": {"type": "text", "label": "✅ Учится"}, "color": "positive"},
-              {"action": {"type": "text", "label": "⛔ Отчислен"}, "color": "negative"}],
-             [{"action": {"type": "text", "label": "🔙 Назад"}, "color": "secondary"}],
-         ]},
+        {
+            "one_time": False,
+            "inline": False,
+            "buttons": [
+                [
+                    {
+                        "action": {"type": "text", "label": "✅ Учится"},
+                        "color": "positive",
+                    },
+                    {
+                        "action": {"type": "text", "label": "⛔ Отчислен"},
+                        "color": "negative",
+                    },
+                ],
+                [
+                    {
+                        "action": {"type": "text", "label": "🔙 Назад"},
+                        "color": "secondary",
+                    }
+                ],
+            ],
+        },
         ensure_ascii=False,
     )
 
 
-def send_vk_message(vk, user_id: int, message: str, keyboard: Optional[str] = None) -> None:
-    params = {"user_id": user_id, "message": message, "random_id": random.randint(0, 2 ** 31)}
+def send_vk_message(
+    vk, user_id: int, message: str, keyboard: Optional[str] = None
+) -> None:
+    params = {
+        "user_id": user_id,
+        "message": message,
+        "random_id": random.randint(0, 2**31),
+    }
     if keyboard:
         params["keyboard"] = keyboard
     vk.messages.send(**params)
 
 
-def parse_week_columns(headers: List[str], today: date) -> List[Tuple[int, str, Optional[date], Optional[date]]]:
+def parse_week_columns(
+    headers: List[str], today: date
+) -> List[Tuple[int, str, Optional[date], Optional[date]]]:
     """Возвращает список (col_idx, заголовок, start_date, end_date)."""
     out: List[Tuple[int, str, Optional[date], Optional[date]]] = []
     y = today.year
@@ -266,7 +368,9 @@ def parse_week_columns(headers: List[str], today: date) -> List[Tuple[int, str, 
                     out.append((c, h, ds, de))
                 else:
                     # Adjust end year by +1 where year missing.
-                    if not re.search(r"\.\d{4}\b|\.\d{2}\b", left) and not re.search(r"\.\d{4}\b|\.\d{2}\b", right):
+                    if not re.search(r"\.\d{4}\b|\.\d{2}\b", left) and not re.search(
+                        r"\.\d{4}\b|\.\d{2}\b", right
+                    ):
                         try:
                             de2 = date(ds.year + 1, de.month, de.day)
                             out.append((c, h, ds, de2))
@@ -307,7 +411,9 @@ def parse_week_columns(headers: List[str], today: date) -> List[Tuple[int, str, 
     return out
 
 
-def get_current_week_column_meta(headers: List[str]) -> Tuple[Optional[int], Optional[str]]:
+def get_current_week_column_meta(
+    headers: List[str],
+) -> Tuple[Optional[int], Optional[str]]:
     today = _tz_now().date()
     for col, label, ds, de in parse_week_columns(headers, today):
         if ds and de and ds <= today <= de:
@@ -401,7 +507,9 @@ def header_row(_: Optional[str] = None) -> List[str]:
     return [str(x or "").strip() for x in (rows[0] or [])]
 
 
-def get_student_by_number(row_number: int, _unused: Optional[str], note_col: Optional[int] = None) -> str:
+def get_student_by_number(
+    row_number: int, _unused: Optional[str], note_col: Optional[int] = None
+) -> str:
     sh = current_spreadsheet
     rows = _sheet_rows()
     if len(rows) < 2:
@@ -512,7 +620,14 @@ def main() -> None:
     try:
         info = api.lookup_table()
         _table_cache.update(info)
-        print("📎 Таблица:", info.get("title"), "id=", info.get("id"), "листы:", info.get("sheet_names"))
+        print(
+            "📎 Таблица:",
+            info.get("title"),
+            "id=",
+            info.get("id"),
+            "листы:",
+            info.get("sheet_names"),
+        )
     except Exception as e:
         print("⚠️ lookup_table:", e)
 
@@ -554,7 +669,12 @@ def main() -> None:
                             get_main_keyboard(),
                         )
                         continue
-                    send_vk_message(vk, user_id, "Введите номер колонки из списка или Назад.", get_back_keyboard())
+                    send_vk_message(
+                        vk,
+                        user_id,
+                        "Введите номер колонки из списка или Назад.",
+                        get_back_keyboard(),
+                    )
                     continue
 
                 if act == "write_note":
@@ -579,7 +699,12 @@ def main() -> None:
                         send_vk_message(vk, user_id, res, get_main_keyboard())
                         del user_states[user_id]
                         continue
-                    send_vk_message(vk, user_id, "⚠️ Номер и текст, например: `5 Не посещает`", get_back_keyboard())
+                    send_vk_message(
+                        vk,
+                        user_id,
+                        "⚠️ Номер и текст, например: `5 Не посещает`",
+                        get_back_keyboard(),
+                    )
                     del user_states[user_id]
                     continue
 
@@ -596,7 +721,12 @@ def main() -> None:
                     elif "учится" in text_lower:
                         code = "Учится"
                     else:
-                        send_vk_message(vk, user_id, "Нажмите кнопку статуса.", get_status_keyboard())
+                        send_vk_message(
+                            vk,
+                            user_id,
+                            "Нажмите кнопку статуса.",
+                            get_status_keyboard(),
+                        )
                         continue
                     row = st["row"]
                     msg = write_status(row, code, current_group)
@@ -613,7 +743,12 @@ def main() -> None:
                         sn, _ = parse_student_button(text)
                         if sn:
                             nc = user_note_col.get(user_id)
-                            send_vk_message(vk, user_id, get_student_by_number(sn, current_group, nc), get_main_keyboard())
+                            send_vk_message(
+                                vk,
+                                user_id,
+                                get_student_by_number(sn, current_group, nc),
+                                get_main_keyboard(),
+                            )
                             del user_states[user_id]
                             continue
                         if text.strip().isdigit():
@@ -621,7 +756,9 @@ def main() -> None:
                             send_vk_message(
                                 vk,
                                 user_id,
-                                get_student_by_number(sn, current_group, user_note_col.get(user_id)),
+                                get_student_by_number(
+                                    sn, current_group, user_note_col.get(user_id)
+                                ),
                                 get_main_keyboard(),
                             )
                             del user_states[user_id]
@@ -642,7 +779,12 @@ def main() -> None:
                         sn = int(text.strip())
                     if sn:
                         user_states[user_id] = {"action": "set_status", "row": sn}
-                        send_vk_message(vk, user_id, f"Строка {sn}. Выберите статус:", get_status_keyboard())
+                        send_vk_message(
+                            vk,
+                            user_id,
+                            f"Строка {sn}. Выберите статус:",
+                            get_status_keyboard(),
+                        )
                     else:
                         send_vk_message(
                             vk,
@@ -665,31 +807,65 @@ def main() -> None:
                         _table_cache.update(info)
                         names = info.get("sheet_names") or []
                     except Exception as e:
-                        send_vk_message(vk, user_id, f"❌ API: {e}", get_main_keyboard())
+                        send_vk_message(
+                            vk, user_id, f"❌ API: {e}", get_main_keyboard()
+                        )
                         continue
-                send_vk_message(vk, user_id, "🎓 Выберите направление (лист):", get_directions_keyboard(names))
+                send_vk_message(
+                    vk,
+                    user_id,
+                    "🎓 Выберите направление (лист):",
+                    get_directions_keyboard(names),
+                )
 
             elif text_lower in ("📋 группы", "/groups"):
                 if not current_spreadsheet:
-                    send_vk_message(vk, user_id, "⚠️ Сначала выберите направление (лист).", get_main_keyboard())
+                    send_vk_message(
+                        vk,
+                        user_id,
+                        "⚠️ Сначала выберите направление (лист).",
+                        get_main_keyboard(),
+                    )
                     continue
                 groups = get_groups_list()
                 if groups:
-                    send_vk_message(vk, user_id, f"📋 Группы ({current_spreadsheet}):", get_groups_keyboard(groups))
+                    send_vk_message(
+                        vk,
+                        user_id,
+                        f"📋 Группы ({current_spreadsheet}):",
+                        get_groups_keyboard(groups),
+                    )
                 else:
-                    send_vk_message(vk, user_id, "❌ Не найдены группы в столбце B", get_main_keyboard())
+                    send_vk_message(
+                        vk,
+                        user_id,
+                        "❌ Не найдены группы в столбце B",
+                        get_main_keyboard(),
+                    )
 
             elif text_lower in ("📅 колонка даты",):
                 hdr = header_row(current_group or current_spreadsheet)
-                opts = [(c, lab) for c, lab, _, _ in parse_week_columns(hdr, _tz_now().date())]
+                opts = [
+                    (c, lab)
+                    for c, lab, _, _ in parse_week_columns(hdr, _tz_now().date())
+                ]
                 if not opts:
                     # любые заголовки с цифрами — на крайний случай
-                    opts = [(i, h) for i, h in enumerate(hdr) if h and re.search(r"\d", h)]
+                    opts = [
+                        (i, h) for i, h in enumerate(hdr) if h and re.search(r"\d", h)
+                    ]
                 if not opts:
-                    send_vk_message(vk, user_id, "❌ Не найдены заголовки с датами (формат 01.01-07.01 или с годом).", get_main_keyboard())
+                    send_vk_message(
+                        vk,
+                        user_id,
+                        "❌ Не найдены заголовки с датами (формат 01.01-07.01 или с годом).",
+                        get_main_keyboard(),
+                    )
                     continue
                 user_states[user_id] = {"action": "pick_week_col", "options": opts}
-                lines = "\n".join([f"{i+1}. {lab}" for i, (_, lab) in enumerate(opts[:12])])
+                lines = "\n".join(
+                    [f"{i+1}. {lab}" for i, (_, lab) in enumerate(opts[:12])]
+                )
                 send_vk_message(
                     vk,
                     user_id,
@@ -699,29 +875,49 @@ def main() -> None:
 
             elif text_lower in ("🎓 статус учёбы",):
                 if not current_group:
-                    send_vk_message(vk, user_id, "⚠️ Сначала выберите группу (лист).", get_main_keyboard())
+                    send_vk_message(
+                        vk,
+                        user_id,
+                        "⚠️ Сначала выберите группу (лист).",
+                        get_main_keyboard(),
+                    )
                     continue
                 students_map = get_students_map(current_group)
                 if not students_map:
-                    send_vk_message(vk, user_id, "❌ Нет студентов", get_back_keyboard())
+                    send_vk_message(
+                        vk, user_id, "❌ Нет студентов", get_back_keyboard()
+                    )
                     continue
                 students = [(i + 1, fio) for i, (_, fio) in enumerate(students_map)]
                 send_vk_message(
                     vk,
                     user_id,
-                    "Выберите студента, затем статус:\n" + "\n".join(f"{n}. {name}" for n, name in students[:10]),
+                    "Выберите студента, затем статус:\n"
+                    + "\n".join(f"{n}. {name}" for n, name in students[:10]),
                     get_students_keyboard(students, 0),
                 )
-                user_states[user_id] = {"action": "pick_student_status", "students": students}
+                user_states[user_id] = {
+                    "action": "pick_student_status",
+                    "students": students,
+                }
 
             elif text_lower in ("👤 студент", "/get"):
                 if not current_spreadsheet or not current_group:
-                    send_vk_message(vk, user_id, "⚠️ Сначала выберите направление и группу.", get_main_keyboard())
+                    send_vk_message(
+                        vk,
+                        user_id,
+                        "⚠️ Сначала выберите направление и группу.",
+                        get_main_keyboard(),
+                    )
                     continue
                 students_map = get_students_map(current_group)
                 students = [(i + 1, fio) for i, (_, fio) in enumerate(students_map)]
                 if students:
-                    user_states[user_id] = {"action": "get_student", "students": students, "page": 0}
+                    user_states[user_id] = {
+                        "action": "get_student",
+                        "students": students,
+                        "page": 0,
+                    }
                     send_vk_message(
                         vk,
                         user_id,
@@ -729,16 +925,25 @@ def main() -> None:
                         get_students_keyboard(students, 0),
                     )
                 else:
-                    send_vk_message(vk, user_id, "❌ Нет студентов", get_back_keyboard())
+                    send_vk_message(
+                        vk, user_id, "❌ Нет студентов", get_back_keyboard()
+                    )
 
             elif text_lower in ("📝 замечание", "/note"):
                 if not current_spreadsheet or not current_group:
-                    send_vk_message(vk, user_id, "⚠️ Сначала выберите направление и группу.", get_main_keyboard())
+                    send_vk_message(
+                        vk,
+                        user_id,
+                        "⚠️ Сначала выберите направление и группу.",
+                        get_main_keyboard(),
+                    )
                     continue
                 students_map = get_students_map(current_group)
                 students = [(i + 1, fio) for i, (_, fio) in enumerate(students_map)]
                 if not students:
-                    send_vk_message(vk, user_id, "❌ Нет студентов", get_back_keyboard())
+                    send_vk_message(
+                        vk, user_id, "❌ Нет студентов", get_back_keyboard()
+                    )
                     continue
                 user_states[user_id] = {"action": "write_note", "students": students}
                 send_vk_message(
@@ -770,7 +975,9 @@ def main() -> None:
                     send_vk_message(
                         vk,
                         user_id,
-                        get_student_by_number(row, current_group, user_note_col.get(user_id)),
+                        get_student_by_number(
+                            row, current_group, user_note_col.get(user_id)
+                        ),
                         get_main_keyboard(),
                     )
                 except Exception:
@@ -782,20 +989,30 @@ def main() -> None:
                 if chosen_sheet:
                     current_spreadsheet = chosen_sheet
                     current_group = None
-                    send_vk_message(vk, user_id, f"✅ Направление (лист): {chosen_sheet}\nТеперь выберите группу.", get_main_keyboard())
+                    send_vk_message(
+                        vk,
+                        user_id,
+                        f"✅ Направление (лист): {chosen_sheet}\nТеперь выберите группу.",
+                        get_main_keyboard(),
+                    )
                     continue
                 # Выбор группы (значение в столбце B)
                 if current_spreadsheet:
                     groups = get_groups_list()
                     if text in groups:
                         current_group = text
-                        send_vk_message(vk, user_id, f"✅ Группа: {text}", get_main_keyboard())
+                        send_vk_message(
+                            vk, user_id, f"✅ Группа: {text}", get_main_keyboard()
+                        )
                         continue
-                send_vk_message(vk, user_id, "⚠️ Используйте кнопки или /помощь", get_main_keyboard())
+                send_vk_message(
+                    vk, user_id, "⚠️ Используйте кнопки или /помощь", get_main_keyboard()
+                )
 
         except Exception as e:
             print("❌", e)
             import traceback
+
             traceback.print_exc()
 
 

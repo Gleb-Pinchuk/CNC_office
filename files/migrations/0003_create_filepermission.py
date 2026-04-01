@@ -11,7 +11,9 @@ def _index_exists(schema_editor, table_name, index_name):
     if not _table_exists(schema_editor, table_name):
         return False
     with schema_editor.connection.cursor() as cursor:
-        constraints = schema_editor.connection.introspection.get_constraints(cursor, table_name)
+        constraints = schema_editor.connection.introspection.get_constraints(
+            cursor, table_name
+        )
     return index_name in constraints
 
 
@@ -41,11 +43,23 @@ class Migration(migrations.Migration):
         CreateModelIfMissing(
             name="FilePermission",
             fields=[
-                ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
                 (
                     "file_type",
                     models.CharField(
-                        choices=[("storage_file", "Р¤Р°Р№Р»"), ("section_table", "РўР°Р±Р»РёС†Р° СЂР°Р·РґРµР»Р°"), ("document", "Р”РѕРєСѓРјРµРЅС‚")],
+                        choices=[
+                            ("storage_file", "Р¤Р°Р№Р»"),
+                            ("section_table", "РўР°Р±Р»РёС†Р° СЂР°Р·РґРµР»Р°"),
+                            ("document", "Р”РѕРєСѓРјРµРЅС‚"),
+                        ],
                         max_length=20,
                         verbose_name="РўРёРї РѕР±СЉРµРєС‚Р°",
                     ),
@@ -54,13 +68,22 @@ class Migration(migrations.Migration):
                 (
                     "permission",
                     models.CharField(
-                        choices=[("read", "рџ‘ЃпёЏ РўРѕР»СЊРєРѕ С‡С‚РµРЅРёРµ"), ("write", "вњЏпёЏ Р§С‚РµРЅРёРµ Рё Р·Р°РїРёСЃСЊ")],
+                        choices=[
+                            ("read", "рџ‘ЃпёЏ РўРѕР»СЊРєРѕ С‡С‚РµРЅРёРµ"),
+                            ("write", "вњЏпёЏ Р§С‚РµРЅРёРµ Рё Р·Р°РїРёСЃСЊ"),
+                        ],
                         default="read",
                         max_length=10,
                         verbose_name="Р Р°Р·СЂРµС€РµРЅРёРµ",
                     ),
                 ),
-                ("created_at", models.DateTimeField(auto_now_add=True, verbose_name="Р”Р°С‚Р° РїСЂРµРґРѕСЃС‚Р°РІР»РµРЅРёСЏ")),
+                (
+                    "created_at",
+                    models.DateTimeField(
+                        auto_now_add=True,
+                        verbose_name="Р”Р°С‚Р° РїСЂРµРґРѕСЃС‚Р°РІР»РµРЅРёСЏ",
+                    ),
+                ),
                 (
                     "user",
                     models.ForeignKey(
@@ -79,10 +102,15 @@ class Migration(migrations.Migration):
         ),
         AddIndexIfMissing(
             model_name="filepermission",
-            index=models.Index(fields=["file_type", "file_id", "user"], name="files_filep_file_ty_1f2a3b_idx"),
+            index=models.Index(
+                fields=["file_type", "file_id", "user"],
+                name="files_filep_file_ty_1f2a3b_idx",
+            ),
         ),
         AddIndexIfMissing(
             model_name="filepermission",
-            index=models.Index(fields=["user", "file_type"], name="files_filep_user_fi_3c4d5e_idx"),
+            index=models.Index(
+                fields=["user", "file_type"], name="files_filep_user_fi_3c4d5e_idx"
+            ),
         ),
     ]

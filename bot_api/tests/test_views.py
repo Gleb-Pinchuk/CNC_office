@@ -7,7 +7,9 @@ from sections.models import SectionTable
 
 @pytest.mark.django_db
 class TestBotApiViews:
-    @override_settings(CNC_BOT_API_SECRET="secret-token", CNC_BOT_TABLE_OWNER_USERNAME="bot_owner")
+    @override_settings(
+        CNC_BOT_API_SECRET="secret-token", CNC_BOT_TABLE_OWNER_USERNAME="bot_owner"
+    )
     def test_health_requires_valid_secret(self, client):
         denied = client.get("/api/bot/health/")
         ok = client.get("/api/bot/health/", HTTP_X_CNC_BOT_TOKEN="secret-token")
@@ -16,7 +18,9 @@ class TestBotApiViews:
         assert ok.status_code == status.HTTP_200_OK
         assert ok.data["ok"] is True
 
-    @override_settings(CNC_BOT_API_SECRET="secret-token", CNC_BOT_TABLE_OWNER_USERNAME="missing_owner")
+    @override_settings(
+        CNC_BOT_API_SECRET="secret-token", CNC_BOT_TABLE_OWNER_USERNAME="missing_owner"
+    )
     def test_gateway_returns_503_when_owner_not_configured(self, client):
         response = client.post(
             "/api/bot/gateway/",
@@ -27,11 +31,15 @@ class TestBotApiViews:
 
         assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
 
-    @override_settings(CNC_BOT_API_SECRET="secret-token", CNC_BOT_TABLE_OWNER_USERNAME="bot_owner")
+    @override_settings(
+        CNC_BOT_API_SECRET="secret-token", CNC_BOT_TABLE_OWNER_USERNAME="bot_owner"
+    )
     def test_lookup_table_returns_matching_sheet_names(self, client):
         from django.contrib.auth import get_user_model
 
-        owner = get_user_model().objects.create_user(username="bot_owner", password="pass")
+        owner = get_user_model().objects.create_user(
+            username="bot_owner", password="pass"
+        )
         SectionTable.objects.create(
             owner=owner,
             title="Rangers main",
@@ -59,11 +67,15 @@ class TestBotApiViews:
         assert response.data["sheet_names"] == ["Alpha", "Bravo"]
         assert response.data["active_sheet_index"] == 1
 
-    @override_settings(CNC_BOT_API_SECRET="secret-token", CNC_BOT_TABLE_OWNER_USERNAME="bot_owner")
+    @override_settings(
+        CNC_BOT_API_SECRET="secret-token", CNC_BOT_TABLE_OWNER_USERNAME="bot_owner"
+    )
     def test_list_and_get_sheet_data(self, client):
         from django.contrib.auth import get_user_model
 
-        owner = get_user_model().objects.create_user(username="bot_owner", password="pass")
+        owner = get_user_model().objects.create_user(
+            username="bot_owner", password="pass"
+        )
         table = SectionTable.objects.create(
             owner=owner,
             title="Attendance",
@@ -89,11 +101,15 @@ class TestBotApiViews:
         assert data_response.status_code == status.HTTP_200_OK
         assert data_response.data["data"] == [["Name", "Score"]]
 
-    @override_settings(CNC_BOT_API_SECRET="secret-token", CNC_BOT_TABLE_OWNER_USERNAME="bot_owner")
+    @override_settings(
+        CNC_BOT_API_SECRET="secret-token", CNC_BOT_TABLE_OWNER_USERNAME="bot_owner"
+    )
     def test_set_cell_updates_table_content(self, client):
         from django.contrib.auth import get_user_model
 
-        owner = get_user_model().objects.create_user(username="bot_owner", password="pass")
+        owner = get_user_model().objects.create_user(
+            username="bot_owner", password="pass"
+        )
         table = SectionTable.objects.create(
             owner=owner,
             title="Attendance",
@@ -119,12 +135,18 @@ class TestBotApiViews:
         table.refresh_from_db()
         assert table.content["custom_sheet"]["data"][1][1] == "42"
 
-    @override_settings(CNC_BOT_API_SECRET="secret-token", CNC_BOT_TABLE_OWNER_USERNAME="bot_owner")
+    @override_settings(
+        CNC_BOT_API_SECRET="secret-token", CNC_BOT_TABLE_OWNER_USERNAME="bot_owner"
+    )
     def test_set_cell_rejects_invalid_coordinates(self, client):
         from django.contrib.auth import get_user_model
 
-        owner = get_user_model().objects.create_user(username="bot_owner", password="pass")
-        table = SectionTable.objects.create(owner=owner, title="Attendance", section_type="attendance", content={})
+        owner = get_user_model().objects.create_user(
+            username="bot_owner", password="pass"
+        )
+        table = SectionTable.objects.create(
+            owner=owner, title="Attendance", section_type="attendance", content={}
+        )
 
         response = client.post(
             "/api/bot/gateway/",
@@ -141,7 +163,9 @@ class TestBotApiViews:
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
 
-    @override_settings(CNC_BOT_API_SECRET="secret-token", CNC_BOT_TABLE_OWNER_USERNAME="bot_owner")
+    @override_settings(
+        CNC_BOT_API_SECRET="secret-token", CNC_BOT_TABLE_OWNER_USERNAME="bot_owner"
+    )
     def test_gateway_rejects_unknown_action(self, client):
         from django.contrib.auth import get_user_model
 

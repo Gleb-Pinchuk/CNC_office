@@ -1,6 +1,6 @@
+import django.db.models.deletion
 from django.conf import settings
 from django.db import migrations, models
-import django.db.models.deletion
 
 
 class Migration(migrations.Migration):
@@ -14,7 +14,15 @@ class Migration(migrations.Migration):
         migrations.CreateModel(
             name="Document",
             fields=[
-                ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
                 ("title", models.CharField(max_length=255, verbose_name="Название")),
                 (
                     "doc_type",
@@ -25,10 +33,28 @@ class Migration(migrations.Migration):
                         verbose_name="Тип документа",
                     ),
                 ),
-                ("content", models.JSONField(blank=True, default=dict, verbose_name="Содержимое")),
-                ("is_editable", models.BooleanField(default=True, verbose_name="Можно редактировать")),
-                ("created_at", models.DateTimeField(auto_now_add=True, verbose_name="Дата создания")),
-                ("updated_at", models.DateTimeField(auto_now=True, verbose_name="Дата обновления")),
+                (
+                    "content",
+                    models.JSONField(
+                        blank=True, default=dict, verbose_name="Содержимое"
+                    ),
+                ),
+                (
+                    "is_editable",
+                    models.BooleanField(
+                        default=True, verbose_name="Можно редактировать"
+                    ),
+                ),
+                (
+                    "created_at",
+                    models.DateTimeField(
+                        auto_now_add=True, verbose_name="Дата создания"
+                    ),
+                ),
+                (
+                    "updated_at",
+                    models.DateTimeField(auto_now=True, verbose_name="Дата обновления"),
+                ),
                 (
                     "owner",
                     models.ForeignKey(
@@ -47,11 +73,15 @@ class Migration(migrations.Migration):
         ),
         migrations.AddIndex(
             model_name="document",
-            index=models.Index(fields=["owner", "-updated_at"], name="documents_do_owner_i_04d2b7_idx"),
+            index=models.Index(
+                fields=["owner", "-updated_at"], name="documents_do_owner_i_04d2b7_idx"
+            ),
         ),
         migrations.AddIndex(
             model_name="document",
-            index=models.Index(fields=["doc_type", "-updated_at"], name="documents_do_doc_ty_5f7a1b_idx"),
+            index=models.Index(
+                fields=["doc_type", "-updated_at"],
+                name="documents_do_doc_ty_5f7a1b_idx",
+            ),
         ),
     ]
-

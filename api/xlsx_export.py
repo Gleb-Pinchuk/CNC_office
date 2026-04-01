@@ -73,8 +73,12 @@ def export_custom_sheet_to_xlsx_bytes(
         ws = wb.create_sheet(title=name)
         data = sh.get("data") if isinstance(sh.get("data"), list) else []
         styles = sh.get("styles") if isinstance(sh.get("styles"), dict) else {}
-        col_widths = sh.get("colWidths") if isinstance(sh.get("colWidths"), list) else []
-        row_heights = sh.get("rowHeights") if isinstance(sh.get("rowHeights"), list) else []
+        col_widths = (
+            sh.get("colWidths") if isinstance(sh.get("colWidths"), list) else []
+        )
+        row_heights = (
+            sh.get("rowHeights") if isinstance(sh.get("rowHeights"), list) else []
+        )
 
         # Column widths (px -> approx excel width)
         for c, px in enumerate(col_widths, start=1):
@@ -82,7 +86,9 @@ def export_custom_sheet_to_xlsx_bytes(
                 w = float(px)
             except Exception:
                 continue
-            ws.column_dimensions[get_column_letter(c)].width = max(6.0, min(60.0, w / 7.0))
+            ws.column_dimensions[get_column_letter(c)].width = max(
+                6.0, min(60.0, w / 7.0)
+            )
 
         # Row heights (px -> points)
         for r, px in enumerate(row_heights, start=1):
@@ -96,7 +102,9 @@ def export_custom_sheet_to_xlsx_bytes(
             if not isinstance(row, list):
                 continue
             for c_idx, val in enumerate(row, start=1):
-                cell = ws.cell(row=r_idx, column=c_idx, value="" if val is None else str(val))
+                cell = ws.cell(
+                    row=r_idx, column=c_idx, value="" if val is None else str(val)
+                )
                 sk = f"{r_idx - 1}:{c_idx - 1}"
                 st = styles.get(sk) if isinstance(styles, dict) else None
                 if not st:
@@ -137,4 +145,3 @@ def export_custom_sheet_to_xlsx_bytes(
     wb.properties.title = title or "CNC Office"
     wb.save(out)
     return out.getvalue()
-
