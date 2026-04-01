@@ -1,0 +1,30 @@
+#!/bin/bash
+# /start - скрипт запуска Django приложения в Docker
+
+set -e
+
+echo "🚀 Запуск Django приложения..."
+
+# Ждём пока БД будет готова
+echo "⏳ Ожидание базы данных..."
+python manage.py migrate --noinput
+
+# Собираем статику
+echo "📦 Сборка статики..."
+python manage.py collectstatic --noinput --clear
+
+# Создаём папку для логов
+mkdir -p /app/logs
+
+# Запускаем Gunicorn
+echo "▶️ Запуск Gunicorn..."
+exec gunicorn config.wsgi:application \
+    --bind 0.0.0.0:8000 \
+    --workers 3 \
+    --threads 2 \
+    --worker-class sync \
+    --timeout 120 \
+    --keep-alive 5 \
+    --access-logfile - \
+    --error-logfile - \
+    --log-level info

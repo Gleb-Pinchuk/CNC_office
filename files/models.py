@@ -1,153 +1,277 @@
+# files/models.py
 import os
+
+from django.conf import settings
 from django.db import models
-from django.contrib.auth import get_user_model
-from django.core.validators import FileExtensionValidator
 from django.utils import timezone
 
-User = get_user_model()
+
+def file_upload_path(instance, filename):
+    """
+    Путь для загрузки файлов: user_id/year/month/filename
+    """
+    return f'files/{instance.owner.id}/{timezone.now().strftime("%Y/%m")}/{filename}'
+
+
+class StorageFile(models.Model):
+    """
+    Файл в хранилище
+    """
+
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="storage_files",
+        verbose_name="Владелец",
+    )
+    file = models.FileField(upload_to=file_upload_path, verbose_name="Файл")
+    file_name = models.CharField(
+        max_length=255, default="", blank=True, verbose_name="Имя файла"
+    )
+    mime_type = models.CharField(
+        max_length=100, blank=True, default="", verbose_name="MIME тип"
+    )
+    size = models.BigIntegerField(default=0, verbose_name="Размер (байты)")
+    folder = models.ForeignKey(
+        "StorageFolder",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="files",
+        verbose_name="Папка",
+    )
+    uploaded_at = models.DateTimeField(auto_now_add=True, verbose_name="Дата загрузки")
+
+    class Meta:
+        verbose_name = "Файл"
+        verbose_name_plural = "Файлы"
+        ordering = ["-uploaded_at"]
+        indexes = [
+            models.Index(fields=["owner", "-uploaded_at"]),
+            models.Index(fields=["folder", "-uploaded_at"]),
+        ]
+
+    def __str__(self):
+        return self.file_name or self.file.name
+
+    def save(self, *args, **kwargs):
+        """
+        Автоматически заполняем mime_type, size и file_name
+        """
+        if self.file:
+            if not self.file_name:
+                self.file_name = os.path.basename(self.file.name)
+            self.size = self.file.size
+
+            # Определяем mime_type
+            import mimetypes
+
+            self.mime_type = (
+                mimetypes.guess_type(self.file_name)[0] or "application/octet-stream"
+            )
+
+        super().save(*args, **kwargs)
+
+    @property
+    def size_mb(self):
+        """
+        Размер в МБ для отображения
+        """
+        return round(self.size / 1024 / 1024, 2)
 
 
 class StorageFolder(models.Model):
-    """Папка для хранения файлов"""
-    owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='folders')
-    parent = models.ForeignKey('self', on_delete=models.CASCADE, null=True, blank=True, related_name='subfolders')
-    name = models.CharField(max_length=255)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+    """
+    Папка для файлов
+    """
+
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="storage_folders",
+        verbose_name="Владелец",
+    )
+    name = models.CharField(max_length=255, verbose_name="Название")
+    parent = models.ForeignKey(
+        "self",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="children",
+        verbose_name="Родительская папка",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Дата создания")
 
     class Meta:
-        verbose_name = 'Папка'
-        verbose_name_plural = 'Папки'
-        unique_together = ('owner', 'parent', 'name')
-        ordering = ['name']
+        verbose_name = "Папка"
+        verbose_name_plural = "Папки"
+        ordering = ["name"]
+        unique_together = ["owner", "name", "parent"]
+        indexes = [
+            models.Index(fields=["owner", "parent"]),
+        ]
 
     def __str__(self):
         return self.name
 
     @property
     def files_count(self):
+        """
+        Количество файлов в папке
+        """
         return self.files.count()
 
 
-class StorageFile(models.Model):
-    """Файл в хранилище"""
-    owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='files')
-    folder = models.ForeignKey(StorageFolder, on_delete=models.SET_NULL, null=True, blank=True, related_name='files')
-    file = models.FileField(
-        upload_to='user_files/%Y/%m/%d/',
-        validators=[FileExtensionValidator(allowed_extensions=['*'])]
-    )
-    file_name = models.CharField(max_length=255, blank=True)
-    size = models.BigIntegerField(default=0)
-    size_mb = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-    mime_type = models.CharField(max_length=255, blank=True)
-    uploaded_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-    is_shared = models.BooleanField(default=False)
-    description = models.TextField(blank=True)
+class FilePermission(models.Model):
+    """
+    Доступ к файлу/таблице для другого пользователя
+    """
 
-    class Meta:
-        verbose_name = 'Файл'
-        verbose_name_plural = 'Файлы'
-        ordering = ['-uploaded_at']
-        indexes = [
-            models.Index(fields=['owner', 'uploaded_at']),
-            models.Index(fields=['is_shared']),
-        ]
-
-    def __str__(self):
-        return self.file_name or os.path.basename(self.file.name)
-
-    def save(self, *args, **kwargs):
-        # Автоматическое определение размера и MIME типа
-        if self.file:
-            try:
-                self.size = self.file.size
-                self.size_mb = round(self.size / (1024 * 1024), 2)
-            except:
-                pass
-
-        # Сохраняем имя файла
-        if self.file and not self.file_name:
-            self.file_name = os.path.basename(self.file.name)
-
-        # Определяем MIME type
-        if self.file and not self.mime_type:
-            import mimetypes
-            self.mime_type, _ = mimetypes.guess_type(self.file.path)
-
-        super().save(*args, **kwargs)
-
-
-class FileAccessPermission(models.Model):
-    """Доступ к файлу для других пользователей"""
-    file = models.ForeignKey(StorageFile, on_delete=models.CASCADE, related_name='permissions')
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='file_permissions')
-    permission = models.CharField(
-        max_length=10,
-        choices=[('read', 'Чтение'), ('write', 'Запись')],
-        default='read'
-    )
-    granted_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        verbose_name = 'Доступ к файлу'
-        verbose_name_plural = 'Доступы к файлам'
-        unique_together = ('file', 'user')
-        ordering = ['-granted_at']
-
-    def __str__(self):
-        return f'{self.user.username} -> {self.file} ({self.permission})'
-
-
-class FileLock(models.Model):
-    """Блокировка файла для редактирования"""
-    file = models.ForeignKey(StorageFile, on_delete=models.CASCADE, related_name='locks')
-    locked_by = models.ForeignKey(User, on_delete=models.CASCADE)
-    locked_at = models.DateTimeField(auto_now_add=True)
-    expires_at = models.DateTimeField(default=timezone.now)  # ← Добавьте default
-
-    class Meta:
-        verbose_name = 'Блокировка файла'
-        verbose_name_plural = 'Блокировки файлов'
-        ordering = ['-locked_at']
-
-    def __str__(self):
-        return f'{self.file} locked by {self.locked_by}'
-
-    def is_expired(self):
-        return timezone.now() > self.expires_at
-
-class AuditLog(models.Model):
-    """Журнал аудита действий"""
-    ACTIONS = [
-        ('upload', 'Загрузка файла'),
-        ('download', 'Скачивание файла'),
-        ('delete', 'Удаление файла'),
-        ('share', 'Предоставление доступа'),
-        ('unshare', 'Отзыв доступа'),
-        ('login', 'Вход в систему'),
-        ('logout', 'Выход из системы'),
-        ('create_folder', 'Создание папки'),
-        ('delete_folder', 'Удаление папки'),
-        ('move', 'Перемещение файла'),
-        ('rename', 'Переименование'),
+    PERMISSION_CHOICES = [
+        ("read", "👁️ Только чтение"),
+        ("write", "✏️ Чтение и запись"),
     ]
 
-    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='audit_logs')
-    action = models.CharField(max_length=20, choices=ACTIONS)
-    ip_address = models.GenericIPAddressField(null=True, blank=True)
-    details = models.TextField(blank=True)
-    timestamp = models.DateTimeField(auto_now_add=True)
+    FILE_TYPE_CHOICES = [
+        ("storage_file", "Файл"),
+        ("section_table", "Таблица раздела"),
+        ("document", "Документ"),
+    ]
+
+    file_type = models.CharField(
+        max_length=20, choices=FILE_TYPE_CHOICES, verbose_name="Тип объекта"
+    )
+    file_id = models.IntegerField(verbose_name="ID объекта")
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="file_permissions",
+        verbose_name="Пользователь",
+    )
+    permission = models.CharField(
+        max_length=10,
+        choices=PERMISSION_CHOICES,
+        default="read",
+        verbose_name="Разрешение",
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True, verbose_name="Дата предоставления"
+    )
 
     class Meta:
-        verbose_name = 'Журнал аудита'
-        verbose_name_plural = 'Журналы аудита'
-        ordering = ['-timestamp']
+        verbose_name = "Разрешение"
+        verbose_name_plural = "Разрешения"
+        unique_together = ["file_type", "file_id", "user"]
         indexes = [
-            models.Index(fields=['user', 'timestamp']),
-            models.Index(fields=['action', 'timestamp']),
+            models.Index(fields=["file_type", "file_id", "user"]),
+            models.Index(fields=["user", "file_type"]),
         ]
 
     def __str__(self):
-        return f'{self.user} - {self.get_action_display()} - {self.timestamp}'
+        return f"{self.user.username} - {self.get_permission_display()} - {self.file_type} #{self.file_id}"
+
+    @property
+    def file_name(self):
+        """
+        Получаем имя файла для отображения
+        """
+        if self.file_type == "storage_file":
+            try:
+                return StorageFile.objects.get(id=self.file_id).file_name
+            except StorageFile.DoesNotExist:
+                return f"Файл #{self.file_id}"
+        elif self.file_type == "section_table":
+            try:
+                from sections.models import SectionTable
+
+                return SectionTable.objects.get(id=self.file_id).title
+            except Exception:
+                return f"Таблица #{self.file_id}"
+        elif self.file_type == "document":
+            try:
+                from documents.models import Document
+
+                return Document.objects.get(id=self.file_id).title
+            except Exception:
+                return f"Документ #{self.file_id}"
+        return f"{self.file_type} #{self.file_id}"
+
+    def get_object_owner(self):
+        """
+        Возвращает владельца объекта (User) или None.
+        Используется для управления разрешениями (снять доступ/изменить read/write).
+        """
+        if self.file_type == "storage_file":
+            try:
+                return StorageFile.objects.only("owner").get(id=self.file_id).owner
+            except StorageFile.DoesNotExist:
+                return None
+        if self.file_type == "section_table":
+            try:
+                from sections.models import SectionTable
+
+                return SectionTable.objects.only("owner").get(id=self.file_id).owner
+            except Exception:
+                return None
+        if self.file_type == "document":
+            try:
+                from documents.models import Document
+
+                return Document.objects.only("owner").get(id=self.file_id).owner
+            except Exception:
+                return None
+        return None
+
+
+class AuditLog(models.Model):
+    """
+    Лог аудита действий пользователя
+    """
+
+    ACTION_CHOICES = [
+        ("upload", "📤 Загрузка"),
+        ("download", "⬇️ Скачивание"),
+        ("delete", "🗑️ Удаление"),
+        ("share", "🔗 Предоставление доступа"),
+        ("login", "🔑 Вход"),
+        ("logout", "🚪 Выход"),
+        ("create", "➕ Создание"),
+        ("update", "✏️ Обновление"),
+    ]
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="audit_logs",
+        verbose_name="Пользователь",
+        null=True,
+        blank=True,
+    )
+    action = models.CharField(
+        max_length=20, choices=ACTION_CHOICES, verbose_name="Действие"
+    )
+    file = models.ForeignKey(
+        StorageFile,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="audit_logs",
+        verbose_name="Файл",
+    )
+    details = models.TextField(blank=True, verbose_name="Детали")
+    timestamp = models.DateTimeField(auto_now_add=True, verbose_name="Время")
+    ip_address = models.GenericIPAddressField(
+        null=True, blank=True, verbose_name="IP адрес"
+    )
+
+    class Meta:
+        verbose_name = "Лог аудита"
+        verbose_name_plural = "Логи аудита"
+        ordering = ["-timestamp"]
+        indexes = [
+            models.Index(fields=["user", "-timestamp"]),
+            models.Index(fields=["action", "-timestamp"]),
+        ]
+
+    def __str__(self):
+        return f'{self.user.username if self.user else "System"} - {self.get_action_display()} - {self.timestamp}'

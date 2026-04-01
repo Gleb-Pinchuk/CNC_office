@@ -1,0 +1,47 @@
+name: CI (tests)
+
+on:
+  pull_request:
+  push:
+    branches:
+      - develop
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: cnc_office
+          POSTGRES_USER: cnc_user
+          POSTGRES_PASSWORD: cnc_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cnc_user -d cnc_office"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DEBUG: "False"
+      SECRET_KEY: "ci-secret"
+      ALLOWED_HOSTS: "localhost,127.0.0.1"
+      POSTGRES_DB: "cnc_office"
+      POSTGRES_USER: "cnc_user"
+      POSTGRES_PASSWORD: "cnc_password"
+      DB_HOST: "127.0.0.1"
+      DB_PORT: "5432"
+      CORS_ALLOW_ALL_ORIGINS: "True"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run tests with coverage
+        run: |
+          pytest

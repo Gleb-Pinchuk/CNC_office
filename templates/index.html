@@ -1,24 +1,294 @@
+{% load static %}
 <!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CNC Office | Облачное хранилище</title>
-    <link rel="stylesheet" href="/static/style.css">
+
+    {# ✅ Исправлен URL шрифтов (убраны лишние пробелы) #}
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=Rajdhani:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 
-    <!-- ✅ Jspreadsheet CSS -->
-    <link rel="stylesheet" href="https://jsuites.net/v4/jsuites.css" />
-    <link rel="stylesheet" href="https://bossanova.uk/jspreadsheet/v4/jspreadsheet.css" />
+    {# ✅ Все пути к статике #}
+    <link rel="stylesheet" href="{% static 'style.css' %}">
+    <link rel="stylesheet" href="{% static 'landing.css' %}">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230a0a0f'/%3E%3Ctext x='32' y='40' font-size='30' text-anchor='middle' fill='%2300f5ff'%3EC%3C/text%3E%3C/svg%3E">
 
     <style>
         .hidden { display: none !important; }
         .modal-form { transition: opacity 0.2s ease; }
         #previewContent img { border-radius: 8px; }
         .section-divider { margin: 1rem 0 0.5rem 0; padding: 0.5rem 1rem; font-size: 0.75rem; text-transform: uppercase; color: #666; font-weight: 600; }
-        #jspreadsheet-container { width: 100%; height: 100%; min-height: 600px; background: #fff; }
-        #documentModal .modal-content { max-width: 99vw !important; width: 99vw !important; height: 99vh !important; margin: 0.5vh 0.5vw; }
-        #documentModal .modal-body { padding: 0 !important; overflow: hidden; }
+
+        #handsontable-container {
+            width: 100%;
+            flex: 1;
+            min-height: 400px;
+            background: #fff;
+            overflow: hidden;
+            position: relative;
+        }
+        .sheet-editor-stack {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            min-height: 0;
+        }
+        #sheet-tab-bar {
+            flex-shrink: 0;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            padding: 6px 8px;
+            background: #f0f2f7;
+            border-bottom: 1px solid #d5d9e0;
+            align-items: center;
+        }
+        .sheet-tab {
+            border: 1px solid #c9d0e0;
+            background: #fff;
+            padding: 6px 14px;
+            border-radius: 6px 6px 0 0;
+            font-size: 13px;
+            cursor: pointer;
+            color: #334155;
+        }
+        .sheet-tab.active {
+            background: #fff;
+            border-bottom-color: #fff;
+            margin-bottom: -1px;
+            font-weight: 600;
+            color: #1a5cff;
+        }
+        .sheet-tab-add {
+            font-weight: 700;
+            color: #1a5cff;
+            min-width: 36px;
+        }
+        .sheet-row.filter-hidden { display: none; }
+        #documentModal .modal-content {
+            max-width: 99vw !important;
+            width: 99vw !important;
+            height: 99vh !important;
+            margin: 0.5vh 0.5vw;
+            display: flex;
+            flex-direction: column;
+            z-index: 2101 !important;
+        }
+        #documentModal .modal-header { flex-shrink: 0; }
+        #documentModal .modal-body {
+            flex: 1;
+            overflow: hidden;
+            padding: 0 !important;
+            position: relative;
+        }
+        .handsontable { height: 100% !important; overflow: auto !important; }
+
+        {# ✅ Убираем pointer-events хак: он ломает клики в Handsontable #}
+        #documentModal { pointer-events: auto !important; }
+        #documentModal .modal-backdrop { pointer-events: auto !important; z-index: 2100 !important; }
+        #documentModal .modal-body { z-index: 10 !important; }
+        #handsontable-container {
+            z-index: 20 !important;
+            pointer-events: auto !important;
+        }
+        #handsontable-container .handsontable,
+        #handsontable-container .wtHolder,
+        #handsontable-container .wtHider,
+        #handsontable-container .wtSpreader,
+        #handsontable-container table.htCore,
+        #handsontable-container table.htCore td,
+        #handsontable-container table.htCore th {
+            z-index: 30 !important;
+            pointer-events: auto !important;
+        }
+        .sheet-wrap {
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background: #ffffff;
+        }
+        .sheet-table {
+            border-collapse: collapse;
+            min-width: 1200px;
+            user-select: none;
+            table-layout: fixed;
+        }
+        .sheet-table th,
+        .sheet-table td {
+            border: 1px solid #d5d9e0;
+            min-width: 90px;
+            height: 28px;
+            padding: 2px 6px;
+            font-size: 13px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .sheet-table thead th,
+        .sheet-table tbody th {
+            background: #f3f5f9;
+            text-align: center;
+            font-weight: 600;
+            position: sticky;
+            z-index: 2;
+            color: #111827;
+        }
+        .sheet-table thead th { top: 0; }
+        .sheet-table tbody th { left: 0; z-index: 1; }
+        .sheet-table td.sheet-cell {
+            background: #fff;
+            cursor: text;
+            outline: none;
+        }
+        .sheet-table td.sheet-cell.selected {
+            background: #e8f0ff;
+            box-shadow: inset 0 0 0 2px #4f8cff;
+        }
+        .sheet-table td.sheet-cell.fill-target {
+            background: #f3f8ff;
+            box-shadow: inset 0 0 0 2px #8cb8ff;
+        }
+        .sheet-table th { position: relative; }
+        .col-resizer {
+            position: absolute;
+            right: -2px;
+            top: 0;
+            width: 4px;
+            height: 100%;
+            cursor: col-resize;
+        }
+        .row-resizer {
+            position: absolute;
+            left: 0;
+            bottom: -2px;
+            width: 100%;
+            height: 4px;
+            cursor: row-resize;
+        }
+        .sheet-fill-handle {
+            position: absolute;
+            width: 8px;
+            height: 8px;
+            background: #2f73ff;
+            border: 1px solid #ffffff;
+            border-radius: 50%;
+            z-index: 5;
+            cursor: crosshair;
+        }
+
+        .sheet-ribbon {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-right: 12px;
+            padding: 10px;
+            border: 1px solid rgba(0, 245, 255, 0.25);
+            border-radius: 12px;
+            background: linear-gradient(180deg, rgba(12, 16, 34, 0.95), rgba(8, 10, 20, 0.95));
+            box-shadow: inset 0 0 18px rgba(0, 245, 255, 0.08);
+        }
+        .sheet-ribbon-tabs,
+        .sheet-ribbon-groups {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        .sheet-ribbon-tab {
+            border: 1px solid rgba(0, 245, 255, 0.25);
+            color: #d7ecff;
+            background: rgba(20, 28, 52, 0.8);
+            padding: 6px 12px;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .sheet-ribbon-tab.active {
+            background: linear-gradient(135deg, rgba(0,245,255,0.35), rgba(123,44,191,0.45));
+            border-color: rgba(0, 245, 255, 0.55);
+        }
+        .sheet-ribbon-group {
+            display: inline-flex;
+            gap: 6px;
+            align-items: center;
+            padding: 6px;
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .sheet-ribbon-group-title {
+            font-size: 11px;
+            color: #a9b8d9;
+            margin-right: 4px;
+        }
+        .sheet-ribbon .btn.btn-sm {
+            padding: 0.42rem 0.7rem;
+            border-radius: 0.55rem;
+            min-height: 30px;
+            font-size: 12px;
+        }
+        .sheet-color-input {
+            width: 34px;
+            height: 30px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            background: transparent;
+            cursor: pointer;
+            padding: 2px;
+        }
+        .sheet-ribbon-panels { width: 100%; }
+        .sheet-ribbon-panel {
+            display: none;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+        }
+        .sheet-ribbon-panel.active { display: flex; }
+        .sheet-ribbon select.sheet-font-select {
+            font-size: 12px;
+            padding: 4px 8px;
+            border-radius: 6px;
+            border: 1px solid rgba(255,255,255,0.25);
+            background: rgba(20,28,52,0.9);
+            color: #e8f0ff;
+            max-width: 150px;
+        }
+        .sheet-filter-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.45);
+            z-index: 10000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .sheet-filter-dialog {
+            background: #fff;
+            padding: 1rem 1.25rem;
+            border-radius: 12px;
+            max-width: 420px;
+            width: 92%;
+            max-height: 70vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.25);
+        }
+        .sheet-filter-dialog h4 { margin: 0 0 0.5rem 0; color: #111; }
+        .sheet-filter-hint { font-size: 12px; color: #666; margin: 0 0 8px 0; }
+        .sheet-filter-list {
+            overflow: auto;
+            max-height: 240px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 8px;
+            margin-bottom: 10px;
+        }
+        .sheet-filter-item { display: flex; align-items: center; gap: 8px; padding: 4px 0; cursor: pointer; color: #222; }
+        .sheet-filter-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+        .sheet-filter-dot { font-size: 10px; }
     </style>
 </head>
 <body>
@@ -60,15 +330,12 @@
                 <div class="section-divider">📊 Разделы</div>
 
                 <a href="#" class="nav-item" data-view="section-attendance">
-                    <span style="margin-right:0.5rem;">📊</span>
                     <span>Посещаемость</span>
                 </a>
                 <a href="#" class="nav-item" data-view="section-rangers">
-                    <span style="margin-right:0.5rem;">🤖</span>
                     <span>Цифровые рейнджеры</span>
                 </a>
                 <a href="#" class="nav-item" data-view="section-statements">
-                    <span style="margin-right:0.5rem;">📋</span>
                     <span>Ведомости</span>
                 </a>
 
@@ -118,7 +385,7 @@
         </main>
     </div>
 
-    <!-- Upload Modal -->
+    {# Upload Modal #}
     <div class="modal" id="uploadModal">
         <div class="modal-backdrop" onclick="hideModal('uploadModal')"></div>
         <div class="modal-content">
@@ -133,7 +400,8 @@
                         <label for="fileInput">Файл</label>
                         <div class="input-wrapper">
                             <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
-                            <input type="file" id="fileInput" name="file" required>
+                            <input type="file" id="fileInput" name="file" required
+                                   accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.rtf,.odt,.ods,.odp,.jpg,.jpeg,.png,.gif,.bmp,.svg,.webp,.mp4,.avi,.mkv,.mov,.mp3,.wav,.ogg,.zip,.rar,.7z,.tar,.gz,.json,.xml,.csv,.py,.js,.html,.css,.sql,.md,.log">
                         </div>
                     </div>
                     <div class="form-group">
@@ -152,7 +420,7 @@
         </div>
     </div>
 
-    <!-- Login/Register Modal -->
+    {# Login/Register Modal #}
     <div class="modal" id="loginModal">
         <div class="modal-backdrop" onclick="hideModal('loginModal')"></div>
         <div class="modal-content modal-small">
@@ -222,7 +490,7 @@
         </div>
     </div>
 
-    <!-- Preview Modal -->
+    {# Preview Modal #}
     <div class="modal" id="previewModal">
         <div class="modal-backdrop" onclick="hideModal('previewModal')"></div>
         <div class="modal-content" style="max-width:900px;width:90%;">
@@ -232,7 +500,7 @@
         </div>
     </div>
 
-    <!-- ✅ Document Modal с Jspreadsheet -->
+    {# Document Modal с Handsontable #}
     <div class="modal" id="documentModal">
         <div class="modal-backdrop" onclick="hideModal('documentModal')"></div>
         <div class="modal-content" style="max-width:99vw;width:99vw;height:99vh;margin:0.5vh 0.5vw;display:flex;flex-direction:column;">
@@ -240,17 +508,87 @@
             <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;padding:0.5rem 1rem;">
                 <h2 id="documentTitle" style="margin:0;font-size:1.1rem;">Редактор</h2>
                 <div>
+                    <div class="sheet-ribbon" aria-label="Панель инструментов таблицы">
+                        <div class="sheet-ribbon-tabs">
+                            <button type="button" class="sheet-ribbon-tab active" data-tab="home" onclick="setRibbonTab('home')">Главная</button>
+                            <button type="button" class="sheet-ribbon-tab" data-tab="insert" onclick="setRibbonTab('insert')">Вставка</button>
+                            <button type="button" class="sheet-ribbon-tab" data-tab="format" onclick="setRibbonTab('format')">Формат</button>
+                            <button type="button" class="sheet-ribbon-tab" data-tab="data" onclick="setRibbonTab('data')">Данные</button>
+                        </div>
+                        <div class="sheet-ribbon-panels">
+                            <div class="sheet-ribbon-panel active" data-panel="home">
+                                <div class="sheet-ribbon-group">
+                                    <span class="sheet-ribbon-group-title">Правка</span>
+                                    <button type="button" class="btn btn-secondary btn-sm" onclick="undoTableEdit()">Отменить</button>
+                                    <button type="button" class="btn btn-secondary btn-sm" onclick="redoTableEdit()">Повтор</button>
+                                </div>
+                                <div class="sheet-ribbon-group">
+                                    <span class="sheet-ribbon-group-title">Шрифт</span>
+                                    <select class="sheet-font-select" title="Начертание" onchange="setSelectionFontFamily(this.value)">
+                                        <option value="'Segoe UI', system-ui, sans-serif">Segoe UI</option>
+                                        <option value="Arial, sans-serif">Arial</option>
+                                        <option value="'Times New Roman', serif">Times New Roman</option>
+                                        <option value="Georgia, serif">Georgia</option>
+                                        <option value="'Courier New', monospace">Courier New</option>
+                                        <option value="Verdana, sans-serif">Verdana</option>
+                                    </select>
+                                    <select class="sheet-font-select" title="Размер" onchange="setSelectionFontSize(this.value)">
+                                        <option value="11">11 px</option>
+                                        <option value="12">12 px</option>
+                                        <option value="14" selected>14 px</option>
+                                        <option value="16">16 px</option>
+                                        <option value="18">18 px</option>
+                                        <option value="22">22 px</option>
+                                    </select>
+                                    <button type="button" class="btn btn-secondary btn-sm" onclick="toggleSelectionBold()">Жирный</button>
+                                    <button type="button" class="btn btn-secondary btn-sm" onclick="toggleSelectionItalic()">Курсив</button>
+                                </div>
+                                <div class="sheet-ribbon-group">
+                                    <span class="sheet-ribbon-group-title">Выравнивание</span>
+                                    <button type="button" class="btn btn-secondary btn-sm" onclick="setSelectionAlign('left')">Влево</button>
+                                    <button type="button" class="btn btn-secondary btn-sm" onclick="setSelectionAlign('center')">Центр</button>
+                                    <button type="button" class="btn btn-secondary btn-sm" onclick="setSelectionAlign('right')">Вправо</button>
+                                </div>
+                            </div>
+                            <div class="sheet-ribbon-panel" data-panel="insert">
+                                <div class="sheet-ribbon-group">
+                                    <span class="sheet-ribbon-group-title">Строки и столбцы</span>
+                                    <button type="button" class="btn btn-secondary btn-sm" onclick="insertRowBelow()">Строка +</button>
+                                    <button type="button" class="btn btn-secondary btn-sm" onclick="insertColRight()">Столбец +</button>
+                                </div>
+                            </div>
+                            <div class="sheet-ribbon-panel" data-panel="format">
+                                <div class="sheet-ribbon-group">
+                                    <span class="sheet-ribbon-group-title">Цвет</span>
+                                    <label title="Цвет текста">Текст <input class="sheet-color-input" type="color" value="#111111" onchange="setSelectionTextColor(this.value)"></label>
+                                    <label title="Заливка">Заливка <input class="sheet-color-input" type="color" value="#ffffff" onchange="setSelectionFillColor(this.value)"></label>
+                                </div>
+                            </div>
+                            <div class="sheet-ribbon-panel" data-panel="data">
+                                <div class="sheet-ribbon-group">
+                                    <span class="sheet-ribbon-group-title">Фильтр</span>
+                                    <button type="button" class="btn btn-secondary btn-sm" onclick="openColumnFilterForSelection()">Фильтр столбца</button>
+                                    <button type="button" class="btn btn-secondary btn-sm" onclick="clearSheetColumnFilters()">Сбросить фильтры</button>
+                                </div>
+                                <span class="sheet-ribbon-group-title" style="max-width:220px;font-size:11px;color:#9aaee5;">Двойной клик по заголовку столбца (A,B,…) — быстрый фильтр как в Excel.</span>
+                            </div>
+                        </div>
+                    </div>
                     <button class="btn btn-secondary btn-sm" onclick="shareCurrentDocument()" style="margin-right:8px;">🔗 Поделиться</button>
+                    <button class="btn btn-success btn-sm" onclick="exportToExcel()" style="margin-right:8px;">📥 Excel</button>
                     <button class="btn btn-primary btn-sm" onclick="saveDocument()">💾 Сохранить</button>
                 </div>
             </div>
-            <div class="modal-body" style="flex:1;overflow:hidden;padding:0;">
-                <div id="jspreadsheet-container" style="width:100%;height:100%;min-height:600px;background:#fff;"></div>
+            <div class="modal-body" style="flex:1;overflow:hidden;padding:0;position:relative;">
+                <div class="sheet-editor-stack">
+                    <div id="sheet-tab-bar" class="sheet-tab-bar" aria-label="Листы таблицы"></div>
+                    <div id="handsontable-container" style="width:100%;background:#fff;"></div>
+                </div>
             </div>
         </div>
     </div>
 
-    <!-- Create Document Modal -->
+    {# Create Document Modal #}
     <div class="modal" id="createDocumentModal">
         <div class="modal-backdrop" onclick="hideModal('createDocumentModal')"></div>
         <div class="modal-content modal-small">
@@ -273,11 +611,7 @@
         </div>
     </div>
 
-    <!-- ✅ Jspreadsheet JS -->
-    <script src="https://jsuites.net/v4/jsuites.js"></script>
-    <script src="https://bossanova.uk/jspreadsheet/v4/jspreadsheet.js"></script>
-
-    <!-- ✅ App JS -->
-    <script src="/static/app.js?v=11.0"></script>
+    {# ✅ Все пути к JS #}
+    <script src="{% static 'app.js' %}?v=19.4"></script>
 </body>
 </html>

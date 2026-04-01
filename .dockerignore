@@ -1,0 +1,21 @@
+# .dockerignore
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+*.log
+*.sqlite3
+media/
+staticfiles/
+.git/
+.github/
+.vscode/
+.idea/
+*.env
+*.md
+README*
+LICENSE

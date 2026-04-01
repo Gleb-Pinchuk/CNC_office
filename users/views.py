@@ -1,17 +1,23 @@
-from rest_framework import generics, permissions, status
-from rest_framework.response import Response
-from rest_framework.authtoken.models import Token
-from rest_framework.authtoken.views import ObtainAuthToken
+# users/views.py
 from django.contrib.auth import get_user_model
-from .serializers import UserSerializer, UserListSerializer, RegisterSerializer
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_exempt
+from rest_framework import generics, permissions, status
+from rest_framework.authtoken.models import Token
+from rest_framework.authtoken.serializers import AuthTokenSerializer  # ✅ ИМПОРТ
+from rest_framework.response import Response
+
+from .serializers import RegisterSerializer, UserListSerializer
 
 User = get_user_model()
 
 
+@method_decorator(csrf_exempt, name="dispatch")
 class RegisterView(generics.CreateAPIView):
     """Регистрация нового пользователя"""
+
     queryset = User.objects.all()
-    serializer_class = RegisterSerializer  # Используйте RegisterSerializer с password2
+    serializer_class = RegisterSerializer
     permission_classes = [permissions.AllowAny]
     authentication_classes = []
 
@@ -19,36 +25,37 @@ class RegisterView(generics.CreateAPIView):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
-
-        # Создаём токен для авто-входа
         token, _ = Token.objects.get_or_create(user=user)
+        return Response(
+            {
+                "token": token.key,
+                "user": UserListSerializer(user).data,
+                "message": "Пользователь успешно зарегистрирован",
+            },
+            status=status.HTTP_201_CREATED,
+        )
 
-        return Response({
-            'token': token.key,
-            'user': UserListSerializer(user).data,
-            'message': 'Пользователь успешно зарегистрирован'
-        }, status=status.HTTP_201_CREATED)
 
-
-class LoginView(ObtainAuthToken):
+@method_decorator(csrf_exempt, name="dispatch")
+class LoginView(generics.GenericAPIView):  # ✅ НЕ ObtainAuthToken
     """Вход пользователя — возвращает токен"""
+
     permission_classes = [permissions.AllowAny]
     authentication_classes = []
+    serializer_class = AuthTokenSerializer  # ✅ СТАНДАРТНЫЙ СЕРИАЛИЗАТОР
 
     def post(self, request, *args, **kwargs):
-        serializer = self.serializer_class(data=request.data, context={'request': request})
+        serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        user = serializer.validated_data['user']
+        user = serializer.validated_data["user"]
         token, _ = Token.objects.get_or_create(user=user)
-
-        return Response({
-            'token': token.key,
-            'user': UserListSerializer(user).data
-        })
+        return Response({"token": token.key, "user": UserListSerializer(user).data})
 
 
+@method_decorator(csrf_exempt, name="dispatch")
 class UserProfileView(generics.RetrieveAPIView):
     """Данные текущего пользователя"""
+
     serializer_class = UserListSerializer
     permission_classes = [permissions.IsAuthenticated]
 
@@ -57,7 +64,8 @@ class UserProfileView(generics.RetrieveAPIView):
 
 
 class UserListView(generics.ListAPIView):
-    """Список пользователей (только для авторизованных)"""
+    """Список пользователей"""
+
     queryset = User.objects.all()
     serializer_class = UserListSerializer
     permission_classes = [permissions.IsAuthenticated]
