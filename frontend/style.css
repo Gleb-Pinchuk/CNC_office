@@ -50,7 +50,7 @@ svg {
     stroke-linejoin: round;
 }
 
-.logo-icon { width: 40px; height: 40px; color: var(--primary-color); }
+.logo-icon { display: none; }
 .nav-icon { width: 24px; height: 24px; color: var(--text-secondary); }
 .btn-icon { width: 20px; height: 20px; }
 .modal-icon { width: 64px; height: 64px; margin: 0 auto 1rem; color: var(--primary-color); }
@@ -317,6 +317,31 @@ svg {
     gap: 1rem;
     font-size: 0.75rem;
     color: var(--text-muted);
+}
+.shared-perm-meta {
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+.perm-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 54px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    color: #fff;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+}
+.perm-badge.write { background: #10b981; }
+.perm-badge.read { background: #64748b; }
+.shared-perm-user {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .file-actions {

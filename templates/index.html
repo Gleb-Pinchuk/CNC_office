@@ -339,7 +339,7 @@
             padding: 8px 12px;
             border-radius: 10px;
             border: 1px solid #d6e3f5;
-            background: #fff;
+            background: linear-gradient(180deg, #f8fbff 0%, #eef5ff 100%);
             color: #0f172a;
             font-weight: 600;
             transition: all 0.2s ease;
@@ -409,6 +409,42 @@
         .sheet-filter-item { display: flex; align-items: center; gap: 8px; padding: 4px 0; cursor: pointer; color: #222; }
         .sheet-filter-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
         .sheet-filter-dot { font-size: 10px; }
+        .sheet-formula-hint {
+            position: fixed;
+            z-index: 13000;
+            min-width: 280px;
+            background: #ffffff;
+            border: 1px solid #dbe7f5;
+            border-radius: 10px;
+            box-shadow: 0 14px 32px rgba(15, 23, 42, 0.2);
+            padding: 6px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .sheet-formula-item {
+            border: 1px solid transparent;
+            border-radius: 8px;
+            background: #f8fbff;
+            color: #0f172a;
+            text-align: left;
+            padding: 8px 10px;
+            font-size: 12px;
+            font-weight: 700;
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+        .sheet-formula-item:hover {
+            border-color: #93c5fd;
+            background: #eef6ff;
+        }
+        .sheet-formula-item span {
+            font-size: 11px;
+            font-weight: 500;
+            color: #64748b;
+        }
     </style>
 </head>
 <body>

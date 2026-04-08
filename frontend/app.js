@@ -1253,6 +1253,7 @@ class CustomSheetEditor {
             const hasMod = e.ctrlKey || e.metaKey;
             const isUndo = hasMod && !e.shiftKey && key === 'z';
             const isRedo = (hasMod && key === 'y') || (hasMod && e.shiftKey && key === 'z');
+            const isDeleteKey = key === 'backspace' || key === 'delete';
             const activeEl = document.activeElement;
             const modalOpen = documentModal?.classList?.contains('show');
             const insideEditor = !!(activeEl && this.container.contains(activeEl));
@@ -1261,13 +1262,20 @@ class CustomSheetEditor {
                 activeEl.tagName === 'TEXTAREA' ||
                 activeEl.tagName === 'SELECT'
             ));
-            if (!modalOpen || (!insideEditor && isTypingInput)) return;
+            const canHandleSheetHotkeys = modalOpen && (!isTypingInput || insideEditor);
+            if (!canHandleSheetHotkeys) return;
             if (isUndo) {
                 e.preventDefault();
                 this.undo();
             } else if (isRedo) {
                 e.preventDefault();
                 this.redo();
+            } else if (isDeleteKey) {
+                const isEditingCell = !!this.editingCellKey;
+                if (!isEditingCell && insideEditor) {
+                    e.preventDefault();
+                    this.clearSelectedCells();
+                }
             }
         };
         document.addEventListener('keydown', this._onKeyDown, true);
@@ -1280,6 +1288,8 @@ class CustomSheetEditor {
         this.rowHeights = norm.rowHeights;
         this.editingCellKey = null;
         this.formatPainter = { armed: false, sourceKey: null, sourceStyle: null };
+        this.formulaHintEl = null;
+        this.formulaFns = ['SUM', 'СУММ', 'AVERAGE', 'MIN', 'MAX'];
         this.columnFilters = {};
         Object.entries(norm.columnFilters).forEach(([k, v]) => { this.columnFilters[k] = v.slice(); });
         this.render();
@@ -1470,12 +1480,39 @@ class CustomSheetEditor {
             const evaluated = this._evaluateCell(ref.row, ref.col, memo, visiting);
             return evaluated?.numeric !== null && evaluated?.numeric !== undefined ? [evaluated.numeric] : [];
         }
+        if (/[+\-*/()]/.test(token)) {
+            const exprVal = this._evaluateExpression(token, memo, visiting);
+            return exprVal === null ? [] : [exprVal];
+        }
         const n = this._toNumberSafe(token);
         return n === null ? [] : [n];
     }
+    _evaluateExpression(expression, memo, visiting) {
+        let expr = String(expression || '').trim();
+        if (!expr) return null;
+        const refs = expr.match(/[A-Za-z]+\d+/g) || [];
+        refs.forEach((refToken) => {
+            const ref = this._parseCellRef(refToken);
+            const val = ref ? (this._evaluateCell(ref.row, ref.col, memo, visiting)?.numeric ?? 0) : 0;
+            expr = expr.replace(new RegExp(`\\b${refToken}\\b`, 'g'), String(val));
+        });
+        if (!/^[\d+\-*/().,\s]+$/.test(expr)) return null;
+        expr = expr.replace(/,/g, '.');
+        try {
+            const out = Function(`"use strict"; return (${expr});`)();
+            return Number.isFinite(out) ? Number(out) : null;
+        } catch (_) {
+            return null;
+        }
+    }
     _evaluateFormula(raw, memo, visiting) {
         const match = /^\s*=\s*([A-Za-zА-Яа-яЁё]+)\s*\((.*)\)\s*$/.exec(String(raw || ''));
-        if (!match) return { text: '#ERROR!', numeric: null };
+        if (!match) {
+            const direct = String(raw || '').replace(/^\s*=\s*/, '');
+            const computed = this._evaluateExpression(direct, memo, visiting);
+            if (computed === null) return { text: '#ERROR!', numeric: null };
+            return { text: this._formatComputedNumber(computed), numeric: computed };
+        }
         const fn = match[1].trim().toUpperCase();
         const argsText = match[2] || '';
         const args = argsText.split(/[;,]/).map((p) => p.trim()).filter(Boolean);
@@ -1581,6 +1618,7 @@ class CustomSheetEditor {
             if (!selectAll) range.collapse(false);
             sel.addRange(range);
         }
+        this._showFormulaHints(cell);
     }
     _commitEditCell(cell, { cancel = false } = {}) {
         if (!cell) return;
@@ -1598,15 +1636,128 @@ class CustomSheetEditor {
             this._pushUndo();
             this.data[r][c] = after;
             this._markDirty();
+            this._hideFormulaHints();
             this.render();
             return;
         }
         this.data[r][c] = before;
         const display = this._getDisplayedValue(r, c);
         cell.textContent = display;
+        this._hideFormulaHints();
+    }
+    isEditing() {
+        if (this.editingCellKey) return true;
+        const active = document.activeElement;
+        return !!(active && this.container.contains(active) && active.getAttribute('contenteditable') === 'true');
+    }
+    clearSelectedCells() {
+        const s = this._normalizeSelection();
+        let changed = false;
+        for (let r = s.r1; r <= s.r2; r++) {
+            for (let c = s.c1; c <= s.c2; c++) {
+                if (String(this.data[r][c] ?? '') !== '') {
+                    changed = true;
+                    break;
+                }
+            }
+            if (changed) break;
+        }
+        if (!changed) return;
+        this._pushUndo();
+        for (let r = s.r1; r <= s.r2; r++) {
+            for (let c = s.c1; c <= s.c2; c++) {
+                this.data[r][c] = '';
+            }
+        }
+        this.render();
+    }
+    _getEditingCellEl() {
+        if (!this.editingCellKey) return null;
+        const [r, c] = this.editingCellKey.split(':').map(Number);
+        if (!Number.isFinite(r) || !Number.isFinite(c)) return null;
+        return this.container.querySelector(`.sheet-cell[data-r="${r}"][data-c="${c}"]`);
+    }
+    _hideFormulaHints() {
+        if (this.formulaHintEl) {
+            this.formulaHintEl.remove();
+            this.formulaHintEl = null;
+        }
+    }
+    _insertCellRefIntoFormula(refText) {
+        const editingEl = this._getEditingCellEl();
+        if (!editingEl) return false;
+        const raw = String(editingEl.textContent || '');
+        if (!raw.trim().startsWith('=')) return false;
+        editingEl.textContent = `${raw}${refText}`;
+        editingEl.focus();
+        const sel = window.getSelection();
+        if (sel) {
+            sel.removeAllRanges();
+            const range = document.createRange();
+            range.selectNodeContents(editingEl);
+            range.collapse(false);
+            sel.addRange(range);
+        }
+        this._showFormulaHints(editingEl);
+        return true;
+    }
+    _showFormulaHints(cell) {
+        if (!cell || cell.getAttribute('contenteditable') !== 'true') {
+            this._hideFormulaHints();
+            return;
+        }
+        const text = String(cell.textContent || '');
+        if (!text.trim().startsWith('=')) {
+            this._hideFormulaHints();
+            return;
+        }
+        const tokenMatch = /^\s*=\s*([A-Za-zА-Яа-яЁё]*)/.exec(text);
+        const typed = (tokenMatch?.[1] || '').toUpperCase();
+        const variants = this.formulaFns.filter((fn) => fn.toUpperCase().startsWith(typed)).slice(0, 5);
+        if (!variants.length) {
+            this._hideFormulaHints();
+            return;
+        }
+        if (!this.formulaHintEl) {
+            this.formulaHintEl = document.createElement('div');
+            this.formulaHintEl.className = 'sheet-formula-hint';
+            document.body.appendChild(this.formulaHintEl);
+        }
+        const hints = {
+            SUM: 'Сумма диапазона: SUM(A1:A10)',
+            'СУММ': 'Сумма диапазона: СУММ(A1:A10)',
+            AVERAGE: 'Среднее значение: AVERAGE(A1:A10)',
+            MIN: 'Минимум по диапазону: MIN(A1:A10)',
+            MAX: 'Максимум по диапазону: MAX(A1:A10)',
+        };
+        this.formulaHintEl.innerHTML = variants.map((fn) => `<button type="button" class="sheet-formula-item" data-fn="${fn}">${fn}<span>${hints[fn]}</span></button>`).join('');
+        this.formulaHintEl.querySelectorAll('.sheet-formula-item').forEach((btn) => {
+            btn.addEventListener('mousedown', (e) => e.preventDefault());
+            btn.addEventListener('click', () => {
+                const fn = btn.dataset.fn || 'SUM';
+                cell.textContent = `=${fn}()`;
+                cell.focus();
+                const sel = window.getSelection();
+                if (sel) {
+                    sel.removeAllRanges();
+                    const range = document.createRange();
+                    const textNode = cell.firstChild;
+                    const pos = Math.max(0, String(cell.textContent).length - 1);
+                    if (textNode) range.setStart(textNode, pos);
+                    else range.selectNodeContents(cell);
+                    range.collapse(true);
+                    sel.addRange(range);
+                }
+                this._showFormulaHints(cell);
+            });
+        });
+        const rect = cell.getBoundingClientRect();
+        this.formulaHintEl.style.left = `${Math.max(12, rect.left)}px`;
+        this.formulaHintEl.style.top = `${Math.max(12, rect.bottom + 6)}px`;
     }
 
     render() {
+        this._hideFormulaHints();
         const rows = this.data.length;
         const cols = this.data[0]?.length || 0;
         const displayMemo = new Map();
@@ -1645,6 +1796,14 @@ class CustomSheetEditor {
             });
             cell.addEventListener('mousedown', (e) => {
                 if (e.button !== 0) return;
+                if (this.editingCellKey && this.editingCellKey !== this._cellKey(r, c)) {
+                    const ref = `${this._colName(c)}${r + 1}`;
+                    if (this._insertCellRefIntoFormula(ref)) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        return;
+                    }
+                }
                 if (this._applyFormatPainterToCell(r, c)) return;
                 this.isSelecting = true;
                 this._setSelection(r, c);
@@ -1686,6 +1845,11 @@ class CustomSheetEditor {
                     this._setSelection(nextR, c);
                     const next = this.container.querySelector(`.sheet-cell[data-r="${nextR}"][data-c="${c}"]`);
                     if (next) next.focus();
+                }
+            });
+            cell.addEventListener('input', () => {
+                if (cell.getAttribute('contenteditable') === 'true') {
+                    this._showFormulaHints(cell);
                 }
             });
             cell.addEventListener('paste', (e) => {
@@ -1822,6 +1986,7 @@ class CustomSheetEditor {
                 if (cell.getAttribute('contenteditable') === 'true') {
                     this._commitEditCell(cell);
                 }
+                this._hideFormulaHints();
             });
         });
         this._bindResizers();
@@ -2073,6 +2238,7 @@ class CustomSheetEditor {
         if (el) el.focus();
     }
     destroy() {
+        this._hideFormulaHints();
         window.removeEventListener('mouseup', this._onGlobalMouseUp);
         window.removeEventListener('blur', this._onGlobalMouseUp);
         document.removeEventListener('keydown', this._onKeyDown, true);
@@ -2404,6 +2570,7 @@ class MultiSheetWorkbook {
     armFormatPainter() { if (this._editor) this._editor.armFormatPainter(); }
     clearFormatPainter() { if (this._editor) this._editor.clearFormatPainter(); }
     getSelectionStyleState() { return this._editor ? this._editor.getSelectionStyleState() : null; }
+    isEditing() { return this._editor ? this._editor.isEditing() : false; }
     insertRowBelow() { if (this._editor) this._editor.insertRowBelow(); }
     insertColRight() { if (this._editor) this._editor.insertColRight(); }
     undo() { if (this._editor) this._editor.undo(); }
@@ -2469,7 +2636,7 @@ function initHandsontable(doc, restoredSelection = null) {
             window._sheetRefreshInterval = null;
             return;
         }
-        if (hasPendingSheetChanges()) return;
+        if (hasPendingSheetChanges() || (sheetEditor?.isEditing && sheetEditor.isEditing())) return;
         try {
             const endpoint = isCurrentSectionTable()
                 ? `${API_BASE}/section-tables/${currentDocument.id}/`
@@ -2880,11 +3047,12 @@ function createSharedCard(perm, index) {
     card.onclick = (e) => { if (!e.target.closest('.file-actions')) openShared(); };
     const name = perm.file_name || `Объект #${fileId}`;
     const user = perm.user?.username || 'Неизвестно';
-    const badge = perm.permission === 'write' ? '<span style="background:#10B981;color:#fff;padding:2px 8px;border-radius:12px;font-size:0.75rem">WRITE</span>' : '<span style="background:#6B7280;color:#fff;padding:2px 8px;border-radius:12px;font-size:0.75rem">READ</span>';
+    const canWriteBadge = perm.permission === 'write';
+    const badge = `<span class="perm-badge ${canWriteBadge ? 'write' : 'read'}">${canWriteBadge ? 'WRITE' : 'READ'}</span>`;
     card.innerHTML = `
         <div class="file-icon">${iconGlyph('link')}</div>
         <div class="file-name" title="${escapeHtml(name)}">${escapeHtml(name)}</div>
-        <div class="file-meta">${badge}<span>${user}</span></div>
+        <div class="file-meta shared-perm-meta">${badge}<span class="shared-perm-user">${escapeHtml(user)}</span></div>
         <div class="file-actions"></div>`;
     const actions = card.querySelector('.file-actions');
     if (actions) {

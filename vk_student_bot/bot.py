@@ -110,6 +110,24 @@ def _normalize_text(text: str) -> str:
     return re.sub(r"\s+", " ", (text or "").strip()).lower()
 
 
+def _social_url(value: Any, platform: str) -> str:
+    raw = str(value or "").strip()
+    if not raw or raw == "-":
+        return "-"
+    if raw.startswith("http://") or raw.startswith("https://"):
+        return raw
+    cleaned = raw.lstrip("@").strip()
+    if not cleaned:
+        return "-"
+    if platform == "telegram":
+        return f"https://t.me/{cleaned}"
+    if platform == "vk":
+        return f"https://vk.com/{cleaned}"
+    if platform == "tiktok":
+        return f"https://www.tiktok.com/@{cleaned}"
+    return raw
+
+
 def _table_id() -> int:
     table_id = _table_cache.get("id") or _table_cache.get("table_id")
     if table_id:
@@ -253,15 +271,19 @@ def get_student_by_number(
     if use_col is not None and use_col < len(student_row):
         current_note = str(student_row[use_col] or "")
     phone = data.get("Номер телефона") or data.get("Телефон") or "-"
+    telegram_url = _social_url(data.get("Телеграм", "-"), "telegram")
+    vk_url = _social_url(data.get("Вконтакте", "-"), "vk")
+    tiktok_raw = data.get("ТикТок", data.get("Тикток", "-"))
+    tiktok_url = _social_url(tiktok_raw, "tiktok")
     msg = (
         f"🔍 Студент #{row_number}\n\n"
         f"🎓 Направление (лист): {sh or '—'}\n"
         f"📋 Группа: {group or '—'}\n"
         f"👤 ФИО: {data.get('ФИО', '-')}\n"
         f"📱 Телефон: {phone}\n"
-        f"📱 Telegram: {data.get('Телеграм', '-')}\n"
-        f"💬 ВКонтакте: {data.get('Вконтакте', '-')}\n"
-        f"🎵 TikTok: {data.get('ТикТок', data.get('Тикток', '-'))}\n"
+        f"📱 Telegram: {telegram_url}\n"
+        f"💬 ВКонтакте: {vk_url}\n"
+        f"🎵 TikTok: {tiktok_url}\n"
         f"📅 Неделя (колонка): {week_range if week_range else 'Не определена'}\n"
         f"📝 Замечание: {current_note or 'Нет'}"
     )
