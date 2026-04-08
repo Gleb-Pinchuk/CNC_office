@@ -13,6 +13,7 @@ let sheetDirtySince = 0;
 const VIEW_STORAGE_KEY = 'cnc_current_view';
 const EDITOR_STATE_KEY = 'cnc_editor_state_v2';
 const PRESENCE_PING_MS = 1200;
+const HASH_EDITOR_KEY = 'editor';
 let realtimeSaveTimer = null;
 let sheetPresenceInterval = null;
 let lastPresenceKey = '';
@@ -112,7 +113,7 @@ function scheduleRealtimeSheetSave() {
         if (currentDocument && sheetEditor && !currentDocument.is_readonly) {
             saveDocumentSilent();
         }
-    }, 1200);
+    }, 400);
 }
 
 function getPresenceUrl() {
@@ -125,6 +126,58 @@ function getPresenceUrl() {
 
 function clearEditorState() {
     localStorage.removeItem(EDITOR_STATE_KEY);
+    clearEditorHashState();
+}
+
+function _buildEditorHashValue(payload) {
+    const t = payload?.isSectionTable ? 'section_table' : 'document';
+    const id = Number(payload?.id);
+    const sel = payload?.selection || {};
+    const si = Number(sel.activeSheetIndex ?? 0);
+    const r = Number(sel.row ?? 0);
+    const c = Number(sel.col ?? 0);
+    if (!Number.isFinite(id) || id <= 0) return '';
+    return `${t}:${id}:${Number.isFinite(si) ? si : 0}:${Number.isFinite(r) ? r : 0}:${Number.isFinite(c) ? c : 0}`;
+}
+
+function writeEditorHashState(payload) {
+    const value = _buildEditorHashValue(payload);
+    if (!value) return;
+    const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+    hash.set(HASH_EDITOR_KEY, value);
+    history.replaceState(null, '', `${window.location.pathname}${window.location.search}#${hash.toString()}`);
+}
+
+function clearEditorHashState() {
+    const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+    if (!hash.has(HASH_EDITOR_KEY)) return;
+    hash.delete(HASH_EDITOR_KEY);
+    const tail = hash.toString();
+    history.replaceState(null, '', `${window.location.pathname}${window.location.search}${tail ? `#${tail}` : ''}`);
+}
+
+function readEditorHashState() {
+    const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+    const raw = hash.get(HASH_EDITOR_KEY);
+    if (!raw) return null;
+    const parts = raw.split(':');
+    if (parts.length < 2) return null;
+    const t = parts[0] === 'section_table' ? 'section_table' : 'document';
+    const id = Number(parts[1]);
+    if (!Number.isFinite(id) || id <= 0) return null;
+    const activeSheetIndex = Number(parts[2] ?? 0);
+    const row = Number(parts[3] ?? 0);
+    const col = Number(parts[4] ?? 0);
+    return {
+        isSectionTable: t === 'section_table',
+        id,
+        selection: {
+            activeSheetIndex: Number.isFinite(activeSheetIndex) ? activeSheetIndex : 0,
+            row: Number.isFinite(row) ? row : 0,
+            col: Number.isFinite(col) ? col : 0,
+        },
+        ts: Date.now(),
+    };
 }
 
 function saveEditorState() {
@@ -138,6 +191,7 @@ function saveEditorState() {
         ts: Date.now(),
     };
     localStorage.setItem(EDITOR_STATE_KEY, JSON.stringify(payload));
+    writeEditorHashState(payload);
 }
 
 function readEditorState() {
@@ -153,7 +207,7 @@ function readEditorState() {
 }
 
 async function restoreEditorStateAfterReload() {
-    const st = readEditorState();
+    const st = readEditorHashState() || readEditorState();
     if (!st || !st.id) return;
     const ageMs = Date.now() - Number(st.ts || 0);
     if (ageMs > 1000 * 60 * 30) return;
@@ -363,9 +417,9 @@ function applyLivePresence(items) {
 
 function startSheetPresenceLoop() {
     stopSheetPresenceLoop();
-    if (!sheetEditor || !currentDocument || currentDocument.is_readonly) return;
+    if (!sheetEditor || !currentDocument) return;
     const tick = async () => {
-        if (!sheetEditor || !currentDocument || currentDocument.is_readonly) {
+        if (!sheetEditor || !currentDocument) {
             stopSheetPresenceLoop();
             return;
         }
@@ -382,8 +436,9 @@ function startSheetPresenceLoop() {
         try {
             const url = getPresenceUrl();
             if (!url) return;
+            const canEdit = !currentDocument.is_readonly;
             const shouldPing = nextKey !== lastPresenceKey || !currentPresenceItems.length;
-            const method = shouldPing ? 'POST' : 'GET';
+            const method = (canEdit && shouldPing) ? 'POST' : 'GET';
             const res = await fetch(url, {
                 method,
                 headers: getAuthHeaders(),
@@ -1058,11 +1113,12 @@ function createDocumentCard(doc, index) {
     return card;
 }
 
-async function openDocument(docId, restoredSelection = null) {
+async function openDocument(docId, restoredSelection = null, sharedPermission = null) {
     try {
         const res = await fetch(`${API_BASE}/documents/${docId}/`, { headers: getAuthHeaders() });
         if (res.ok) {
             currentDocument = await res.json();
+            if (sharedPermission) currentDocument.shared_permission = sharedPermission;
             delete currentDocument.isSectionTable;
             showDocumentEditor(currentDocument, restoredSelection);
         }
@@ -2051,8 +2107,9 @@ function initHandsontable(doc, restoredSelection = null) {
                 cell.setAttribute('contenteditable', 'false');
             });
         }, 0);
-    } else if (doc && !doc.is_readonly) {
-        // Периодическое сохранение
+    }
+    if (doc && !doc.is_readonly) {
+        // Периодическое сохранение (только для write)
         window._sheetSyncInterval = setInterval(() => {
             if (currentDocument && currentDocument.id === doc.id && sheetEditor) {
                 saveDocumentSilent();
@@ -2061,37 +2118,50 @@ function initHandsontable(doc, restoredSelection = null) {
                 window._sheetSyncInterval = null;
             }
         }, 5000);
-        window._sheetRefreshInterval = setInterval(async () => {
-            if (!currentDocument || currentDocument.id !== doc.id || !sheetEditor) {
-                clearInterval(window._sheetRefreshInterval);
-                window._sheetRefreshInterval = null;
-                return;
-            }
-            if (hasPendingSheetChanges()) return;
-            try {
-                const endpoint = isCurrentSectionTable()
-                    ? `${API_BASE}/section-tables/${currentDocument.id}/`
-                    : `${API_BASE}/documents/${currentDocument.id}/`;
-                const res = await fetch(endpoint, { headers: getAuthHeaders() });
-                if (!res.ok) return;
-                const fresh = await res.json();
-                if (!fresh?.updated_at || fresh.updated_at === currentDocument.updated_at) return;
-                const payloadFresh = fresh?.content?.custom_sheet || null;
-                if (!payloadFresh) return;
-                currentDocument.updated_at = fresh.updated_at;
-                currentDocument.content = fresh.content || {};
-                if (sheetEditor) {
-                    sheetEditor.destroy();
-                }
-                sheetEditor = new MultiSheetWorkbook(container, tabBar, payloadFresh, markSheetDirty);
-                workbookBaseSnapshot = sheetEditor ? deepClone(sheetEditor.export()) : null;
-                clearSheetDirty();
-                applyLivePresence(currentPresenceItems);
-            } catch (e) {
-                console.debug('Sheet refresh skip:', e?.message || e);
-            }
-        }, 2000);
     }
+    // Периодическое обновление контента (для всех: write/read)
+    window._sheetRefreshInterval = setInterval(async () => {
+        if (!currentDocument || currentDocument.id !== doc.id || !sheetEditor) {
+            clearInterval(window._sheetRefreshInterval);
+            window._sheetRefreshInterval = null;
+            return;
+        }
+        if (hasPendingSheetChanges()) return;
+        try {
+            const endpoint = isCurrentSectionTable()
+                ? `${API_BASE}/section-tables/${currentDocument.id}/`
+                : `${API_BASE}/documents/${currentDocument.id}/`;
+            const res = await fetch(endpoint, { headers: getAuthHeaders() });
+            if (!res.ok) return;
+            const fresh = await res.json();
+            if (!fresh?.updated_at || fresh.updated_at === currentDocument.updated_at) return;
+            const payloadFresh = fresh?.content?.custom_sheet || null;
+            if (!payloadFresh) return;
+            const restoreSel = sheetEditor?.getSelectionMeta ? sheetEditor.getSelectionMeta() : null;
+            currentDocument.updated_at = fresh.updated_at;
+            currentDocument.content = fresh.content || {};
+            if (sheetEditor) {
+                sheetEditor.destroy();
+            }
+            sheetEditor = new MultiSheetWorkbook(container, tabBar, payloadFresh, markSheetDirty);
+            if (restoreSel && sheetEditor?.setSelectionMeta) {
+                sheetEditor.setSelectionMeta(restoreSel);
+            }
+            if (currentDocument?.is_readonly && container) {
+                setTimeout(() => {
+                    container.querySelectorAll('.sheet-cell').forEach((cell) => {
+                        cell.setAttribute('contenteditable', 'false');
+                    });
+                }, 0);
+            }
+            workbookBaseSnapshot = sheetEditor ? deepClone(sheetEditor.export()) : null;
+            clearSheetDirty();
+            saveEditorState();
+            applyLivePresence(currentPresenceItems);
+        } catch (e) {
+            console.debug('Sheet refresh skip:', e?.message || e);
+        }
+    }, 1000);
 }
 
 function toggleSelectionBold() {
@@ -2369,11 +2439,12 @@ async function createSectionTable() {
     } catch (e) { console.error('Create section table error:', e); alert('Ошибка подключения'); }
 }
 
-async function openSectionTable(tableId, restoredSelection = null) {
+async function openSectionTable(tableId, restoredSelection = null, sharedPermission = null) {
     try {
         const res = await fetch(`${API_BASE}/section-tables/${tableId}/`, { headers: getAuthHeaders() });
         if (res.ok) {
             currentDocument = await res.json();
+            if (sharedPermission) currentDocument.shared_permission = sharedPermission;
             currentDocument.doc_type = 'spreadsheet';
             currentDocument.isSectionTable = true;
             showDocumentEditor(currentDocument, restoredSelection);
@@ -2427,17 +2498,11 @@ function createSharedCard(perm, index) {
         if (!fileId) return;
         if (fileType === 'storage_file') return downloadFile(fileId);
         if (fileType === 'document') {
-            await openDocument(fileId);
-            if (currentDocument) {
-                currentDocument.shared_permission = perm.permission;
-            }
+            await openDocument(fileId, null, perm.permission);
             return;
         }
         if (fileType === 'section_table') {
-            await openSectionTable(fileId);
-            if (currentDocument) {
-                currentDocument.shared_permission = perm.permission;
-            }
+            await openSectionTable(fileId, null, perm.permission);
         }
     };
     card.onclick = (e) => { if (!e.target.closest('.file-actions')) openShared(); };
