@@ -30,9 +30,10 @@ jobs:
             cd ~/cnc_office_v2
             
             # ============================================
-            # 1. Pull свежих изменений
+            # 1. Настройка авторизации и Pull изменений
             # ============================================
-            echo "🔄 Pull свежих изменений (ветка: ${{ github.ref_name }})..."
+            echo "🔄 Настройка URL с токеном и Pull (ветка: ${{ github.ref_name }})..."
+            git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/Gleb-Pinchuk/CNC_office.git
             git fetch origin ${{ github.ref_name }}
             git reset --hard origin/${{ github.ref_name }}
             
