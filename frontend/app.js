@@ -18,6 +18,7 @@ let realtimeSaveTimer = null;
 let sheetPresenceInterval = null;
 let lastPresenceKey = '';
 let currentPresenceItems = [];
+let livePresenceLayer = null;
 
 // DOM Elements
 const filesGrid = document.getElementById('filesGrid');
@@ -368,9 +369,10 @@ function stopSheetPresenceLoop() {
     container.querySelectorAll('.sheet-cell.live-editing-cell').forEach((el) => {
         el.classList.remove('live-editing-cell');
         el.style.removeProperty('--live-color');
-        const badge = el.querySelector('.live-cell-badge');
-        if (badge) badge.remove();
     });
+    if (livePresenceLayer) {
+        livePresenceLayer.innerHTML = '';
+    }
 }
 
 function _presenceColor(username) {
@@ -381,9 +383,24 @@ function _presenceColor(username) {
     return palette[Math.abs(hash) % palette.length];
 }
 
+function ensureLivePresenceLayer() {
+    if (livePresenceLayer && document.body.contains(livePresenceLayer)) {
+        return livePresenceLayer;
+    }
+    livePresenceLayer = document.getElementById('livePresenceLayer');
+    if (!livePresenceLayer) {
+        livePresenceLayer = document.createElement('div');
+        livePresenceLayer.id = 'livePresenceLayer';
+        livePresenceLayer.className = 'live-presence-layer';
+        document.body.appendChild(livePresenceLayer);
+    }
+    return livePresenceLayer;
+}
+
 function applyLivePresence(items) {
     const container = document.getElementById('handsontable-container');
     if (!container || !sheetEditor) return;
+    const layer = ensureLivePresenceLayer();
     const own = String(currentUser?.username || '').toLowerCase();
     const active = sheetEditor.getSelectionMeta ? sheetEditor.getSelectionMeta() : null;
     const activeSheet = String(active?.sheetName || '').trim().toLowerCase();
@@ -391,9 +408,8 @@ function applyLivePresence(items) {
     container.querySelectorAll('.sheet-cell.live-editing-cell').forEach((el) => {
         el.classList.remove('live-editing-cell');
         el.style.removeProperty('--live-color');
-        const badge = el.querySelector('.live-cell-badge');
-        if (badge) badge.remove();
     });
+    layer.innerHTML = '';
 
     (items || []).forEach((p) => {
         const username = String(p?.username || '');
@@ -408,10 +424,16 @@ function applyLivePresence(items) {
         const color = _presenceColor(username);
         cell.classList.add('live-editing-cell');
         cell.style.setProperty('--live-color', color);
-        const badge = document.createElement('span');
-        badge.className = 'live-cell-badge';
+        const rect = cell.getBoundingClientRect();
+        const badge = document.createElement('div');
+        badge.className = 'live-presence-badge';
         badge.textContent = username;
-        cell.appendChild(badge);
+        badge.style.setProperty('--live-color', color);
+        const top = Math.max(8, rect.top - 32);
+        const left = Math.max(8, rect.left + 2);
+        badge.style.top = `${top}px`;
+        badge.style.left = `${left}px`;
+        layer.appendChild(badge);
     });
 }
 
@@ -712,24 +734,45 @@ function createFileCard(file, index) {
         <div class="file-name" title="${escapeHtml(name)}">${escapeHtml(name)}</div>
         <div class="file-meta"><span>${size}</span><span>${date}</span></div>
         <div class="file-actions">
-            ${canAct ? `<button class="file-action-btn" onclick="event.stopPropagation();downloadFile(${file.id})">⬇️</button>` : ''}
-            ${canAct ? `<button class="file-action-btn" onclick="event.stopPropagation();shareFile(${file.id})">🔗</button>` : ''}
-            ${canAct ? `<button class="file-action-btn" onclick="event.stopPropagation();deleteFile(${file.id})">🗑️</button>` : ''}
+            ${canAct ? `<button class="file-action-btn" title="Download" onclick="event.stopPropagation();downloadFile(${file.id})">${iconGlyph('download')}</button>` : ''}
+            ${canAct ? `<button class="file-action-btn" title="Share" onclick="event.stopPropagation();shareFile(${file.id})">${iconGlyph('share')}</button>` : ''}
+            ${canAct ? `<button class="file-action-btn" title="Delete" onclick="event.stopPropagation();deleteFile(${file.id})">${iconGlyph('trash')}</button>` : ''}
         </div>`;
     return card;
 }
 
+function iconGlyph(name) {
+    const map = {
+        file: '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-width="1.8" d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7z"/><path stroke-width="1.8" d="M14 2v5h5"/></svg>',
+        table: '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="4" width="18" height="16" rx="2" stroke-width="1.8"/><path stroke-width="1.8" d="M3 10h18M9 4v16M15 4v16"/></svg>',
+        text: '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-width="1.8" d="M4 5h16M4 10h16M4 15h11"/></svg>',
+        image: '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="4" width="18" height="16" rx="2" stroke-width="1.8"/><circle cx="9" cy="10" r="2" stroke-width="1.8"/><path stroke-width="1.8" d="m21 16-4.8-4.8a1 1 0 0 0-1.4 0L8 18"/></svg>',
+        video: '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="5" width="14" height="14" rx="2" stroke-width="1.8"/><path stroke-width="1.8" d="m17 10 4-2v8l-4-2z"/></svg>',
+        audio: '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-width="1.8" d="M9 18V6l10-2v12"/><circle cx="6" cy="18" r="3" stroke-width="1.8"/><circle cx="16" cy="16" r="3" stroke-width="1.8"/></svg>',
+        archive: '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="4" width="18" height="5" rx="1" stroke-width="1.8"/><path stroke-width="1.8" d="M4 9h16v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path stroke-width="1.8" d="M10 13h4"/></svg>',
+        folder: '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-width="1.8" d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3z"/></svg>',
+        link: '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-width="1.8" d="M10 13a5 5 0 0 0 7.1 0l2.8-2.8a5 5 0 0 0-7.1-7.1L10 5"/><path stroke-width="1.8" d="M14 11a5 5 0 0 0-7.1 0l-2.8 2.8a5 5 0 0 0 7.1 7.1L14 19"/></svg>',
+        download: '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-width="1.8" d="M12 3v12"/><path stroke-width="1.8" d="m7 10 5 5 5-5"/><path stroke-width="1.8" d="M4 21h16"/></svg>',
+        share: '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="18" cy="5" r="3" stroke-width="1.8"/><circle cx="6" cy="12" r="3" stroke-width="1.8"/><circle cx="18" cy="19" r="3" stroke-width="1.8"/><path stroke-width="1.8" d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/></svg>',
+        trash: '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-width="1.8" d="M3 6h18"/><path stroke-width="1.8" d="M8 6V4h8v2"/><path stroke-width="1.8" d="M19 6l-1 14H6L5 6"/><path stroke-width="1.8" d="M10 11v6M14 11v6"/></svg>',
+        pencil: '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-width="1.8" d="m4 20 4.2-1 9.7-9.7a2.1 2.1 0 0 0 0-3l-.2-.2a2.1 2.1 0 0 0-3 0L5 15.8z"/><path stroke-width="1.8" d="m13.5 7.5 3 3"/></svg>',
+        shield: '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-width="1.8" d="M12 3 4 6v6c0 5 3.4 8.8 8 10 4.6-1.2 8-5 8-10V6z"/></svg>',
+        login: '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-width="1.8" d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><path stroke-width="1.8" d="m10 17 5-5-5-5"/><path stroke-width="1.8" d="M15 12H3"/></svg>',
+        logout: '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-width="1.8" d="M10 17l-5-5 5-5"/><path stroke-width="1.8" d="M5 12h12"/><path stroke-width="1.8" d="M14 3h5a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-5"/></svg>',
+    };
+    return map[name] || map.file;
+}
 function getFileIcon(mimeType) {
-    if (!mimeType) return '📄';
+    if (!mimeType) return iconGlyph('file');
     const mt = mimeType.toLowerCase();
-    if (mt.includes('excel')||mt.includes('spreadsheet')) return '📊';
-    if (mt.includes('word')||mt.includes('.doc')) return '📝';
-    if (mt.includes('pdf')) return '📄';
-    if (mt.includes('image')) return '🖼️';
-    if (mt.includes('video')) return '🎬';
-    if (mt.includes('audio')) return '🎵';
-    if (mt.includes('zip')) return '📦';
-    return '📄';
+    if (mt.includes('excel') || mt.includes('spreadsheet')) return iconGlyph('table');
+    if (mt.includes('word') || mt.includes('.doc') || mt.includes('text')) return iconGlyph('text');
+    if (mt.includes('pdf')) return iconGlyph('file');
+    if (mt.includes('image')) return iconGlyph('image');
+    if (mt.includes('video')) return iconGlyph('video');
+    if (mt.includes('audio')) return iconGlyph('audio');
+    if (mt.includes('zip')) return iconGlyph('archive');
+    return iconGlyph('file');
 }
 
 // ✅ ЗАГРУЗКА ФАЙЛА (ИСПРАВЛЕНО: FormData без Content-Type)
@@ -886,7 +929,7 @@ function showPreviewModal(file) {
                 showModal(previewModal);
             })
             .catch(() => {
-                previewContent.innerHTML = `<p style="color:#ff4466;">Не удалось загрузить</p><button class="btn btn-primary" onclick="downloadFile(${file.id})">⬇️ Скачать</button>`;
+                previewContent.innerHTML = `<p style="color:#ff4466;">Не удалось загрузить</p><button class="btn btn-primary" onclick="downloadFile(${file.id})">Скачать</button>`;
                 showModal(previewModal);
             });
     }
@@ -898,7 +941,7 @@ function showPreviewModal(file) {
                 showModal(previewModal);
             })
             .catch(() => {
-                previewContent.innerHTML = `<p style="color:#ff4466;">Не удалось загрузить</p><button class="btn btn-primary" onclick="downloadFile(${file.id})">⬇️ Скачать</button>`;
+                previewContent.innerHTML = `<p style="color:#ff4466;">Не удалось загрузить</p><button class="btn btn-primary" onclick="downloadFile(${file.id})">Скачать</button>`;
                 showModal(previewModal);
             });
     }
@@ -913,10 +956,10 @@ function showPreviewModal(file) {
     else if (mt.includes('excel') || mt.includes('spreadsheet') || ['xls', 'xlsx', 'csv'].includes(fileExt)) {
         previewContent.innerHTML = `
             <div style="text-align:center;padding:2rem;">
-                <div style="font-size:4rem;margin-bottom:1rem;">📊</div>
+                <div style="font-size:4rem;margin-bottom:1rem;display:flex;justify-content:center;">${iconGlyph('table')}</div>
                 <h3>Excel файл</h3>
                 <p style="color:#888;margin:1rem 0;">${file.file_name || 'Файл'}</p>
-                <button class="btn btn-primary" onclick="downloadFile(${file.id})">⬇️ Скачать</button>
+                <button class="btn btn-primary" onclick="downloadFile(${file.id})">Скачать</button>
             </div>
         `;
         showModal(previewModal);
@@ -1028,10 +1071,10 @@ function createFolderCard(folder, index) {
     card.onclick = (e) => { if (!e.target.closest('.file-actions')) { currentFolder = folder; currentView = 'files'; loadView('files'); } };
     const date = folder.created_at ? new Date(folder.created_at).toLocaleDateString('ru-RU') : '';
     card.innerHTML = `
-        <div class="file-icon">📁</div>
+        <div class="file-icon">${iconGlyph('folder')}</div>
         <div class="file-name" title="${escapeHtml(folder.name)}">${escapeHtml(folder.name)}</div>
         <div class="file-meta"><span>${folder.files_count || 0} файлов</span><span>${date}</span></div>
-        <div class="file-actions"><button class="file-action-btn" onclick="event.stopPropagation();deleteFolder(${folder.id})">🗑️</button></div>`;
+        <div class="file-actions"><button class="file-action-btn" onclick="event.stopPropagation();deleteFolder(${folder.id})">${iconGlyph('trash')}</button></div>`;
     return card;
 }
 
@@ -1098,7 +1141,7 @@ function createDocumentCard(doc, index) {
     card.style.cursor = 'pointer';
     card.onclick = (e) => { if (!e.target.closest('.file-actions')) openDocument(doc.id); };
 
-    const icon = doc.doc_type === 'spreadsheet' ? '📊' : '📝';
+    const icon = doc.doc_type === 'spreadsheet' ? iconGlyph('table') : iconGlyph('text');
     const date = doc.updated_at ? new Date(doc.updated_at).toLocaleString('ru-RU') : '';
     const canEdit = doc.is_editable || doc.owner_username === currentUser?.username;
 
@@ -1107,8 +1150,8 @@ function createDocumentCard(doc, index) {
         <div class="file-name" title="${escapeHtml(doc.title)}">${escapeHtml(doc.title)}</div>
         <div class="file-meta"><span>${doc.doc_type === 'spreadsheet' ? 'Таблица' : 'Текст'}</span><span>${date}</span></div>
         <div class="file-actions">
-            ${canEdit ? `<button class="file-action-btn" onclick="event.stopPropagation();openDocument(${doc.id})">✏️</button>` : ''}
-            <button class="file-action-btn" onclick="event.stopPropagation();deleteDocument(${doc.id})">🗑️</button>
+            ${canEdit ? `<button class="file-action-btn" onclick="event.stopPropagation();openDocument(${doc.id})">${iconGlyph('pencil')}</button>` : ''}
+            <button class="file-action-btn" onclick="event.stopPropagation();deleteDocument(${doc.id})">${iconGlyph('trash')}</button>
         </div>`;
     return card;
 }
@@ -2396,12 +2439,12 @@ function createSectionTableCard(table, index, sectionType) {
     card.onclick = (e) => { if (!e.target.closest('.file-actions')) openSectionTable(table.id); };
     const date = table.updated_at ? new Date(table.updated_at).toLocaleString('ru-RU') : '';
     card.innerHTML = `
-        <div class="file-icon">📊</div>
+        <div class="file-icon">${iconGlyph('table')}</div>
         <div class="file-name" title="${escapeHtml(table.title)}">${escapeHtml(table.title)}</div>
         <div class="file-meta"><span>${sectionType}</span><span>${date}</span></div>
         <div class="file-actions">
-            <button class="file-action-btn" onclick="event.stopPropagation();openSectionTable(${table.id})">✏️</button>
-            <button class="file-action-btn" onclick="event.stopPropagation();deleteSectionTable(${table.id})">🗑️</button>
+            <button class="file-action-btn" onclick="event.stopPropagation();openSectionTable(${table.id})">${iconGlyph('pencil')}</button>
+            <button class="file-action-btn" onclick="event.stopPropagation();deleteSectionTable(${table.id})">${iconGlyph('trash')}</button>
         </div>
     `;
     return card;
@@ -2508,9 +2551,9 @@ function createSharedCard(perm, index) {
     card.onclick = (e) => { if (!e.target.closest('.file-actions')) openShared(); };
     const name = perm.file_name || `Объект #${fileId}`;
     const user = perm.user?.username || 'Неизвестно';
-    const badge = perm.permission === 'write' ? '<span style="background:#10B981;color:#fff;padding:2px 8px;border-radius:12px;font-size:0.75rem">✏️</span>' : '<span style="background:#6B7280;color:#fff;padding:2px 8px;border-radius:12px;font-size:0.75rem">👁️</span>';
+    const badge = perm.permission === 'write' ? '<span style="background:#10B981;color:#fff;padding:2px 8px;border-radius:12px;font-size:0.75rem">WRITE</span>' : '<span style="background:#6B7280;color:#fff;padding:2px 8px;border-radius:12px;font-size:0.75rem">READ</span>';
     card.innerHTML = `
-        <div class="file-icon">🔗</div>
+        <div class="file-icon">${iconGlyph('link')}</div>
         <div class="file-name" title="${escapeHtml(name)}">${escapeHtml(name)}</div>
         <div class="file-meta">${badge}<span>${user}</span></div>
         <div class="file-actions"></div>`;
@@ -2518,7 +2561,7 @@ function createSharedCard(perm, index) {
     if (actions) {
         const btn = document.createElement('button');
         btn.className = 'file-action-btn';
-        btn.textContent = fileType === 'storage_file' ? '⬇️' : (canWrite ? '✏️' : '👁️');
+        btn.innerHTML = fileType === 'storage_file' ? iconGlyph('download') : (canWrite ? iconGlyph('pencil') : iconGlyph('shield'));
         btn.onclick = (e) => { e.stopPropagation(); openShared(); };
         actions.appendChild(btn);
 
@@ -2526,7 +2569,7 @@ function createSharedCard(perm, index) {
             const toggle = document.createElement('button');
             toggle.className = 'file-action-btn';
             toggle.title = 'Переключить read/write';
-            toggle.textContent = canWrite ? '👁️' : '✏️';
+            toggle.innerHTML = canWrite ? iconGlyph('shield') : iconGlyph('pencil');
             toggle.onclick = (e) => {
                 e.stopPropagation();
                 updatePermission(perm.id, canWrite ? 'read' : 'write');
@@ -2536,7 +2579,7 @@ function createSharedCard(perm, index) {
             const del = document.createElement('button');
             del.className = 'file-action-btn';
             del.title = 'Снять доступ';
-            del.textContent = '✖';
+            del.innerHTML = iconGlyph('trash');
             del.onclick = (e) => { e.stopPropagation(); revokePermission(perm.id); };
             actions.appendChild(del);
         }
@@ -2571,8 +2614,8 @@ function createLogCard(log, index) {
     const card = document.createElement('div');
     card.className = 'file-card';
     card.style.animationDelay = `${index * 0.1}s`;
-    const icons = { upload: '📤', download: '⬇️', delete: '🗑️', share: '🔗', login: '🔑', logout: '🚪' };
-    const icon = icons[log.action] || '📝';
+    const iconMap = { upload: 'file', download: 'download', delete: 'trash', share: 'share', login: 'login', logout: 'logout', update: 'pencil', create: 'table' };
+    const icon = iconGlyph(iconMap[log.action] || 'file');
     const date = log.timestamp ? new Date(log.timestamp).toLocaleString('ru-RU') : '';
     const user = log.user_username || log.user?.username || 'Система';
     card.innerHTML = `
@@ -2646,4 +2689,14 @@ function setupEventListeners() {
         saveEditorState();
         sendPresenceLeave();
     });
+    window.addEventListener('resize', () => {
+        if (currentPresenceItems.length) applyLivePresence(currentPresenceItems);
+    });
+    window.addEventListener('scroll', () => {
+        if (currentPresenceItems.length) applyLivePresence(currentPresenceItems);
+    }, true);
 }
+
+
+
+

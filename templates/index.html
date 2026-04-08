@@ -173,22 +173,27 @@
             box-shadow: inset 0 0 0 2px var(--live-color, #0ea5e9);
             background: #eef6ff;
         }
-        .live-cell-badge {
-            position: absolute;
-            top: -18px;
-            left: 2px;
-            z-index: 9;
+        .live-presence-layer {
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            z-index: 12000;
+        }
+        .live-presence-badge {
+            position: fixed;
             display: inline-flex;
             align-items: center;
-            padding: 1px 6px;
-            border-radius: 6px;
+            padding: 4px 9px;
+            border-radius: 10px;
             background: var(--live-color, #0ea5e9);
             color: #fff;
-            font-size: 10px;
-            line-height: 1.3;
+            font-size: 11px;
+            font-weight: 600;
+            line-height: 1.2;
             white-space: nowrap;
             pointer-events: none;
-            box-shadow: 0 4px 14px rgba(2, 6, 23, 0.24);
+            box-shadow: 0 10px 22px rgba(2, 6, 23, 0.34);
+            border: 1px solid rgba(255,255,255,0.3);
         }
         .sheet-table th { position: relative; }
         .col-resizer {
@@ -370,7 +375,7 @@
                     <span>Документы</span>
                 </a>
 
-                <div class="section-divider">📊 Разделы</div>
+                <div class="section-divider">Разделы</div>
 
                 <a href="#" class="nav-item" data-view="section-attendance">
                     <span>Посещаемость</span>
@@ -617,7 +622,7 @@
                             </div>
                         </div>
                     </div>
-                    <button class="btn btn-secondary btn-sm" onclick="shareCurrentDocument()" style="margin-right:8px;">🔗 Поделиться</button>
+                    <button class="btn btn-secondary btn-sm" onclick="shareCurrentDocument()" style="margin-right:8px;">Поделиться</button>
                     <button class="btn btn-success btn-sm" onclick="exportToExcel()" style="margin-right:8px;">📥 Excel</button>
                     <button class="btn btn-primary btn-sm" onclick="saveDocument()">💾 Сохранить</button>
                 </div>
