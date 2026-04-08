@@ -170,3 +170,24 @@ class TestDocumentsAPI:
         data = document.content["custom_sheet"]["sheets"][0]["data"]
         assert data[1][0] == "A2-updated"
         assert data[0][1] == "B1-updated"
+
+    def test_presence_updates_and_clears(self, auth_client, document):
+        up = auth_client.post(
+            f"/api/documents/{document.id}/presence/",
+            data={"sheet_name": "Лист1", "row": 3, "col": 4, "editing": True},
+            content_type="application/json",
+        )
+        assert up.status_code == status.HTTP_200_OK
+        assert any(
+            p["row"] == 3 and p["col"] == 4 and p["sheet_name"] == "Лист1"
+            for p in up.data["presence"]
+        )
+
+        clear = auth_client.post(
+            f"/api/documents/{document.id}/presence/",
+            data={"editing": False},
+            content_type="application/json",
+        )
+        assert clear.status_code == status.HTTP_200_OK
+        assert clear.data["status"] == "cleared"
+        assert clear.data["presence"] == []

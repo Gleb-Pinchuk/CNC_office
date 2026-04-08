@@ -285,7 +285,11 @@ def write_note(
     hdr_list = [str(h or "") for h in (rows[0] or [])]
     col_num, week_range = get_current_week_column_meta(hdr_list)
     c = user_note_col.get(user_id)
-    if c is None:
+    try:
+        c = int(c) if c is not None else None
+    except (TypeError, ValueError):
+        c = None
+    if c is None or c < 0 or c >= len(hdr_list):
         c = col_num
     if c is None:
         return "❌ Не выбрана колонка недели. Нажмите «📅 Колонка даты»."
@@ -476,7 +480,7 @@ def parse_week_columns(headers: List[str], today: date) -> List[Tuple[int, str, 
                             pass
                 continue
         parts = ddm.findall(h)
-        if len(parts) < 2:
+        if len(parts) < 1:
             continue
 
         def build(idx: int) -> Optional[date]:
@@ -492,7 +496,8 @@ def parse_week_columns(headers: List[str], today: date) -> List[Tuple[int, str, 
             except ValueError:
                 return None
 
-        ds, de = build(0), build(1)
+        ds = build(0)
+        de = build(1) if len(parts) > 1 else ds
         if not ds or not de:
             continue
         if de < ds:
@@ -506,9 +511,18 @@ def parse_week_columns(headers: List[str], today: date) -> List[Tuple[int, str, 
 
 def get_current_week_column_meta(headers: List[str]) -> Tuple[Optional[int], Optional[str]]:
     today = _tz_now().date()
-    for col, label, ds, de in parse_week_columns(headers, today):
+    parsed = parse_week_columns(headers, today)
+    for col, label, ds, de in parsed:
         if ds and de and ds <= today <= de:
             return col, label
+    past = [(de, col, label) for col, label, ds, de in parsed if ds and de and de < today]
+    if past:
+        _, col, label = max(past, key=lambda x: x[0])
+        return col, label
+    future = [(ds, col, label) for col, label, ds, de in parsed if ds and de and ds > today]
+    if future:
+        _, col, label = min(future, key=lambda x: x[0])
+        return col, label
     return None, None
 
 
@@ -694,6 +708,7 @@ def main() -> None:
             chosen_sheet = _resolve_sheet_click(text)
             if chosen_sheet:
                 st.update({"current_spreadsheet": chosen_sheet, "current_group": None})
+                user_note_col.pop(user_id, None)
                 send_vk_message(vk, user_id, f"✅ Направление: {chosen_sheet}", get_main_keyboard())
                 continue
 
@@ -704,6 +719,7 @@ def main() -> None:
                     groups = []
                 if text in groups:
                     st["current_group"] = text
+                    user_note_col.pop(user_id, None)
                     send_vk_message(vk, user_id, f"✅ Группа: {text}", get_main_keyboard())
                     continue
 

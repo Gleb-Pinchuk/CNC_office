@@ -1,16 +1,22 @@
 # sections/views.py
+from datetime import timedelta
+
 from django.db import transaction
 from django.db.models import Q
 from django.http import HttpResponse
+from django.utils import timezone
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from api.xlsx_export import export_custom_sheet_to_xlsx_bytes
 from bot_api.sheet_utils import set_cell_value
+from files.models import LiveCellPresence
 
 from .models import SectionTable
 from .serializers import SectionTableSerializer
+
+PRESENCE_TTL_SECONDS = 30
 
 
 def _apply_changed_cells(content, changed_cells):
@@ -29,6 +35,32 @@ def _apply_changed_cells(content, changed_cells):
         value = "" if item.get("value") is None else str(item.get("value"))
         set_cell_value(result, sheet_name, row, col, value)
     return result
+
+
+def _cleanup_stale_presence(file_type: str, file_id: int):
+    cutoff = timezone.now() - timedelta(seconds=PRESENCE_TTL_SECONDS)
+    LiveCellPresence.objects.filter(
+        file_type=file_type, file_id=file_id, updated_at__lt=cutoff
+    ).delete()
+
+
+def _presence_payload(file_type: str, file_id: int):
+    _cleanup_stale_presence(file_type, file_id)
+    rows = (
+        LiveCellPresence.objects.filter(file_type=file_type, file_id=file_id)
+        .select_related("user")
+        .order_by("user__username")
+    )
+    return [
+        {
+            "username": item.user.username,
+            "sheet_name": item.sheet_name or "",
+            "row": item.row,
+            "col": item.col,
+            "updated_at": item.updated_at,
+        }
+        for item in rows
+    ]
 
 
 class SectionTableViewSet(viewsets.ModelViewSet):
@@ -117,6 +149,53 @@ class SectionTableViewSet(viewsets.ModelViewSet):
                 "content_keys": list(content.keys()),
                 "updated_at": table.updated_at,
                 "content": table.content,
+            }
+        )
+
+    @action(detail=True, methods=["get", "post"], url_path="presence")
+    def presence(self, request, pk=None):
+        table = self.get_object()
+        file_type = "section_table"
+        file_id = table.id
+
+        if request.method == "POST":
+            editing = bool(request.data.get("editing", True))
+            if not editing:
+                LiveCellPresence.objects.filter(
+                    file_type=file_type, file_id=file_id, user=request.user
+                ).delete()
+                return Response(
+                    {
+                        "status": "cleared",
+                        "presence": _presence_payload(file_type, file_id),
+                        "ttl_seconds": PRESENCE_TTL_SECONDS,
+                    }
+                )
+            try:
+                row = int(request.data.get("row"))
+                col = int(request.data.get("col"))
+            except (TypeError, ValueError):
+                return Response(
+                    {"detail": "row и col должны быть числами"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if row < 0 or col < 0:
+                return Response(
+                    {"detail": "row и col должны быть >= 0"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            sheet_name = str(request.data.get("sheet_name") or "").strip()[:120]
+            LiveCellPresence.objects.update_or_create(
+                file_type=file_type,
+                file_id=file_id,
+                user=request.user,
+                defaults={"sheet_name": sheet_name, "row": row, "col": col},
+            )
+
+        return Response(
+            {
+                "presence": _presence_payload(file_type, file_id),
+                "ttl_seconds": PRESENCE_TTL_SECONDS,
             }
         )
 

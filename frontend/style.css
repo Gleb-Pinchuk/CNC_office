@@ -1,27 +1,27 @@
 
 /* CSS Variables - SAME AS LANDING */
 :root {
-    --primary-color: #00f5ff;
-    --primary-dark: #00c8d4;
-    --secondary-color: #7b2cbf;
-    --accent-color: #f72585;
-    --bg-dark: #0a0a0f;
-    --bg-card: #12121a;
-    --bg-card-hover: #1a1a25;
-    --text-primary: #ffffff;
-    --text-secondary: #a0a0b0;
-    --text-muted: #6b6b80;
-    --border-color: #2a2a3a;
-    --success-color: #00ff88;
-    --warning-color: #ffaa00;
-    --error-color: #ff4466;
-    --gradient-primary: linear-gradient(135deg, #00f5ff 0%, #7b2cbf 100%);
-    --gradient-secondary: linear-gradient(135deg, #f72585 0%, #7b2cbf 100%);
-    --shadow-glow: 0 0 40px rgba(0, 245, 255, 0.3);
-    --shadow-card: 0 10px 40px rgba(0, 0, 0, 0.5);
+    --primary-color: #0f766e;
+    --primary-dark: #0b5f58;
+    --secondary-color: #0ea5e9;
+    --accent-color: #f97316;
+    --bg-dark: #f4f7fb;
+    --bg-card: #ffffff;
+    --bg-card-hover: #f2f6ff;
+    --text-primary: #0f172a;
+    --text-secondary: #334155;
+    --text-muted: #64748b;
+    --border-color: #d8e1ef;
+    --success-color: #16a34a;
+    --warning-color: #d97706;
+    --error-color: #dc2626;
+    --gradient-primary: linear-gradient(135deg, #14b8a6 0%, #0ea5e9 100%);
+    --gradient-secondary: linear-gradient(135deg, #fb923c 0%, #f59e0b 100%);
+    --shadow-glow: 0 10px 34px rgba(14, 165, 233, 0.22);
+    --shadow-card: 0 16px 36px rgba(15, 23, 42, 0.08);
     --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    --font-display: 'Orbitron', sans-serif;
-    --font-body: 'Rajdhani', sans-serif;
+    --font-display: 'Space Grotesk', sans-serif;
+    --font-body: 'Manrope', sans-serif;
 }
 
 /* Reset */
@@ -29,7 +29,10 @@
 
 body {
     font-family: var(--font-body);
-    background: var(--bg-dark);
+    background:
+        radial-gradient(1200px 700px at 120% -10%, rgba(14,165,233,0.15), transparent 60%),
+        radial-gradient(900px 560px at -10% 110%, rgba(20,184,166,0.16), transparent 55%),
+        var(--bg-dark);
     color: var(--text-primary);
     line-height: 1.6;
     overflow-x: hidden;
@@ -113,7 +116,7 @@ svg {
 
 /* Sidebar */
 .sidebar {
-    background: var(--bg-card);
+    background: #f8fbff;
     border-right: 1px solid var(--border-color);
     padding: 1.5rem;
     display: flex;
@@ -157,7 +160,7 @@ svg {
 .nav-item:hover,
 .nav-item.active {
     background: var(--bg-card-hover);
-    color: var(--primary-color);
+    color: var(--primary-dark);
 }
 
 .nav-item.active .nav-icon {
@@ -229,7 +232,7 @@ svg {
     align-items: center;
     padding: 1.5rem 2rem;
     border-bottom: 1px solid var(--border-color);
-    background: rgba(18, 18, 26, 0.9);
+    background: rgba(255, 255, 255, 0.88);
     backdrop-filter: blur(10px);
     position: sticky;
     top: 0;
@@ -245,7 +248,7 @@ svg {
 /* Breadcrumb */
 .breadcrumb {
     padding: 0.75rem 2rem;
-    background: var(--bg-card);
+    background: rgba(255, 255, 255, 0.88);
     border-bottom: 1px solid var(--border-color);
     font-size: 0.875rem;
 }
