@@ -73,6 +73,7 @@ class CNCApi:
             },
         )
 
+
     def get_sheet_data(
         self, table_id: int, sheet_name: Optional[str]
     ) -> List[List[Any]]:
@@ -502,6 +503,7 @@ def main() -> None:
                 continue
 
             act = st.get("action")
+
 
             if act == "pick_week_col":
                 opts = st.get("options", [])
