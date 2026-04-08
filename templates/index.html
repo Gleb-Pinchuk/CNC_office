@@ -7,7 +7,7 @@
     <title>CNC Office | Облачное хранилище</title>
 
     {# ✅ Исправлен URL шрифтов (убраны лишние пробелы) #}
-    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=Rajdhani:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
 
     {# ✅ Все пути к статике #}
     <link rel="stylesheet" href="{% static 'style.css' %}">
@@ -24,7 +24,7 @@
             width: 100%;
             flex: 1;
             min-height: 400px;
-            background: #fff;
+            background: linear-gradient(180deg, #f7fbff 0%, #f2f7ff 100%);
             overflow: hidden;
             position: relative;
         }
@@ -52,6 +52,9 @@
             font-size: 13px;
             cursor: pointer;
             color: #334155;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
         }
         .sheet-tab.active {
             background: #fff;
@@ -64,6 +67,22 @@
             font-weight: 700;
             color: #1a5cff;
             min-width: 36px;
+        }
+        .sheet-tab-del {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            font-size: 14px;
+            line-height: 1;
+            color: #64748b;
+            user-select: none;
+        }
+        .sheet-tab-del:hover {
+            background: #fee2e2;
+            color: #b91c1c;
         }
         .sheet-row.filter-hidden { display: none; }
         #documentModal .modal-content {
@@ -106,7 +125,7 @@
             width: 100%;
             height: 100%;
             overflow: auto;
-            background: #ffffff;
+            background: linear-gradient(180deg, #f8fbff 0%, #f4f8ff 100%);
         }
         .sheet-table {
             border-collapse: collapse;
@@ -138,18 +157,60 @@
         .sheet-table tbody th { left: 0; z-index: 1; }
         .sheet-table td.sheet-cell {
             background: #fff;
-            cursor: text;
+            cursor: cell;
             outline: none;
+            position: relative;
+            transition: background 0.18s ease, box-shadow 0.18s ease;
         }
         .sheet-table td.sheet-cell.selected {
             background: #e8f0ff;
             box-shadow: inset 0 0 0 2px #4f8cff;
         }
+        .sheet-table td.sheet-cell.active-row:not(.selected),
+        .sheet-table td.sheet-cell.active-col:not(.selected) {
+            background: #f7fbff;
+        }
+        .sheet-table td.sheet-cell.editing {
+            cursor: text;
+            background: #ffffff;
+            box-shadow: inset 0 0 0 2px #1d4ed8;
+        }
         .sheet-table td.sheet-cell.fill-target {
             background: #f3f8ff;
             box-shadow: inset 0 0 0 2px #8cb8ff;
         }
+        .sheet-table td.sheet-cell.live-editing-cell {
+            box-shadow: inset 0 0 0 2px var(--live-color, #0ea5e9);
+            background: #eef6ff;
+        }
+        .live-presence-layer {
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            z-index: 12000;
+        }
+        .live-presence-badge {
+            position: fixed;
+            display: inline-flex;
+            align-items: center;
+            padding: 4px 9px;
+            border-radius: 10px;
+            background: var(--live-color, #0ea5e9);
+            color: #fff;
+            font-size: 11px;
+            font-weight: 600;
+            line-height: 1.2;
+            white-space: nowrap;
+            pointer-events: none;
+            box-shadow: 0 10px 22px rgba(2, 6, 23, 0.34);
+            border: 1px solid rgba(255,255,255,0.3);
+        }
         .sheet-table th { position: relative; }
+        .sheet-table th.active-row,
+        .sheet-table th.active-col {
+            background: #e7f1ff !important;
+            color: #0f172a;
+        }
         .col-resizer {
             position: absolute;
             right: -2px;
@@ -175,6 +236,7 @@
             border-radius: 50%;
             z-index: 5;
             cursor: crosshair;
+            transform: translate(-50%, -50%);
         }
 
         .sheet-ribbon {
@@ -183,10 +245,11 @@
             gap: 10px;
             margin-right: 12px;
             padding: 10px;
-            border: 1px solid rgba(0, 245, 255, 0.25);
+            border: 1px solid #d9e5f3;
             border-radius: 12px;
-            background: linear-gradient(180deg, rgba(12, 16, 34, 0.95), rgba(8, 10, 20, 0.95));
-            box-shadow: inset 0 0 18px rgba(0, 245, 255, 0.08);
+            background: linear-gradient(180deg, #f8fbff, #f2f7ff);
+            box-shadow: 0 8px 18px rgba(15, 23, 42, 0.07);
+            min-width: 560px;
         }
         .sheet-ribbon-tabs,
         .sheet-ribbon-groups {
@@ -196,9 +259,9 @@
             align-items: center;
         }
         .sheet-ribbon-tab {
-            border: 1px solid rgba(0, 245, 255, 0.25);
-            color: #d7ecff;
-            background: rgba(20, 28, 52, 0.8);
+            border: 1px solid #d4e2f2;
+            color: #334155;
+            background: #ffffff;
             padding: 6px 12px;
             border-radius: 8px;
             font-size: 12px;
@@ -206,8 +269,9 @@
             cursor: pointer;
         }
         .sheet-ribbon-tab.active {
-            background: linear-gradient(135deg, rgba(0,245,255,0.35), rgba(123,44,191,0.45));
-            border-color: rgba(0, 245, 255, 0.55);
+            background: linear-gradient(135deg, #14b8a6, #0ea5e9);
+            border-color: #0ea5e9;
+            color: #ffffff;
         }
         .sheet-ribbon-group {
             display: inline-flex;
@@ -215,12 +279,12 @@
             align-items: center;
             padding: 6px;
             border-radius: 10px;
-            background: rgba(255, 255, 255, 0.04);
-            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: #f8fbff;
+            border: 1px solid #dbe7f4;
         }
         .sheet-ribbon-group-title {
             font-size: 11px;
-            color: #a9b8d9;
+            color: #64748b;
             margin-right: 4px;
         }
         .sheet-ribbon .btn.btn-sm {
@@ -228,6 +292,62 @@
             border-radius: 0.55rem;
             min-height: 30px;
             font-size: 12px;
+        }
+        .sheet-ribbon .btn.btn-sm.active {
+            background: linear-gradient(135deg, #dbeafe, #bfdbfe);
+            border-color: #60a5fa;
+            color: #1e3a8a;
+        }
+        .sheet-modal-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            position: relative;
+            padding: 0.65rem 1rem;
+            border-bottom: 1px solid #dbe7f4;
+            background: linear-gradient(180deg, #ffffff 0%, #f7fbff 100%);
+        }
+        .sheet-header-main {
+            width: 100%;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 12px;
+        }
+        .sheet-header-title {
+            margin: 0;
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+            top: 12px;
+            font-size: 1.15rem;
+            font-weight: 700;
+            letter-spacing: 0.01em;
+            color: #0f172a;
+            pointer-events: none;
+        }
+        .sheet-header-actions {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            padding-top: 0.25rem;
+        }
+        .sheet-action-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 12px;
+            border-radius: 10px;
+            border: 1px solid #d6e3f5;
+            background: linear-gradient(180deg, #f8fbff 0%, #eef5ff 100%);
+            color: #0f172a;
+            font-weight: 600;
+            transition: all 0.2s ease;
+        }
+        .sheet-action-btn:hover {
+            transform: translateY(-1px);
+            border-color: #93c5fd;
+            box-shadow: 0 8px 18px rgba(59, 130, 246, 0.16);
         }
         .sheet-color-input {
             width: 34px;
@@ -250,9 +370,9 @@
             font-size: 12px;
             padding: 4px 8px;
             border-radius: 6px;
-            border: 1px solid rgba(255,255,255,0.25);
-            background: rgba(20,28,52,0.9);
-            color: #e8f0ff;
+            border: 1px solid #d4e2f2;
+            background: #ffffff;
+            color: #0f172a;
             max-width: 150px;
         }
         .sheet-filter-overlay {
@@ -289,6 +409,42 @@
         .sheet-filter-item { display: flex; align-items: center; gap: 8px; padding: 4px 0; cursor: pointer; color: #222; }
         .sheet-filter-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
         .sheet-filter-dot { font-size: 10px; }
+        .sheet-formula-hint {
+            position: fixed;
+            z-index: 13000;
+            min-width: 280px;
+            background: #ffffff;
+            border: 1px solid #dbe7f5;
+            border-radius: 10px;
+            box-shadow: 0 14px 32px rgba(15, 23, 42, 0.2);
+            padding: 6px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .sheet-formula-item {
+            border: 1px solid transparent;
+            border-radius: 8px;
+            background: #f8fbff;
+            color: #0f172a;
+            text-align: left;
+            padding: 8px 10px;
+            font-size: 12px;
+            font-weight: 700;
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+        .sheet-formula-item:hover {
+            border-color: #93c5fd;
+            background: #eef6ff;
+        }
+        .sheet-formula-item span {
+            font-size: 11px;
+            font-weight: 500;
+            color: #64748b;
+        }
     </style>
 </head>
 <body>
@@ -327,7 +483,7 @@
                     <span>Документы</span>
                 </a>
 
-                <div class="section-divider">📊 Разделы</div>
+                <div class="section-divider">Разделы</div>
 
                 <a href="#" class="nav-item" data-view="section-attendance">
                     <span>Посещаемость</span>
@@ -505,9 +661,9 @@
         <div class="modal-backdrop" onclick="hideModal('documentModal')"></div>
         <div class="modal-content" style="max-width:99vw;width:99vw;height:99vh;margin:0.5vh 0.5vw;display:flex;flex-direction:column;">
             <button class="modal-close" onclick="hideModal('documentModal')">&times;</button>
-            <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;padding:0.5rem 1rem;">
-                <h2 id="documentTitle" style="margin:0;font-size:1.1rem;">Редактор</h2>
-                <div>
+            <div class="modal-header sheet-modal-header">
+                <h2 id="documentTitle" class="sheet-header-title">Редактор таблицы</h2>
+                <div class="sheet-header-main">
                     <div class="sheet-ribbon" aria-label="Панель инструментов таблицы">
                         <div class="sheet-ribbon-tabs">
                             <button type="button" class="sheet-ribbon-tab active" data-tab="home" onclick="setRibbonTab('home')">Главная</button>
@@ -521,6 +677,7 @@
                                     <span class="sheet-ribbon-group-title">Правка</span>
                                     <button type="button" class="btn btn-secondary btn-sm" onclick="undoTableEdit()">Отменить</button>
                                     <button type="button" class="btn btn-secondary btn-sm" onclick="redoTableEdit()">Повтор</button>
+                                    <button type="button" class="btn btn-secondary btn-sm" id="sheetFormatPainterBtn" onclick="toggleFormatPainter()">Формат по образцу</button>
                                 </div>
                                 <div class="sheet-ribbon-group">
                                     <span class="sheet-ribbon-group-title">Шрифт</span>
@@ -540,14 +697,20 @@
                                         <option value="18">18 px</option>
                                         <option value="22">22 px</option>
                                     </select>
-                                    <button type="button" class="btn btn-secondary btn-sm" onclick="toggleSelectionBold()">Жирный</button>
-                                    <button type="button" class="btn btn-secondary btn-sm" onclick="toggleSelectionItalic()">Курсив</button>
+                                    <button type="button" class="btn btn-secondary btn-sm" id="sheetBoldBtn" onclick="toggleSelectionBold()">Жирный</button>
+                                    <button type="button" class="btn btn-secondary btn-sm" id="sheetItalicBtn" onclick="toggleSelectionItalic()">Курсив</button>
                                 </div>
                                 <div class="sheet-ribbon-group">
                                     <span class="sheet-ribbon-group-title">Выравнивание</span>
-                                    <button type="button" class="btn btn-secondary btn-sm" onclick="setSelectionAlign('left')">Влево</button>
-                                    <button type="button" class="btn btn-secondary btn-sm" onclick="setSelectionAlign('center')">Центр</button>
-                                    <button type="button" class="btn btn-secondary btn-sm" onclick="setSelectionAlign('right')">Вправо</button>
+                                    <button type="button" class="btn btn-secondary btn-sm" data-align-btn="left" onclick="setSelectionAlign('left')">Влево</button>
+                                    <button type="button" class="btn btn-secondary btn-sm" data-align-btn="center" onclick="setSelectionAlign('center')">Центр</button>
+                                    <button type="button" class="btn btn-secondary btn-sm" data-align-btn="right" onclick="setSelectionAlign('right')">Вправо</button>
+                                </div>
+                                <div class="sheet-ribbon-group">
+                                    <span class="sheet-ribbon-group-title">Вертикаль</span>
+                                    <button type="button" class="btn btn-secondary btn-sm" data-valign-btn="top" onclick="setSelectionVAlign('top')">Сверху</button>
+                                    <button type="button" class="btn btn-secondary btn-sm" data-valign-btn="middle" onclick="setSelectionVAlign('middle')">По центру</button>
+                                    <button type="button" class="btn btn-secondary btn-sm" data-valign-btn="bottom" onclick="setSelectionVAlign('bottom')">Снизу</button>
                                 </div>
                             </div>
                             <div class="sheet-ribbon-panel" data-panel="insert">
@@ -574,15 +737,17 @@
                             </div>
                         </div>
                     </div>
-                    <button class="btn btn-secondary btn-sm" onclick="shareCurrentDocument()" style="margin-right:8px;">🔗 Поделиться</button>
-                    <button class="btn btn-success btn-sm" onclick="exportToExcel()" style="margin-right:8px;">📥 Excel</button>
-                    <button class="btn btn-primary btn-sm" onclick="saveDocument()">💾 Сохранить</button>
+                    <div class="sheet-header-actions">
+                        <button class="sheet-action-btn" onclick="shareCurrentDocument()">Поделиться</button>
+                        <button class="sheet-action-btn" onclick="exportToExcel()">Excel</button>
+                        <button class="sheet-action-btn btn btn-primary btn-sm" onclick="saveDocument()">Сохранить</button>
+                    </div>
                 </div>
             </div>
             <div class="modal-body" style="flex:1;overflow:hidden;padding:0;position:relative;">
                 <div class="sheet-editor-stack">
                     <div id="sheet-tab-bar" class="sheet-tab-bar" aria-label="Листы таблицы"></div>
-                    <div id="handsontable-container" style="width:100%;background:#fff;"></div>
+                    <div id="handsontable-container" style="width:100%;background:linear-gradient(180deg,#f8fbff,#f2f7ff);"></div>
                 </div>
             </div>
         </div>
@@ -612,6 +777,29 @@
     </div>
 
     {# ✅ Все пути к JS #}
-    <script src="{% static 'app.js' %}?v=19.4"></script>
+    <div class="modal" id="createFolderModal">
+        <div class="modal-backdrop" onclick="hideModal('createFolderModal')"></div>
+        <div class="modal-content modal-small">
+            <button class="modal-close" onclick="hideModal('createFolderModal')">&times;</button>
+            <div class="modal-header">
+                <h2>Создать папку</h2>
+                <p>Введите название новой папки</p>
+            </div>
+            <div class="modal-body">
+                <form onsubmit="event.preventDefault(); createFolderSubmit();" autocomplete="off">
+                    <div class="form-group">
+                        <label for="newFolderName">Название папки</label>
+                        <div class="input-wrapper">
+                            <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                            <input type="text" id="newFolderName" maxlength="80" required placeholder="Например: Учебные ведомости">
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-full">Создать папку</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script src="{% static 'app.js' %}?v=19.6"></script>
 </body>
 </html>

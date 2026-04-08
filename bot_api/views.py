@@ -2,6 +2,7 @@ import os
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.db import transaction
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -138,17 +139,22 @@ class BotGatewayView(APIView):
                 {"detail": "row и col должны быть числами (0-based)"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        table = SectionTable.objects.filter(owner=owner, id=table_id).first()
-        if not table:
-            return Response(
-                {"detail": "Таблица не найдена"}, status=status.HTTP_404_NOT_FOUND
+        with transaction.atomic():
+            table = (
+                SectionTable.objects.select_for_update()
+                .filter(owner=owner, id=table_id)
+                .first()
             )
-        content = table.content if isinstance(table.content, dict) else {}
-        set_cell_value(
-            content, sheet_name, row, col, "" if value is None else str(value)
-        )
-        table.content = content
-        table.save(update_fields=["content", "updated_at"])
+            if not table:
+                return Response(
+                    {"detail": "Таблица не найдена"}, status=status.HTTP_404_NOT_FOUND
+                )
+            content = table.content if isinstance(table.content, dict) else {}
+            set_cell_value(
+                content, sheet_name, row, col, "" if value is None else str(value)
+            )
+            table.content = content
+            table.save(update_fields=["content", "updated_at"])
         return Response({"status": "ok", "table_id": table.id, "row": row, "col": col})
 
 

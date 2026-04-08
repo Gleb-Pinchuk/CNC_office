@@ -162,3 +162,59 @@ class TestSectionTablesAPI:
 
         assert res.status_code == status.HTTP_200_OK
         assert [item["id"] for item in res.data] == [section_table.id]
+
+    def test_save_content_merges_changed_cells(self, auth_client, section_table):
+        section_table.content = {
+            "custom_sheet": {
+                "version": 2,
+                "activeSheetIndex": 0,
+                "sheets": [
+                    {
+                        "name": "Лист1",
+                        "rows": 2,
+                        "cols": 2,
+                        "data": [["X1", "Y1"], ["X2", "Y2"]],
+                        "styles": {},
+                    }
+                ],
+            }
+        }
+        section_table.save(update_fields=["content", "updated_at"])
+
+        res = auth_client.post(
+            f"/api/section-tables/{section_table.id}/save_content/",
+            data={
+                "content": {"custom_sheet": {"sheets": []}},
+                "changed_cells": [
+                    {"sheet_name": "Лист1", "row": 1, "col": 1, "value": "Y2-updated"},
+                    {"sheet_name": "Лист1", "row": 0, "col": 0, "value": "X1-updated"},
+                ],
+            },
+            content_type="application/json",
+        )
+        assert res.status_code == status.HTTP_200_OK
+        section_table.refresh_from_db()
+        data = section_table.content["custom_sheet"]["sheets"][0]["data"]
+        assert data[1][1] == "Y2-updated"
+        assert data[0][0] == "X1-updated"
+
+    def test_presence_updates_and_clears(self, auth_client, section_table):
+        up = auth_client.post(
+            f"/api/section-tables/{section_table.id}/presence/",
+            data={"sheet_name": "Лист1", "row": 2, "col": 1, "editing": True},
+            content_type="application/json",
+        )
+        assert up.status_code == status.HTTP_200_OK
+        assert any(
+            p["row"] == 2 and p["col"] == 1 and p["sheet_name"] == "Лист1"
+            for p in up.data["presence"]
+        )
+
+        clear = auth_client.post(
+            f"/api/section-tables/{section_table.id}/presence/",
+            data={"editing": False},
+            content_type="application/json",
+        )
+        assert clear.status_code == status.HTTP_200_OK
+        assert clear.data["status"] == "cleared"
+        assert clear.data["presence"] == []
