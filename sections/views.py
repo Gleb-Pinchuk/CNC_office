@@ -1,4 +1,5 @@
 # sections/views.py
+from django.db import transaction
 from django.db.models import Q
 from django.http import HttpResponse
 from rest_framework import permissions, status, viewsets
@@ -6,9 +7,28 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from api.xlsx_export import export_custom_sheet_to_xlsx_bytes
+from bot_api.sheet_utils import set_cell_value
 
 from .models import SectionTable
 from .serializers import SectionTableSerializer
+
+
+def _apply_changed_cells(content, changed_cells):
+    result = content if isinstance(content, dict) else {}
+    for item in changed_cells:
+        if not isinstance(item, dict):
+            continue
+        try:
+            row = int(item.get("row"))
+            col = int(item.get("col"))
+        except (TypeError, ValueError):
+            continue
+        if row < 0 or col < 0:
+            continue
+        sheet_name = item.get("sheet_name")
+        value = "" if item.get("value") is None else str(item.get("value"))
+        set_cell_value(result, sheet_name, row, col, value)
+    return result
 
 
 class SectionTableViewSet(viewsets.ModelViewSet):
@@ -72,6 +92,7 @@ class SectionTableViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_403_FORBIDDEN,
                 )
         content = request.data.get("content", {})
+        changed_cells = request.data.get("changed_cells")
 
         if not isinstance(content, dict):
             return Response(
@@ -79,14 +100,23 @@ class SectionTableViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        table.content = content
-        table.save(update_fields=["content", "updated_at"])
+        if isinstance(changed_cells, list) and changed_cells:
+            with transaction.atomic():
+                locked = SectionTable.objects.select_for_update().get(id=table.id)
+                locked.content = _apply_changed_cells(locked.content, changed_cells)
+                locked.save(update_fields=["content", "updated_at"])
+                table = locked
+        else:
+            table.content = content
+            table.save(update_fields=["content", "updated_at"])
 
         return Response(
             {
                 "status": "saved",
                 "table_id": table.id,
                 "content_keys": list(content.keys()),
+                "updated_at": table.updated_at,
+                "content": table.content,
             }
         )
 

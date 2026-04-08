@@ -8,6 +8,9 @@ let currentSectionType = null;
 let authToken = localStorage.getItem('cnc_auth_token');
 let hotInstance = null;
 let sheetEditor = null;
+let workbookBaseSnapshot = null;
+let sheetDirtySince = 0;
+const VIEW_STORAGE_KEY = 'cnc_current_view';
 
 // DOM Elements
 const filesGrid = document.getElementById('filesGrid');
@@ -75,6 +78,82 @@ function getShareUrl() {
     return `${API_BASE}/documents/${currentDocument.id}/share/`;
 }
 
+function deepClone(value) {
+    try {
+        return JSON.parse(JSON.stringify(value));
+    } catch (_) {
+        return null;
+    }
+}
+
+function markSheetDirty() {
+    sheetDirtySince = Date.now();
+}
+
+function clearSheetDirty() {
+    sheetDirtySince = 0;
+}
+
+function hasPendingSheetChanges() {
+    return !!sheetDirtySince;
+}
+
+function collectChangedCells(baseWorkbook, currentWorkbook) {
+    if (!baseWorkbook || !currentWorkbook) return null;
+    const base = migrateWorkbookPayload(baseWorkbook);
+    const cur = migrateWorkbookPayload(currentWorkbook);
+    if (!Array.isArray(base.sheets) || !Array.isArray(cur.sheets)) return null;
+    if (base.sheets.length !== cur.sheets.length) return null;
+
+    const changed = [];
+    for (let s = 0; s < cur.sheets.length; s++) {
+        const b = normalizeSheetPayload(base.sheets[s] || {});
+        const c = normalizeSheetPayload(cur.sheets[s] || {});
+        if ((b.name || '').trim().toLowerCase() !== (c.name || '').trim().toLowerCase()) return null;
+
+        const bStyles = JSON.stringify(b.styles || {});
+        const cStyles = JSON.stringify(c.styles || {});
+        const bCF = JSON.stringify(b.columnFilters || {});
+        const cCF = JSON.stringify(c.columnFilters || {});
+        const bCW = JSON.stringify(b.colWidths || []);
+        const cCW = JSON.stringify(c.colWidths || []);
+        const bRH = JSON.stringify(b.rowHeights || []);
+        const cRH = JSON.stringify(c.rowHeights || []);
+        if (bStyles !== cStyles || bCF !== cCF || bCW !== cCW || bRH !== cRH) return null;
+
+        const rows = Math.max(b.data.length, c.data.length);
+        const cols = Math.max(b.data[0]?.length || 0, c.data[0]?.length || 0);
+        for (let r = 0; r < rows; r++) {
+            for (let col = 0; col < cols; col++) {
+                const beforeVal = String((b.data[r] && b.data[r][col]) ?? '');
+                const nowVal = String((c.data[r] && c.data[r][col]) ?? '');
+                if (beforeVal !== nowVal) {
+                    changed.push({ sheet_name: c.name || `Лист${s + 1}`, row: r, col, value: nowVal });
+                }
+            }
+        }
+    }
+    return changed;
+}
+
+function buildSpreadsheetSavePayload() {
+    if (!sheetEditor) return null;
+    const currentWorkbook = sheetEditor.export();
+    const body = { content: { custom_sheet: currentWorkbook } };
+    if (workbookBaseSnapshot) {
+        const changedCells = collectChangedCells(workbookBaseSnapshot, currentWorkbook);
+        if (changedCells && changedCells.length > 0) {
+            body.changed_cells = changedCells;
+        } else if (changedCells && changedCells.length === 0) {
+            return { skip: true, workbook: currentWorkbook, body };
+        }
+        if (changedCells) {
+            body.base_updated_at = currentDocument?.updated_at || null;
+        }
+    }
+    return { skip: false, workbook: currentWorkbook, body };
+}
+
 // ✅ Экранирование HTML
 function escapeHtml(text) {
     if (!text) return '';
@@ -103,7 +182,8 @@ async function checkAuth() {
             currentUser = await res.json();
             if (usernameSpan) usernameSpan.textContent = currentUser.username;
             setAuthUI(true);
-            loadView('files');
+            const savedView = localStorage.getItem(VIEW_STORAGE_KEY) || 'files';
+            loadView(savedView);
         } else {
             clearAuth();
             showLoginModal();
@@ -145,6 +225,16 @@ function hideModal(modal) {
             if (currentDocument && (hotInstance || sheetEditor)) saveDocumentSilent();
             if (sheetEditor) { sheetEditor.destroy(); sheetEditor = null; }
             if (hotInstance) { hotInstance.destroy(); hotInstance = null; }
+            if (window._sheetSyncInterval) {
+                clearInterval(window._sheetSyncInterval);
+                window._sheetSyncInterval = null;
+            }
+            if (window._sheetRefreshInterval) {
+                clearInterval(window._sheetRefreshInterval);
+                window._sheetRefreshInterval = null;
+            }
+            workbookBaseSnapshot = null;
+            clearSheetDirty();
             currentDocument = null;
         }
         el.classList.remove('show');
@@ -193,7 +283,7 @@ async function handleLogin(e) {
             currentUser = data.user || { username };
             if (usernameSpan) usernameSpan.textContent = currentUser.username;
             hideModal('loginModal');
-            loadView('files');
+            loadView(localStorage.getItem(VIEW_STORAGE_KEY) || 'files');
         } else {
             const errorMsg = data.detail ||
                            data.non_field_errors?.[0] ||
@@ -234,7 +324,7 @@ async function handleRegister(e) {
                 currentUser = data.user || { username };
                 if (usernameSpan) usernameSpan.textContent = currentUser.username;
                 hideModal('loginModal');
-                loadView('files');
+                loadView(localStorage.getItem(VIEW_STORAGE_KEY) || 'files');
             } else {
                 alert('✅ Регистрация успешна! Теперь войдите.');
                 if (registerForm) registerForm.classList.add('hidden');
@@ -260,7 +350,12 @@ async function logout() { clearAuth(); location.reload(); }
 // ✅ ЗАГРУЗКА ВИДА
 async function loadView(view) {
     currentView = view;
+    localStorage.setItem(VIEW_STORAGE_KEY, view);
     navItems.forEach(n => n.classList.toggle('active', n.getAttribute('data-view') === view));
+    if (window._listAutoRefreshInterval) {
+        clearInterval(window._listAutoRefreshInterval);
+        window._listAutoRefreshInterval = null;
+    }
 
     const titles = {
         'files': 'Мои файлы',
@@ -307,6 +402,13 @@ async function loadView(view) {
         case 'shared': await loadShared(); break;
         case 'logs': await loadLogs(); break;
         default: await loadFiles();
+    }
+
+    if (view === 'documents' || view?.startsWith('section-')) {
+        window._listAutoRefreshInterval = setInterval(() => {
+            if (currentView === 'documents') loadDocuments();
+            if (currentView?.startsWith('section-')) loadSectionTable(currentView.replace('section-', ''));
+        }, 10000);
     }
 }
 
@@ -833,8 +935,9 @@ function migrateWorkbookPayload(raw) {
 }
 
 class CustomSheetEditor {
-    constructor(container, payload) {
+    constructor(container, payload, onDirty = null) {
         this.container = container;
+        this.onDirty = onDirty;
         this.undoStack = [];
         this.redoStack = [];
         this.selection = { r1: 0, c1: 0, r2: 0, c2: 0 };
@@ -853,15 +956,21 @@ class CustomSheetEditor {
         window.addEventListener('mouseup', this._onFillEnd);
 
         this._onKeyDown = (e) => {
-            if (e.ctrlKey && e.key.toLowerCase() === 'z') {
+            const key = String(e.key || '').toLowerCase();
+            const hasMod = e.ctrlKey || e.metaKey;
+            const isUndo = hasMod && !e.shiftKey && key === 'z';
+            const isRedo = (hasMod && key === 'y') || (hasMod && e.shiftKey && key === 'z');
+            const activeEl = document.activeElement;
+            if (!activeEl || !this.container.contains(activeEl)) return;
+            if (isUndo) {
                 e.preventDefault();
                 this.undo();
-            } else if (e.ctrlKey && e.key.toLowerCase() === 'y') {
+            } else if (isRedo) {
                 e.preventDefault();
                 this.redo();
             }
         };
-        window.addEventListener('keydown', this._onKeyDown);
+        document.addEventListener('keydown', this._onKeyDown, true);
 
         const norm = normalizeSheetPayload(payload || {});
         this.sheetName = norm.name;
@@ -886,6 +995,7 @@ class CustomSheetEditor {
         return { r1: Math.min(r1, r2), r2: Math.max(r1, r2), c1: Math.min(c1, c2), c2: Math.max(c1, c2) };
     }
     _pushUndo() {
+        this._syncActiveCellFromDom();
         this.undoStack.push(JSON.stringify({
             data: this.data,
             styles: this.styles,
@@ -893,6 +1003,18 @@ class CustomSheetEditor {
         }));
         if (this.undoStack.length > 50) this.undoStack.shift();
         this.redoStack = [];
+        this._markDirty();
+    }
+    _markDirty() {
+        if (typeof this.onDirty === 'function') this.onDirty();
+    }
+    _syncActiveCellFromDom() {
+        const active = document.activeElement;
+        if (!active || !this.container.contains(active) || !active.classList.contains('sheet-cell')) return;
+        const r = Number(active.dataset.r);
+        const c = Number(active.dataset.c);
+        if (!Number.isFinite(r) || !Number.isFinite(c)) return;
+        this.data[r][c] = active.textContent || '';
     }
     _applySnapshot(snapshot) {
         const parsed = JSON.parse(snapshot);
@@ -1109,8 +1231,14 @@ class CustomSheetEditor {
                 }
                 if (this.isSelecting && (e.buttons & 1)) this._setSelection(r, c, true);
             });
-            cell.addEventListener('input', () => { this.data[r][c] = cell.textContent || ''; });
-            cell.addEventListener('blur', () => { this.data[r][c] = cell.textContent || ''; });
+            cell.addEventListener('input', () => {
+                this.data[r][c] = cell.textContent || '';
+                this._markDirty();
+            });
+            cell.addEventListener('blur', () => {
+                this.data[r][c] = cell.textContent || '';
+                this._markDirty();
+            });
         });
         this._bindResizers();
         this._bindColumnHeaderFilters();
@@ -1171,7 +1299,7 @@ class CustomSheetEditor {
                 <div class="sheet-filter-list" id="sheetFilterList"></div>
                 <div class="sheet-filter-actions">
                     <button type="button" class="btn btn-secondary btn-sm" id="sheetFilterAll">Выделить все</button>
-                    <button type="button" class="btn btn-secondary btn-sm" id="sheetFilterNone">Снять все</button>
+                    <button type="button" class="btn btn-secondary btn-sm" id="sheetFilterNone">Убрать галочки</button>
                     <button type="button" class="btn btn-secondary btn-sm" id="sheetFilterClear">Сбросить фильтр</button>
                     <button type="button" class="btn btn-primary btn-sm" id="sheetFilterOk">Применить</button>
                 </div>
@@ -1286,8 +1414,10 @@ class CustomSheetEditor {
         this.fillHandle.style.display = 'block';
         const r1 = this.wrapEl.getBoundingClientRect();
         const r2 = endCell.getBoundingClientRect();
-        this.fillHandle.style.left = `${r2.right - r1.left + this.wrapEl.scrollLeft - 4}px`;
-        this.fillHandle.style.top = `${r2.bottom - r1.top + this.wrapEl.scrollTop - 4}px`;
+        const left = Math.max(0, r2.right - r1.left + this.wrapEl.scrollLeft - 6);
+        const top = Math.max(0, r2.bottom - r1.top + this.wrapEl.scrollTop - 6);
+        this.fillHandle.style.left = `${left}px`;
+        this.fillHandle.style.top = `${top}px`;
     }
     _paintFillTarget() {
         this.container.querySelectorAll('.sheet-cell').forEach(el => el.classList.remove('fill-target'));
@@ -1358,7 +1488,7 @@ class CustomSheetEditor {
     destroy() {
         window.removeEventListener('mouseup', this._onGlobalMouseUp);
         window.removeEventListener('blur', this._onGlobalMouseUp);
-        window.removeEventListener('keydown', this._onKeyDown);
+        document.removeEventListener('keydown', this._onKeyDown, true);
         if (this._onFillEnd) {
             window.removeEventListener('mouseup', this._onFillEnd);
             this._onFillEnd = null;
@@ -1366,6 +1496,7 @@ class CustomSheetEditor {
         this.container.innerHTML = '';
     }
     exportSheet() {
+        this._syncActiveCellFromDom();
         const cf = {};
         Object.entries(this.columnFilters || {}).forEach(([k, v]) => {
             if (Array.isArray(v) && v.length) cf[k] = v.slice();
@@ -1497,9 +1628,10 @@ class CustomSheetEditor {
 }
 
 class MultiSheetWorkbook {
-    constructor(gridContainer, tabContainer, rawPayload) {
+    constructor(gridContainer, tabContainer, rawPayload, onDirty = null) {
         this.gridContainer = gridContainer;
         this.tabContainer = tabContainer;
+        this.onDirty = onDirty;
         const wb = migrateWorkbookPayload(rawPayload);
         this.activeIndex = wb.activeSheetIndex;
         this.sheets = wb.sheets;
@@ -1521,7 +1653,7 @@ class MultiSheetWorkbook {
             this._editor = null;
         }
         const sh = this.sheets[this.activeIndex];
-        this._editor = new CustomSheetEditor(this.gridContainer, sh);
+        this._editor = new CustomSheetEditor(this.gridContainer, sh, this.onDirty);
         this._renderTabs();
     }
     _renderTabs() {
@@ -1562,6 +1694,7 @@ class MultiSheetWorkbook {
                     this._editor.sheetName = finalName;
                     this._syncActive();
                 }
+                if (typeof this.onDirty === 'function') this.onDirty();
                 this._renderTabs();
             };
             this.tabContainer.appendChild(btn);
@@ -1585,17 +1718,20 @@ class MultiSheetWorkbook {
             styles: {},
         });
         this.sheets.push(newSheet);
+        if (typeof this.onDirty === 'function') this.onDirty();
         this._switchSheet(this.sheets.length - 1, true);
     }
     deleteSheet(idx) {
         this.sheets.splice(idx, 1);
         if (this.activeIndex >= this.sheets.length) this.activeIndex = this.sheets.length - 1;
+        if (typeof this.onDirty === 'function') this.onDirty();
         this._switchSheet(this.activeIndex, true);
     }
     renameActiveSheet(name) {
         const cleaned = String(name || '').trim();
         if (!cleaned) return;
         this.sheets[this.activeIndex].name = cleaned.slice(0, 40);
+        if (typeof this.onDirty === 'function') this.onDirty();
         this._renderTabs();
     }
     export() {
@@ -1646,13 +1782,23 @@ function initHandsontable(doc) {
     if (!container) { console.error('❌ Container not found'); return; }
     hotInstance = null;
     if (sheetEditor) { sheetEditor.destroy(); sheetEditor = null; }
+    if (window._sheetSyncInterval) {
+        clearInterval(window._sheetSyncInterval);
+        window._sheetSyncInterval = null;
+    }
+    if (window._sheetRefreshInterval) {
+        clearInterval(window._sheetRefreshInterval);
+        window._sheetRefreshInterval = null;
+    }
 
     let payload = doc?.content?.custom_sheet;
     if (!payload) {
         const legacy = Array.isArray(doc?.content?.handsontable) ? doc.content.handsontable : [];
         payload = { data: legacy, rows: legacy.length || 20, cols: (legacy[0]?.length || 10), styles: {} };
     }
-    sheetEditor = new MultiSheetWorkbook(container, tabBar, payload);
+    sheetEditor = new MultiSheetWorkbook(container, tabBar, payload, markSheetDirty);
+    workbookBaseSnapshot = sheetEditor ? deepClone(sheetEditor.export()) : null;
+    clearSheetDirty();
     if (doc?.is_readonly && container) {
         // Disable editing for shared read-only.
         setTimeout(() => {
@@ -1662,14 +1808,43 @@ function initHandsontable(doc) {
         }, 0);
     } else if (doc && !doc.is_readonly) {
         // Периодическое сохранение
-        if (window._sheetSyncInterval) clearInterval(window._sheetSyncInterval);
         window._sheetSyncInterval = setInterval(() => {
             if (currentDocument && currentDocument.id === doc.id && sheetEditor) {
                 saveDocumentSilent();
             } else {
                 clearInterval(window._sheetSyncInterval);
+                window._sheetSyncInterval = null;
             }
         }, 15000);
+        window._sheetRefreshInterval = setInterval(async () => {
+            if (!currentDocument || currentDocument.id !== doc.id || !sheetEditor) {
+                clearInterval(window._sheetRefreshInterval);
+                window._sheetRefreshInterval = null;
+                return;
+            }
+            if (hasPendingSheetChanges()) return;
+            try {
+                const endpoint = isCurrentSectionTable()
+                    ? `${API_BASE}/section-tables/${currentDocument.id}/`
+                    : `${API_BASE}/documents/${currentDocument.id}/`;
+                const res = await fetch(endpoint, { headers: getAuthHeaders() });
+                if (!res.ok) return;
+                const fresh = await res.json();
+                if (!fresh?.updated_at || fresh.updated_at === currentDocument.updated_at) return;
+                const payloadFresh = fresh?.content?.custom_sheet || null;
+                if (!payloadFresh) return;
+                currentDocument.updated_at = fresh.updated_at;
+                currentDocument.content = fresh.content || {};
+                if (sheetEditor) {
+                    sheetEditor.destroy();
+                }
+                sheetEditor = new MultiSheetWorkbook(container, tabBar, payloadFresh, markSheetDirty);
+                workbookBaseSnapshot = sheetEditor ? deepClone(sheetEditor.export()) : null;
+                clearSheetDirty();
+            } catch (e) {
+                console.debug('Sheet refresh skip:', e?.message || e);
+            }
+        }, 5000);
     }
 }
 
@@ -1742,26 +1917,39 @@ async function saveDocumentSilent() {
     if (!currentDocument) return;
     if (currentDocument.is_readonly) return;
     let content = {};
+    let body = null;
+    let savedWorkbook = null;
     if (currentDocument.doc_type === 'spreadsheet' && (sheetEditor || hotInstance)) {
         try {
             if (sheetEditor) {
-                content = { custom_sheet: sheetEditor.export() };
+                const payload = buildSpreadsheetSavePayload();
+                if (!payload || payload.skip) return;
+                body = payload.body;
+                savedWorkbook = payload.workbook;
+                content = body.content;
             } else {
                 const data = hotInstance.getData();
                 content = { handsontable: data };
+                body = { content };
             }
         } catch(e) { console.error('❌ Silent save error:', e); return; }
     } else if (currentDocument.doc_type === 'text') {
         const textEl = document.getElementById('docText');
         if (textEl) content = { text: textEl.value };
+        body = { content };
     }
     const url = getSaveContentUrl();
     if (!url) return;
     try {
-        await fetch(url, {
-            method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ content })
+        const res = await fetch(url, {
+            method: 'POST', headers: getAuthHeaders(), body: JSON.stringify(body || { content })
         });
-        currentDocument.content = content;
+        if (!res.ok) return;
+        const data = await res.json().catch(() => ({}));
+        currentDocument.content = data.content || content;
+        if (data.updated_at) currentDocument.updated_at = data.updated_at;
+        if (savedWorkbook) workbookBaseSnapshot = deepClone(savedWorkbook);
+        clearSheetDirty();
         console.log('✅ Auto-saved silently');
     } catch (e) { console.error('❌ Silent save failed:', e); }
 }
@@ -1771,27 +1959,43 @@ async function saveDocument() {
     if (!currentDocument) return;
     if (currentDocument.is_readonly) { alert('Только чтение: нет прав на сохранение'); return; }
     let content = {};
+    let body = null;
+    let savedWorkbook = null;
     if (currentDocument.doc_type === 'spreadsheet' && (sheetEditor || hotInstance)) {
         try {
             if (sheetEditor) {
-                content = { custom_sheet: sheetEditor.export() };
+                const payload = buildSpreadsheetSavePayload();
+                if (!payload) { alert('Ошибка подготовки данных'); return; }
+                if (payload.skip) { alert('Нет изменений для сохранения'); return; }
+                body = payload.body;
+                savedWorkbook = payload.workbook;
+                content = body.content;
             } else {
                 const data = hotInstance.getData();
                 content = { handsontable: data };
+                body = { content };
             }
             console.log('💾 Saving spreadsheet');
         } catch(e) { console.error('❌ Save error:', e); alert('Ошибка сохранения'); return; }
     } else if (currentDocument.doc_type === 'text') {
         const textEl = document.getElementById('docText');
         if (textEl) content = { text: textEl.value };
+        body = { content };
     }
     const url = getSaveContentUrl();
     if (!url) return;
     try {
         const res = await fetch(url, {
-            method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ content })
+            method: 'POST', headers: getAuthHeaders(), body: JSON.stringify(body || { content })
         });
-        if (res.ok) { currentDocument.content = content; alert('✅ Сохранено!'); }
+        if (res.ok) {
+            const data = await res.json().catch(() => ({}));
+            currentDocument.content = data.content || content;
+            if (data.updated_at) currentDocument.updated_at = data.updated_at;
+            if (savedWorkbook) workbookBaseSnapshot = deepClone(savedWorkbook);
+            clearSheetDirty();
+            alert('✅ Сохранено!');
+        }
         else { const err = await res.json().catch(() => ({})); alert(`Ошибка: ${err.detail || 'Не удалось сохранить'}`); }
     } catch (e) { console.error('❌ Save error:', e); alert('Ошибка подключения'); }
 }

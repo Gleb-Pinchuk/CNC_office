@@ -52,6 +52,9 @@
             font-size: 13px;
             cursor: pointer;
             color: #334155;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
         }
         .sheet-tab.active {
             background: #fff;
@@ -64,6 +67,22 @@
             font-weight: 700;
             color: #1a5cff;
             min-width: 36px;
+        }
+        .sheet-tab-del {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            font-size: 14px;
+            line-height: 1;
+            color: #64748b;
+            user-select: none;
+        }
+        .sheet-tab-del:hover {
+            background: #fee2e2;
+            color: #b91c1c;
         }
         .sheet-row.filter-hidden { display: none; }
         #documentModal .modal-content {
@@ -175,6 +194,7 @@
             border-radius: 50%;
             z-index: 5;
             cursor: crosshair;
+            transform: translate(-50%, -50%);
         }
 
         .sheet-ribbon {

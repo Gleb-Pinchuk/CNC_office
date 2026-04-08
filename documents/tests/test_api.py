@@ -135,3 +135,38 @@ class TestDocumentsAPI:
         )
 
         assert res.status_code == status.HTTP_200_OK
+
+    def test_save_content_merges_changed_cells(self, auth_client, document):
+        document.content = {
+            "custom_sheet": {
+                "version": 2,
+                "activeSheetIndex": 0,
+                "sheets": [
+                    {
+                        "name": "Лист1",
+                        "rows": 2,
+                        "cols": 2,
+                        "data": [["A1", "B1"], ["A2", "B2"]],
+                        "styles": {},
+                    }
+                ],
+            }
+        }
+        document.save(update_fields=["content", "updated_at"])
+
+        res = auth_client.post(
+            f"/api/documents/{document.id}/save_content/",
+            data={
+                "content": {"custom_sheet": {"sheets": []}},
+                "changed_cells": [
+                    {"sheet_name": "Лист1", "row": 1, "col": 0, "value": "A2-updated"},
+                    {"sheet_name": "Лист1", "row": 0, "col": 1, "value": "B1-updated"},
+                ],
+            },
+            content_type="application/json",
+        )
+        assert res.status_code == status.HTTP_200_OK
+        document.refresh_from_db()
+        data = document.content["custom_sheet"]["sheets"][0]["data"]
+        assert data[1][0] == "A2-updated"
+        assert data[0][1] == "B1-updated"

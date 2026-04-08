@@ -106,6 +106,45 @@ user_note_col: Dict[int, int] = {}
 _table_cache: Dict[str, Any] = {}
 
 
+def _normalize_text(text: str) -> str:
+    return re.sub(r"\s+", " ", (text or "").strip()).lower()
+
+
+def _table_id() -> int:
+    table_id = _table_cache.get("id")
+    if table_id:
+        return int(table_id)
+    info = api.lookup_table()
+    _table_cache.update(info)
+    table_id = _table_cache.get("id")
+    if not table_id:
+        raise RuntimeError("table_id not found")
+    return int(table_id)
+
+
+def _resolve_sheet_click(text: str) -> Optional[str]:
+    names = _table_cache.get("sheet_names") or []
+    if not names:
+        try:
+            info = api.lookup_table()
+            _table_cache.update(info)
+            names = _table_cache.get("sheet_names") or []
+        except Exception:
+            return None
+
+    raw = (text or "").strip()
+    if not raw:
+        return None
+    raw_low = raw.lower()
+    for name in names:
+        n = str(name or "").strip()
+        if not n:
+            continue
+        if raw == n or raw_low == n.lower():
+            return n
+    return None
+
+
 def _get_user_val(user_id: int, key: str) -> Optional[Any]:
     return user_states.get(user_id, {}).get(key)
 
@@ -489,13 +528,13 @@ def main() -> None:
             message = event.obj.message
             user_id = message["from_id"]
             text = (message.get("text") or "").strip()
-            text_lower = text.lower()
+            text_lower = _normalize_text(text)
 
             if user_id not in user_states:
                 user_states[user_id] = {}
             st = user_states[user_id]
 
-            if text_lower in ("🔙 назад", "🔙 в меню"):
+            if ("в меню" in text_lower) or ("назад" in text_lower and "⬅" not in text):
                 cur_sh = st.get("current_spreadsheet")
                 cur_gr = st.get("current_group")
                 user_states[user_id] = {"current_spreadsheet": cur_sh, "current_group": cur_gr}
@@ -522,11 +561,11 @@ def main() -> None:
                     continue
 
             if act in ("get_student", "write_note", "pick_student_status"):
-                if text_lower == "вперёд ➡️":
+                if "впер" in text_lower and "➡" in text:
                     st["page"] = st.get("page", 0) + 1
                     send_vk_message(vk, user_id, "Следующая страница:", get_students_keyboard(st["students"], st["page"]))
                     continue
-                if text_lower == "⬅️ назад":
+                if "назад" in text_lower and "⬅" in text:
                     st["page"] = max(0, st.get("page", 0) - 1)
                     send_vk_message(vk, user_id, "Предыдущая страница:", get_students_keyboard(st["students"], st["page"]))
                     continue

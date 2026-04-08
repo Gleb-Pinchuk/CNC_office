@@ -162,3 +162,38 @@ class TestSectionTablesAPI:
 
         assert res.status_code == status.HTTP_200_OK
         assert [item["id"] for item in res.data] == [section_table.id]
+
+    def test_save_content_merges_changed_cells(self, auth_client, section_table):
+        section_table.content = {
+            "custom_sheet": {
+                "version": 2,
+                "activeSheetIndex": 0,
+                "sheets": [
+                    {
+                        "name": "Лист1",
+                        "rows": 2,
+                        "cols": 2,
+                        "data": [["X1", "Y1"], ["X2", "Y2"]],
+                        "styles": {},
+                    }
+                ],
+            }
+        }
+        section_table.save(update_fields=["content", "updated_at"])
+
+        res = auth_client.post(
+            f"/api/section-tables/{section_table.id}/save_content/",
+            data={
+                "content": {"custom_sheet": {"sheets": []}},
+                "changed_cells": [
+                    {"sheet_name": "Лист1", "row": 1, "col": 1, "value": "Y2-updated"},
+                    {"sheet_name": "Лист1", "row": 0, "col": 0, "value": "X1-updated"},
+                ],
+            },
+            content_type="application/json",
+        )
+        assert res.status_code == status.HTTP_200_OK
+        section_table.refresh_from_db()
+        data = section_table.content["custom_sheet"]["sheets"][0]["data"]
+        assert data[1][1] == "Y2-updated"
+        assert data[0][0] == "X1-updated"
