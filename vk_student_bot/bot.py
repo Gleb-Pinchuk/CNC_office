@@ -39,6 +39,7 @@ TZ_NAME = os.getenv("TIMEZONE", "Europe/Moscow")
 FIO_COL_DEFAULT = 2  # 3-й столбец
 GROUP_COL_DEFAULT = 1  # 2-й столбец (Группа)
 STATUS_COL_DEFAULT = 11  # 12-й столбец (учится/отчислен)
+NO_REMARK_TEXT = "Замечаний нет"
 
 
 def _tz_now() -> datetime:
@@ -193,8 +194,56 @@ def _fio_col(headers: List[str]) -> int:
 
 
 def _status_col(headers: List[str]) -> int:
-    # если нет явного совпадения — используем 12-й столбец по ТЗ
-    idx = _detect_col(headers, ["учится", "отчисл", "статус"], STATUS_COL_DEFAULT)
+    # Сначала ищем по явным заголовкам статуса.
+    idx = _detect_col(
+        headers,
+        ["учится", "отчисл", "статус", "состояние", "сост", "обуч"],
+        STATUS_COL_DEFAULT,
+    )
+    return idx
+
+
+def _looks_like_date_header(header: str) -> bool:
+    h = str(header or "").strip().lower()
+    if not h:
+        return False
+    return bool(re.search(r"\d{1,2}\.\d{1,2}|\d{1,2}-\d{1,2}|\d{4}", h))
+
+
+def _normalize_status_value(value: Any) -> str:
+    v = _normalize_text(str(value or ""))
+    if "отчисл" in v:
+        return "Отчислен"
+    if "учит" in v:
+        return "Учится"
+    return ""
+
+
+def _resolve_status_col(rows: List[List[Any]]) -> int:
+    if not rows:
+        return STATUS_COL_DEFAULT
+    headers = [str(h or "") for h in (rows[0] or [])]
+    idx = _status_col(headers)
+    if idx < len(headers) and not _looks_like_date_header(headers[idx]):
+        return idx
+
+    best_idx = idx
+    best_hits = -1
+    max_cols = max((len(r or []) for r in rows), default=0)
+    for col in range(max_cols):
+        if col < len(headers) and _looks_like_date_header(headers[col]):
+            continue
+        hits = 0
+        for row in rows[1:60]:
+            if col < len(row):
+                if _normalize_status_value(row[col]):
+                    hits += 1
+        if hits > best_hits:
+            best_hits = hits
+            best_idx = col
+
+    if best_hits >= 1:
+        return best_idx
     return idx
 
 
@@ -336,7 +385,7 @@ def write_status(user_id: int, row_number: int, status_text: str) -> str:
     if len(rows) < 2:
         return "❌ В таблице нет данных!"
     hdr = [str(h or "") for h in (rows[0] or [])]
-    c = _status_col(hdr)
+    c = _resolve_status_col(rows)
     group = _get_user_val(user_id, "current_group")
     students_map = get_students_map(user_id, group)
     if row_number < 1 or row_number > len(students_map):
@@ -344,7 +393,8 @@ def write_status(user_id: int, row_number: int, status_text: str) -> str:
     sheet_row_idx = students_map[row_number - 1][0]
     api.set_cell(tid, sh, sheet_row_idx, c, status_text)
     fio = students_map[row_number - 1][1]
-    return f"✅ Статус обновлён: {status_text}\n👤 {fio}\n📋 {hdr[c]}"
+    col_label = hdr[c] if c < len(hdr) else f"Колонка {c + 1}"
+    return f"✅ Статус обновлён: {status_text}\n👤 {fio}\n📋 {col_label}"
 
 
 def parse_student_button(text: str) -> Tuple[Optional[int], Optional[str]]:
@@ -444,6 +494,23 @@ def get_week_choice_keyboard(options: List[Tuple[int, str]]) -> str:
 
 def get_status_keyboard() -> str:
     return json.dumps({"one_time": False, "inline": False, "buttons": [[{"action": {"type": "text", "label": "✅ Учится"}, "color": "positive"}, {"action": {"type": "text", "label": "⛔ Отчислен"}, "color": "negative"}], [{"action": {"type": "text", "label": "🔙 Назад"}, "color": "secondary"}]]}, ensure_ascii=False)
+
+
+def get_student_quick_keyboard() -> str:
+    return json.dumps(
+        {
+            "one_time": False,
+            "inline": False,
+            "buttons": [
+                [
+                    {"action": {"type": "text", "label": "✅ Замечаний нет"}, "color": "positive"},
+                    {"action": {"type": "text", "label": "📝 Замечание"}, "color": "primary"},
+                ],
+                [{"action": {"type": "text", "label": "🔙 В меню"}, "color": "secondary"}],
+            ],
+        },
+        ensure_ascii=False,
+    )
 
 
 def send_vk_message(vk, user_id: int, message: str, keyboard: Optional[str] = None) -> None:
@@ -624,8 +691,9 @@ def main() -> None:
                     if act == "get_student":
                         nc = user_note_col.get(user_id)
                         res = get_student_by_number(user_id, sn, nc)
-                        send_vk_message(vk, user_id, res, get_main_keyboard())
-                        st["action"] = None
+                        send_vk_message(vk, user_id, res, get_student_quick_keyboard())
+                        st["action"] = "student_quick_action"
+                        st["row"] = sn
                     elif act == "write_note":
                         st["action"] = "write_note_text"
                         st["row"] = sn
@@ -635,6 +703,23 @@ def main() -> None:
                         st["row"] = sn
                         send_vk_message(vk, user_id, "Выберите статус:", get_status_keyboard())
                     continue
+
+            if act == "student_quick_action":
+                if "замечаний нет" in text_lower:
+                    res = write_note(user_id, st.get("row"), NO_REMARK_TEXT)
+                    send_vk_message(vk, user_id, f"{res}\n\n✅ Отметка \"{NO_REMARK_TEXT}\" сохранена.", get_main_keyboard())
+                    st["action"] = None
+                    continue
+                if "замечан" in text_lower:
+                    st["action"] = "student_note_text"
+                    send_vk_message(vk, user_id, "✍️ Напишите замечание и отправьте одним сообщением:", get_back_keyboard())
+                    continue
+
+            if act == "student_note_text":
+                res = write_note(user_id, st.get("row"), text)
+                send_vk_message(vk, user_id, res, get_main_keyboard())
+                st["action"] = None
+                continue
 
             if act == "write_note_text":
                 res = write_note(user_id, st.get("row"), text)

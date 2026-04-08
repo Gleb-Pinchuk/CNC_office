@@ -30,6 +30,7 @@ const loginModal = document.getElementById('loginModal');
 const previewModal = document.getElementById('previewModal');
 const documentModal = document.getElementById('documentModal');
 const createDocumentModalEl = document.getElementById('createDocumentModal');
+const createFolderModalEl = document.getElementById('createFolderModal');
 const uploadBtn = document.getElementById('uploadBtn');
 const logoutBtn = document.getElementById('logoutBtn');
 const uploadForm = document.getElementById('uploadForm');
@@ -648,7 +649,7 @@ async function loadView(view) {
         } else if (view === 'folders') {
             uploadBtn.style.display = 'inline-flex';
                 uploadBtn.innerHTML = 'Создать папку';
-            uploadBtn.onclick = createFolder;
+            uploadBtn.onclick = openCreateFolderModal;
         } else if (view === 'documents' || view?.startsWith('section-')) {
             uploadBtn.style.display = 'inline-flex';
                 uploadBtn.innerHTML = 'Создать таблицу';
@@ -1078,16 +1079,32 @@ function createFolderCard(folder, index) {
     return card;
 }
 
-async function createFolder() {
-    const name = prompt('Имя папки:');
-    if (!name?.trim()) return;
+function openCreateFolderModal() {
+    const input = document.getElementById('newFolderName');
+    if (input) {
+        input.value = '';
+        setTimeout(() => input.focus(), 60);
+    }
+    showModal('createFolderModal');
+}
+
+async function createFolderSubmit() {
+    const input = document.getElementById('newFolderName');
+    const name = (input?.value || '').trim();
+    if (!name) {
+        alert('Введите имя папки');
+        return;
+    }
     try {
         const res = await fetch(`${API_BASE}/folders/`, {
             method: 'POST',
             headers: getAuthHeaders(),
-            body: JSON.stringify({ name: name.trim() })
+            body: JSON.stringify({ name })
         });
-        if (res.ok) { await loadFolders(); }
+        if (res.ok) {
+            hideModal('createFolderModal');
+            await loadFolders();
+        }
         else { alert('Ошибка создания'); }
     } catch (e) {
         console.error('Create folder error:', e);
@@ -1587,11 +1604,23 @@ class CustomSheetEditor {
     }
     _applyFormatPainterToCell(r, c) {
         if (!this.formatPainter?.armed) return false;
-        const key = this._cellKey(r, c);
+        const s = this._normalizeSelection();
+        const inSelection = r >= s.r1 && r <= s.r2 && c >= s.c1 && c <= s.c2;
+        const useRange = inSelection && (s.r1 !== s.r2 || s.c1 !== s.c2);
         this._pushUndo();
         const copy = this._styleFromObject(this.formatPainter.sourceStyle || {});
-        if (Object.keys(copy).length) this.styles[key] = copy;
-        else delete this.styles[key];
+        const applyTo = (rr, cc) => {
+            const key = this._cellKey(rr, cc);
+            if (Object.keys(copy).length) this.styles[key] = { ...copy };
+            else delete this.styles[key];
+        };
+        if (useRange) {
+            for (let rr = s.r1; rr <= s.r2; rr++) {
+                for (let cc = s.c1; cc <= s.c2; cc++) applyTo(rr, cc);
+            }
+        } else {
+            applyTo(r, c);
+        }
         this.clearFormatPainter();
         this.render();
         return true;
@@ -1980,7 +2009,7 @@ class CustomSheetEditor {
                     this._paintFillTarget();
                     return;
                 }
-                if (this.isSelecting && (e.buttons & 1)) this._setSelection(r, c, true);
+                if (this.isSelecting) this._setSelection(r, c, true);
             });
             cell.addEventListener('blur', () => {
                 if (cell.getAttribute('contenteditable') === 'true') {
@@ -3154,7 +3183,7 @@ function setupEventListeners() {
     if (uploadBtn) {
         uploadBtn.onclick = () => {
             if (currentView === 'files') { loadFoldersForDropdown(); showModal(uploadModal); }
-            else if (currentView === 'folders') { createFolder(); }
+            else if (currentView === 'folders') { openCreateFolderModal(); }
             else if (currentView === 'documents' || currentView?.startsWith('section-')) {
                 currentView === 'documents' ? openCreateDocumentModal() : openCreateSectionTableModal(currentView.replace('section-', ''));
             }
@@ -3178,7 +3207,7 @@ function setupEventListeners() {
         };
     });
 
-    [uploadModal, loginModal, previewModal, documentModal, createDocumentModalEl].forEach(modal => {
+    [uploadModal, loginModal, previewModal, documentModal, createDocumentModalEl, createFolderModalEl].forEach(modal => {
         if (modal) modal.onclick = (e) => { if (e.target === modal) hideModal(modal); };
     });
 
