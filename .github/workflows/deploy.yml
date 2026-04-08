@@ -5,6 +5,8 @@ on:
     branches:
       - develop
       - fix/bot-and-table-editor
+      - "codex-*"
+      - "codex/**"
 
 jobs:
   deploy:
