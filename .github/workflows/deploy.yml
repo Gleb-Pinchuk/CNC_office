@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - develop
+      - fix/bot-and-table-editor
 
 jobs:
   deploy:
@@ -31,9 +32,9 @@ jobs:
             # ============================================
             # 1. Pull свежих изменений
             # ============================================
-            echo "🔄 Pull свежих изменений..."
-            git fetch origin develop
-            git reset --hard origin/develop
+            echo "🔄 Pull свежих изменений (ветка: ${{ github.ref_name }})..."
+            git fetch origin ${{ github.ref_name }}
+            git reset --hard origin/${{ github.ref_name }}
             
             # ============================================
             # 2. Полная остановка контейнеров
