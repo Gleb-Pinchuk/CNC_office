@@ -111,12 +111,12 @@ def _normalize_text(text: str) -> str:
 
 
 def _table_id() -> int:
-    table_id = _table_cache.get("id")
+    table_id = _table_cache.get("id") or _table_cache.get("table_id")
     if table_id:
         return int(table_id)
     info = api.lookup_table()
     _table_cache.update(info)
-    table_id = _table_cache.get("id")
+    table_id = _table_cache.get("id") or _table_cache.get("table_id")
     if not table_id:
         raise RuntimeError("table_id not found")
     return int(table_id)
@@ -534,7 +534,9 @@ def main() -> None:
                 user_states[user_id] = {}
             st = user_states[user_id]
 
-            if ("в меню" in text_lower) or ("назад" in text_lower and "⬅" not in text):
+            if ("в меню" in text_lower) or (text_lower == "назад") or (
+                "назад" in text_lower and "⬅" not in text and "🔙" in text
+            ):
                 cur_sh = st.get("current_spreadsheet")
                 cur_gr = st.get("current_group")
                 user_states[user_id] = {"current_spreadsheet": cur_sh, "current_group": cur_gr}
@@ -561,11 +563,11 @@ def main() -> None:
                     continue
 
             if act in ("get_student", "write_note", "pick_student_status"):
-                if "впер" in text_lower and "➡" in text:
+                if "впер" in text_lower:
                     st["page"] = st.get("page", 0) + 1
                     send_vk_message(vk, user_id, "Следующая страница:", get_students_keyboard(st["students"], st["page"]))
                     continue
-                if "назад" in text_lower and "⬅" in text:
+                if "назад" in text_lower and "меню" not in text_lower:
                     st["page"] = max(0, st.get("page", 0) - 1)
                     send_vk_message(vk, user_id, "Предыдущая страница:", get_students_keyboard(st["students"], st["page"]))
                     continue
@@ -604,12 +606,12 @@ def main() -> None:
                     st["action"] = None
                     continue
 
-            if text_lower == "🎓 направления":
+            if "направлен" in text_lower:
                 names = _table_cache.get("sheet_names") or []
                 send_vk_message(vk, user_id, "Выберите направление:", get_directions_keyboard(names))
                 continue
 
-            if text_lower == "📋 группы":
+            if "групп" in text_lower and "статус" not in text_lower:
                 if not st.get("current_spreadsheet"):
                     send_vk_message(vk, user_id, "⚠️ Выберите направление.")
                     continue
@@ -617,7 +619,7 @@ def main() -> None:
                 send_vk_message(vk, user_id, "Выберите группу:", get_groups_keyboard(groups))
                 continue
 
-            if text_lower == "📅 колонка даты":
+            if "колонк" in text_lower and "дат" in text_lower:
                 hdr = header_row(user_id)
                 opts = [(c, lab) for c, lab, _, _ in parse_week_columns(hdr, _tz_now().date())]
                 if not opts:
@@ -631,7 +633,7 @@ def main() -> None:
                 send_vk_message(vk, user_id, f"Выберите колонку:\n{lines}", get_week_choice_keyboard(opts))
                 continue
 
-            if text_lower == "👤 студент":
+            if "студент" in text_lower:
                 if not st.get("current_group"):
                     send_vk_message(vk, user_id, "⚠️ Выберите группу.")
                     continue
@@ -641,7 +643,7 @@ def main() -> None:
                 send_vk_message(vk, user_id, "Выберите студента:", get_students_keyboard(students, 0))
                 continue
 
-            if text_lower == "📝 замечание":
+            if "замечан" in text_lower:
                 if not st.get("current_group"):
                     send_vk_message(vk, user_id, "⚠️ Выберите группу.")
                     continue
@@ -651,7 +653,7 @@ def main() -> None:
                 send_vk_message(vk, user_id, "Выберите студента:", get_students_keyboard(students, 0))
                 continue
 
-            if text_lower == "🎓 статус учёбы":
+            if "статус" in text_lower and "уч" in text_lower:
                 if not st.get("current_group"):
                     send_vk_message(vk, user_id, "⚠️ Выберите группу.")
                     continue
@@ -661,7 +663,7 @@ def main() -> None:
                 send_vk_message(vk, user_id, "Выберите студента:", get_students_keyboard(students, 0))
                 continue
 
-            if text_lower == "ℹ️ помощь":
+            if "помощ" in text_lower:
                 send_vk_message(vk, user_id, "Бот для работы с таблицами CNC Office.", get_main_keyboard())
                 continue
 
@@ -671,11 +673,15 @@ def main() -> None:
                 send_vk_message(vk, user_id, f"✅ Направление: {chosen_sheet}", get_main_keyboard())
                 continue
 
-            groups = get_groups_list(user_id)
-            if text in groups:
-                st["current_group"] = text
-                send_vk_message(vk, user_id, f"✅ Группа: {text}", get_main_keyboard())
-                continue
+            if st.get("current_spreadsheet"):
+                try:
+                    groups = get_groups_list(user_id)
+                except Exception:
+                    groups = []
+                if text in groups:
+                    st["current_group"] = text
+                    send_vk_message(vk, user_id, f"✅ Группа: {text}", get_main_keyboard())
+                    continue
 
             send_vk_message(vk, user_id, "⚠️ Неизвестная команда. Используйте кнопки.", get_main_keyboard())
         except Exception as e:
