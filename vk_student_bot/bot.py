@@ -355,7 +355,11 @@ def get_directions_keyboard(sheet_names: List[str]) -> str:
     dirs = [n for n in sheet_names if n.lower() in {s.lower() for s in SPREADSHEETS}]
     if not dirs:
         dirs = sheet_names[:4] or sheet_names
-    buttons = [[{"action": {"type": "text", "label": n}, "color": "primary"} for n in dirs]]
+    buttons = []
+    if dirs:
+        buttons.append(
+            [{"action": {"type": "text", "label": n}, "color": "primary"} for n in dirs]
+        )
     buttons.append([{"action": {"type": "text", "label": "🔙 Назад"}, "color": "secondary"}])
     return json.dumps({"one_time": False, "inline": False, "buttons": buttons}, ensure_ascii=False)
 
@@ -418,9 +422,13 @@ def get_status_keyboard() -> str:
 
 def send_vk_message(vk, user_id: int, message: str, keyboard: Optional[str] = None) -> None:
     params = {"user_id": user_id, "message": message, "random_id": random.randint(0, 2**31)}
-    if keyboard:
-        params["keyboard"] = keyboard
-    vk.messages.send(**params)
+    try:
+        if keyboard:
+            params["keyboard"] = keyboard
+        vk.messages.send(**params)
+    except Exception:
+        params.pop("keyboard", None)
+        vk.messages.send(**params)
 
 
 def parse_week_columns(headers: List[str], today: date) -> List[Tuple[int, str, Optional[date], Optional[date]]]:
@@ -608,6 +616,22 @@ def main() -> None:
 
             if "направлен" in text_lower:
                 names = _table_cache.get("sheet_names") or []
+                if not names:
+                    try:
+                        info = api.lookup_table()
+                        _table_cache.update(info)
+                        names = _table_cache.get("sheet_names") or []
+                    except Exception as err:
+                        send_vk_message(
+                            vk,
+                            user_id,
+                            f"⚠️ Не удалось загрузить направления: {err}",
+                            get_main_keyboard(),
+                        )
+                        continue
+                if not names:
+                    send_vk_message(vk, user_id, "⚠️ Список направлений пуст.", get_main_keyboard())
+                    continue
                 send_vk_message(vk, user_id, "Выберите направление:", get_directions_keyboard(names))
                 continue
 
@@ -686,6 +710,11 @@ def main() -> None:
             send_vk_message(vk, user_id, "⚠️ Неизвестная команда. Используйте кнопки.", get_main_keyboard())
         except Exception as e:
             print("❌ Error:", e)
+            try:
+                if 'vk' in locals() and 'user_id' in locals():
+                    send_vk_message(vk, user_id, f"⚠️ Ошибка обработки: {e}")
+            except Exception:
+                pass
 
 if __name__ == "__main__":
     main()
