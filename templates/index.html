@@ -157,13 +157,23 @@
         .sheet-table tbody th { left: 0; z-index: 1; }
         .sheet-table td.sheet-cell {
             background: #fff;
-            cursor: text;
+            cursor: cell;
             outline: none;
             position: relative;
+            transition: background 0.18s ease, box-shadow 0.18s ease;
         }
         .sheet-table td.sheet-cell.selected {
             background: #e8f0ff;
             box-shadow: inset 0 0 0 2px #4f8cff;
+        }
+        .sheet-table td.sheet-cell.active-row:not(.selected),
+        .sheet-table td.sheet-cell.active-col:not(.selected) {
+            background: #f7fbff;
+        }
+        .sheet-table td.sheet-cell.editing {
+            cursor: text;
+            background: #ffffff;
+            box-shadow: inset 0 0 0 2px #1d4ed8;
         }
         .sheet-table td.sheet-cell.fill-target {
             background: #f3f8ff;
@@ -196,6 +206,11 @@
             border: 1px solid rgba(255,255,255,0.3);
         }
         .sheet-table th { position: relative; }
+        .sheet-table th.active-row,
+        .sheet-table th.active-col {
+            background: #e7f1ff !important;
+            color: #0f172a;
+        }
         .col-resizer {
             position: absolute;
             right: -2px;
@@ -234,6 +249,7 @@
             border-radius: 12px;
             background: linear-gradient(180deg, #ffffff, #f7fbff);
             box-shadow: 0 10px 26px rgba(15, 23, 42, 0.08);
+            min-width: 560px;
         }
         .sheet-ribbon-tabs,
         .sheet-ribbon-groups {
@@ -276,6 +292,62 @@
             border-radius: 0.55rem;
             min-height: 30px;
             font-size: 12px;
+        }
+        .sheet-ribbon .btn.btn-sm.active {
+            background: linear-gradient(135deg, #dbeafe, #bfdbfe);
+            border-color: #60a5fa;
+            color: #1e3a8a;
+        }
+        .sheet-modal-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            position: relative;
+            padding: 0.65rem 1rem;
+            border-bottom: 1px solid #dbe7f4;
+            background: linear-gradient(180deg, #ffffff 0%, #f7fbff 100%);
+        }
+        .sheet-header-main {
+            width: 100%;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 12px;
+        }
+        .sheet-header-title {
+            margin: 0;
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+            top: 12px;
+            font-size: 1.15rem;
+            font-weight: 700;
+            letter-spacing: 0.01em;
+            color: #0f172a;
+            pointer-events: none;
+        }
+        .sheet-header-actions {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            padding-top: 0.25rem;
+        }
+        .sheet-action-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 12px;
+            border-radius: 10px;
+            border: 1px solid #d6e3f5;
+            background: #fff;
+            color: #0f172a;
+            font-weight: 600;
+            transition: all 0.2s ease;
+        }
+        .sheet-action-btn:hover {
+            transform: translateY(-1px);
+            border-color: #93c5fd;
+            box-shadow: 0 8px 18px rgba(59, 130, 246, 0.16);
         }
         .sheet-color-input {
             width: 34px;
@@ -553,9 +625,9 @@
         <div class="modal-backdrop" onclick="hideModal('documentModal')"></div>
         <div class="modal-content" style="max-width:99vw;width:99vw;height:99vh;margin:0.5vh 0.5vw;display:flex;flex-direction:column;">
             <button class="modal-close" onclick="hideModal('documentModal')">&times;</button>
-            <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;padding:0.5rem 1rem;">
-                <h2 id="documentTitle" style="margin:0;font-size:1.1rem;">Редактор</h2>
-                <div>
+            <div class="modal-header sheet-modal-header">
+                <h2 id="documentTitle" class="sheet-header-title">Редактор таблицы</h2>
+                <div class="sheet-header-main">
                     <div class="sheet-ribbon" aria-label="Панель инструментов таблицы">
                         <div class="sheet-ribbon-tabs">
                             <button type="button" class="sheet-ribbon-tab active" data-tab="home" onclick="setRibbonTab('home')">Главная</button>
@@ -569,6 +641,7 @@
                                     <span class="sheet-ribbon-group-title">Правка</span>
                                     <button type="button" class="btn btn-secondary btn-sm" onclick="undoTableEdit()">Отменить</button>
                                     <button type="button" class="btn btn-secondary btn-sm" onclick="redoTableEdit()">Повтор</button>
+                                    <button type="button" class="btn btn-secondary btn-sm" id="sheetFormatPainterBtn" onclick="toggleFormatPainter()">Формат по образцу</button>
                                 </div>
                                 <div class="sheet-ribbon-group">
                                     <span class="sheet-ribbon-group-title">Шрифт</span>
@@ -588,14 +661,20 @@
                                         <option value="18">18 px</option>
                                         <option value="22">22 px</option>
                                     </select>
-                                    <button type="button" class="btn btn-secondary btn-sm" onclick="toggleSelectionBold()">Жирный</button>
-                                    <button type="button" class="btn btn-secondary btn-sm" onclick="toggleSelectionItalic()">Курсив</button>
+                                    <button type="button" class="btn btn-secondary btn-sm" id="sheetBoldBtn" onclick="toggleSelectionBold()">Жирный</button>
+                                    <button type="button" class="btn btn-secondary btn-sm" id="sheetItalicBtn" onclick="toggleSelectionItalic()">Курсив</button>
                                 </div>
                                 <div class="sheet-ribbon-group">
                                     <span class="sheet-ribbon-group-title">Выравнивание</span>
-                                    <button type="button" class="btn btn-secondary btn-sm" onclick="setSelectionAlign('left')">Влево</button>
-                                    <button type="button" class="btn btn-secondary btn-sm" onclick="setSelectionAlign('center')">Центр</button>
-                                    <button type="button" class="btn btn-secondary btn-sm" onclick="setSelectionAlign('right')">Вправо</button>
+                                    <button type="button" class="btn btn-secondary btn-sm" data-align-btn="left" onclick="setSelectionAlign('left')">Влево</button>
+                                    <button type="button" class="btn btn-secondary btn-sm" data-align-btn="center" onclick="setSelectionAlign('center')">Центр</button>
+                                    <button type="button" class="btn btn-secondary btn-sm" data-align-btn="right" onclick="setSelectionAlign('right')">Вправо</button>
+                                </div>
+                                <div class="sheet-ribbon-group">
+                                    <span class="sheet-ribbon-group-title">Вертикаль</span>
+                                    <button type="button" class="btn btn-secondary btn-sm" data-valign-btn="top" onclick="setSelectionVAlign('top')">Сверху</button>
+                                    <button type="button" class="btn btn-secondary btn-sm" data-valign-btn="middle" onclick="setSelectionVAlign('middle')">По центру</button>
+                                    <button type="button" class="btn btn-secondary btn-sm" data-valign-btn="bottom" onclick="setSelectionVAlign('bottom')">Снизу</button>
                                 </div>
                             </div>
                             <div class="sheet-ribbon-panel" data-panel="insert">
@@ -622,9 +701,11 @@
                             </div>
                         </div>
                     </div>
-                    <button class="btn btn-secondary btn-sm" onclick="shareCurrentDocument()" style="margin-right:8px;">Поделиться</button>
-                    <button class="btn btn-success btn-sm" onclick="exportToExcel()" style="margin-right:8px;">📥 Excel</button>
-                    <button class="btn btn-primary btn-sm" onclick="saveDocument()">💾 Сохранить</button>
+                    <div class="sheet-header-actions">
+                        <button class="sheet-action-btn" onclick="shareCurrentDocument()">Поделиться</button>
+                        <button class="sheet-action-btn" onclick="exportToExcel()">Excel</button>
+                        <button class="sheet-action-btn btn btn-primary btn-sm" onclick="saveDocument()">Сохранить</button>
+                    </div>
                 </div>
             </div>
             <div class="modal-body" style="flex:1;overflow:hidden;padding:0;position:relative;">
@@ -660,6 +741,6 @@
     </div>
 
     {# ✅ Все пути к JS #}
-    <script src="{% static 'app.js' %}?v=19.4"></script>
+    <script src="{% static 'app.js' %}?v=19.5"></script>
 </body>
 </html>

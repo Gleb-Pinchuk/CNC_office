@@ -1278,6 +1278,8 @@ class CustomSheetEditor {
         this.styles = norm.styles;
         this.colWidths = norm.colWidths;
         this.rowHeights = norm.rowHeights;
+        this.editingCellKey = null;
+        this.formatPainter = { armed: false, sourceKey: null, sourceStyle: null };
         this.columnFilters = {};
         Object.entries(norm.columnFilters).forEach(([k, v]) => { this.columnFilters[k] = v.slice(); });
         this.render();
@@ -1313,6 +1315,8 @@ class CustomSheetEditor {
             data: this.data,
             styles: this.styles,
             columnFilters: this.columnFilters,
+            colWidths: this.colWidths,
+            rowHeights: this.rowHeights,
         }));
         if (this.undoStack.length > 50) this.undoStack.shift();
         this.redoStack = [];
@@ -1324,6 +1328,7 @@ class CustomSheetEditor {
     _syncActiveCellFromDom() {
         const active = document.activeElement;
         if (!active || !this.container.contains(active) || !active.classList.contains('sheet-cell')) return;
+        if (active.getAttribute('contenteditable') !== 'true') return;
         const r = Number(active.dataset.r);
         const c = Number(active.dataset.c);
         if (!Number.isFinite(r) || !Number.isFinite(c)) return;
@@ -1333,6 +1338,8 @@ class CustomSheetEditor {
         const parsed = JSON.parse(snapshot);
         this.data = parsed.data || this.data;
         this.styles = parsed.styles || {};
+        this.colWidths = Array.isArray(parsed.colWidths) ? parsed.colWidths.slice() : this.colWidths;
+        this.rowHeights = Array.isArray(parsed.rowHeights) ? parsed.rowHeights.slice() : this.rowHeights;
         this.columnFilters = {};
         if (parsed.columnFilters && typeof parsed.columnFilters === 'object') {
             Object.entries(parsed.columnFilters).forEach(([k, v]) => {
@@ -1363,28 +1370,246 @@ class CustomSheetEditor {
         for (let r = s.r1; r <= s.r2; r++) for (let c = s.c1; c <= s.c2; c++) cb(r, c);
     }
     _paintSelection() {
-        this.container.querySelectorAll('.sheet-cell').forEach(el => el.classList.remove('selected'));
+        this.container.querySelectorAll('.sheet-cell').forEach(el => el.classList.remove('selected', 'active-row', 'active-col'));
+        this.container.querySelectorAll('[data-col-header], [data-row-header]').forEach(el => {
+            el.classList.remove('active-row', 'active-col');
+        });
         const s = this._normalizeSelection();
         this._forEachSelectedCell((r, c) => {
             const el = this.container.querySelector(`[data-r="${r}"][data-c="${c}"]`);
             if (el) el.classList.add('selected');
         });
+        const anchorRow = s.r1;
+        const anchorCol = s.c1;
+        this.container.querySelectorAll(`.sheet-cell[data-r="${anchorRow}"]`).forEach((el) => el.classList.add('active-row'));
+        this.container.querySelectorAll(`.sheet-cell[data-c="${anchorCol}"]`).forEach((el) => el.classList.add('active-col'));
+        const rowHeader = this.container.querySelector(`[data-row-header="${anchorRow}"]`);
+        if (rowHeader) rowHeader.classList.add('active-row');
+        const colHeader = this.container.querySelector(`[data-col-header="${anchorCol}"]`);
+        if (colHeader) colHeader.classList.add('active-col');
         this._positionFillHandle();
+        this._emitToolbarState();
     }
     _applyCellStyle(el, styleObj) {
         el.style.fontWeight = styleObj?.bold ? '700' : '400';
         el.style.fontStyle = styleObj?.italic ? 'italic' : 'normal';
         el.style.textAlign = styleObj?.align || 'left';
+        el.style.verticalAlign = styleObj?.vAlign || 'middle';
         el.style.color = styleObj?.textColor || '#111111';
         el.style.backgroundColor = styleObj?.fillColor || '#ffffff';
         el.style.fontFamily = styleObj?.fontFamily || "'Segoe UI', system-ui, sans-serif";
         const fs = styleObj?.fontSize;
         el.style.fontSize = fs ? `${Number(fs)}px` : '14px';
     }
+    _isFormulaValue(value) {
+        return typeof value === 'string' && value.trim().startsWith('=');
+    }
+    _parseCellRef(ref) {
+        const m = /^([A-Za-z]+)(\d+)$/i.exec(String(ref || '').trim());
+        if (!m) return null;
+        const letters = m[1].toUpperCase();
+        const row = Number(m[2]) - 1;
+        if (!Number.isFinite(row) || row < 0) return null;
+        let col = 0;
+        for (let i = 0; i < letters.length; i++) {
+            col = col * 26 + (letters.charCodeAt(i) - 64);
+        }
+        col -= 1;
+        if (col < 0) return null;
+        return { row, col };
+    }
+    _toNumberSafe(value) {
+        if (value === null || value === undefined) return null;
+        const raw = String(value).trim().replace(/\s+/g, '').replace(',', '.');
+        if (!raw) return null;
+        const n = Number(raw);
+        return Number.isFinite(n) ? n : null;
+    }
+    _formatComputedNumber(n) {
+        if (!Number.isFinite(n)) return '#ERROR!';
+        if (Math.abs(n - Math.round(n)) < 1e-10) return String(Math.round(n));
+        return String(Number(n.toFixed(10)));
+    }
+    _evaluateCell(r, c, memo = new Map(), visiting = new Set()) {
+        const key = this._cellKey(r, c);
+        if (memo.has(key)) return memo.get(key);
+        if (visiting.has(key)) return { text: '#CYCLE!', numeric: null };
+        visiting.add(key);
+        const raw = String(this.data[r]?.[c] ?? '');
+        let result = { text: raw, numeric: this._toNumberSafe(raw) };
+        if (this._isFormulaValue(raw)) {
+            result = this._evaluateFormula(raw, memo, visiting);
+        }
+        visiting.delete(key);
+        memo.set(key, result);
+        return result;
+    }
+    _collectFormulaNumbers(arg, memo, visiting) {
+        const token = String(arg || '').trim();
+        if (!token) return [];
+        const rangeMatch = /^([A-Za-z]+\d+)\s*:\s*([A-Za-z]+\d+)$/i.exec(token);
+        if (rangeMatch) {
+            const from = this._parseCellRef(rangeMatch[1]);
+            const to = this._parseCellRef(rangeMatch[2]);
+            if (!from || !to) return [];
+            const r1 = Math.min(from.row, to.row);
+            const r2 = Math.max(from.row, to.row);
+            const c1 = Math.min(from.col, to.col);
+            const c2 = Math.max(from.col, to.col);
+            const out = [];
+            for (let r = r1; r <= r2; r++) {
+                for (let c = c1; c <= c2; c++) {
+                    const evaluated = this._evaluateCell(r, c, memo, visiting);
+                    if (evaluated?.numeric !== null && evaluated?.numeric !== undefined) out.push(evaluated.numeric);
+                }
+            }
+            return out;
+        }
+        const ref = this._parseCellRef(token);
+        if (ref) {
+            const evaluated = this._evaluateCell(ref.row, ref.col, memo, visiting);
+            return evaluated?.numeric !== null && evaluated?.numeric !== undefined ? [evaluated.numeric] : [];
+        }
+        const n = this._toNumberSafe(token);
+        return n === null ? [] : [n];
+    }
+    _evaluateFormula(raw, memo, visiting) {
+        const match = /^\s*=\s*([A-Za-zА-Яа-яЁё]+)\s*\((.*)\)\s*$/.exec(String(raw || ''));
+        if (!match) return { text: '#ERROR!', numeric: null };
+        const fn = match[1].trim().toUpperCase();
+        const argsText = match[2] || '';
+        const args = argsText.split(/[;,]/).map((p) => p.trim()).filter(Boolean);
+        const nums = [];
+        args.forEach((arg) => {
+            this._collectFormulaNumbers(arg, memo, visiting).forEach((n) => nums.push(n));
+        });
+        const aliases = {
+            SUM: 'SUM',
+            'СУММ': 'SUM',
+            AVERAGE: 'AVERAGE',
+            MIN: 'MIN',
+            MAX: 'MAX',
+        };
+        const normalized = aliases[fn];
+        if (!normalized) return { text: '#NAME?', numeric: null };
+        if (!nums.length) return { text: '0', numeric: 0 };
+        let value = 0;
+        if (normalized === 'SUM') value = nums.reduce((acc, n) => acc + n, 0);
+        if (normalized === 'AVERAGE') value = nums.reduce((acc, n) => acc + n, 0) / nums.length;
+        if (normalized === 'MIN') value = Math.min(...nums);
+        if (normalized === 'MAX') value = Math.max(...nums);
+        if (!Number.isFinite(value)) return { text: '#ERROR!', numeric: null };
+        return { text: this._formatComputedNumber(value), numeric: value };
+    }
+    _getDisplayedValue(r, c, memo = new Map()) {
+        const value = this._evaluateCell(r, c, memo, new Set());
+        return String(value?.text ?? '');
+    }
+    _styleFromObject(rawStyle) {
+        const src = rawStyle && typeof rawStyle === 'object' ? rawStyle : {};
+        const next = {};
+        if (src.bold) next.bold = true;
+        if (src.italic) next.italic = true;
+        if (src.align) next.align = src.align;
+        if (src.vAlign) next.vAlign = src.vAlign;
+        if (src.textColor) next.textColor = src.textColor;
+        if (src.fillColor) next.fillColor = src.fillColor;
+        if (src.fontFamily) next.fontFamily = src.fontFamily;
+        if (src.fontSize) next.fontSize = src.fontSize;
+        return next;
+    }
+    _emitToolbarState() {
+        const state = this.getSelectionStyleState();
+        document.dispatchEvent(new CustomEvent('sheet:toolbar-state', { detail: state }));
+    }
+    getSelectionStyleState() {
+        const s = this._normalizeSelection();
+        const key = this._cellKey(s.r1, s.c1);
+        const style = this.styles[key] || {};
+        return {
+            bold: !!style.bold,
+            italic: !!style.italic,
+            align: style.align || 'left',
+            vAlign: style.vAlign || 'middle',
+            formatPainterArmed: !!this.formatPainter?.armed,
+        };
+    }
+    armFormatPainter() {
+        const s = this._normalizeSelection();
+        const key = this._cellKey(s.r1, s.c1);
+        this.formatPainter = {
+            armed: true,
+            sourceKey: key,
+            sourceStyle: this._styleFromObject(this.styles[key] || {}),
+        };
+        this._emitToolbarState();
+    }
+    clearFormatPainter() {
+        this.formatPainter = { armed: false, sourceKey: null, sourceStyle: null };
+        this._emitToolbarState();
+    }
+    _applyFormatPainterToCell(r, c) {
+        if (!this.formatPainter?.armed) return false;
+        const key = this._cellKey(r, c);
+        this._pushUndo();
+        const copy = this._styleFromObject(this.formatPainter.sourceStyle || {});
+        if (Object.keys(copy).length) this.styles[key] = copy;
+        else delete this.styles[key];
+        this.clearFormatPainter();
+        this.render();
+        return true;
+    }
+    _startEditCell(cell, initialText = null, selectAll = false) {
+        if (!cell) return;
+        if (currentDocument?.is_readonly) return;
+        const r = Number(cell.dataset.r);
+        const c = Number(cell.dataset.c);
+        if (!Number.isFinite(r) || !Number.isFinite(c)) return;
+        const key = this._cellKey(r, c);
+        const raw = String(this.data[r]?.[c] ?? '');
+        this.editingCellKey = key;
+        cell.dataset.originalValue = raw;
+        cell.setAttribute('contenteditable', 'true');
+        cell.classList.add('editing');
+        cell.textContent = initialText !== null ? String(initialText) : raw;
+        cell.focus();
+        const sel = window.getSelection();
+        if (sel) {
+            sel.removeAllRanges();
+            const range = document.createRange();
+            range.selectNodeContents(cell);
+            if (!selectAll) range.collapse(false);
+            sel.addRange(range);
+        }
+    }
+    _commitEditCell(cell, { cancel = false } = {}) {
+        if (!cell) return;
+        const r = Number(cell.dataset.r);
+        const c = Number(cell.dataset.c);
+        if (!Number.isFinite(r) || !Number.isFinite(c)) return;
+        const key = this._cellKey(r, c);
+        const before = String(cell.dataset.originalValue ?? this.data[r][c] ?? '');
+        const after = cancel ? before : String(cell.textContent || '');
+        cell.classList.remove('editing');
+        cell.setAttribute('contenteditable', 'false');
+        delete cell.dataset.originalValue;
+        this.editingCellKey = null;
+        if (after !== before) {
+            this._pushUndo();
+            this.data[r][c] = after;
+            this._markDirty();
+            this.render();
+            return;
+        }
+        this.data[r][c] = before;
+        const display = this._getDisplayedValue(r, c);
+        cell.textContent = display;
+    }
 
     render() {
         const rows = this.data.length;
         const cols = this.data[0]?.length || 0;
+        const displayMemo = new Map();
         let html = '<div class="sheet-wrap"><table class="sheet-table"><thead><tr><th class="corner"></th>';
         for (let c = 0; c < cols; c++) {
             const w = this.colWidths[c] || 90;
@@ -1399,7 +1624,8 @@ class CustomSheetEditor {
             html += `<tr class="sheet-row${hid}" style="height:${h}px;"><th data-row-header="${r}" style="height:${h}px;min-height:${h}px;max-height:${h}px;">${r + 1}<span class="row-resizer" data-row-resizer="${r}"></span></th>`;
             for (let c = 0; c < cols; c++) {
                 const w = this.colWidths[c] || 90;
-                html += `<td class="sheet-cell" contenteditable="true" data-r="${r}" data-c="${c}" style="width:${w}px;min-width:${w}px;max-width:${w}px;height:${h}px;">${escapeHtml(this.data[r][c])}</td>`;
+                const shown = this._getDisplayedValue(r, c, displayMemo);
+                html += `<td class="sheet-cell" contenteditable="false" data-r="${r}" data-c="${c}" style="width:${w}px;min-width:${w}px;max-width:${w}px;height:${h}px;">${escapeHtml(shown)}</td>`;
             }
             html += '</tr>';
         }
@@ -1413,13 +1639,54 @@ class CustomSheetEditor {
             this._applyCellStyle(cell, styleObj);
 
             cell.addEventListener('focus', () => this._setSelection(r, c));
+            cell.addEventListener('click', () => {
+                this._setSelection(r, c);
+                this._emitToolbarState();
+            });
             cell.addEventListener('mousedown', (e) => {
-                // Не блокируем стандартное поведение contenteditable,
-                // чтобы можно было выделять текст внутри ячейки протягиванием.
                 if (e.button !== 0) return;
+                if (this._applyFormatPainterToCell(r, c)) return;
                 this.isSelecting = true;
                 this._setSelection(r, c);
                 cell.focus();
+            });
+            cell.addEventListener('dblclick', () => {
+                this._setSelection(r, c);
+                this._startEditCell(cell);
+            });
+            cell.addEventListener('keydown', (e) => {
+                const key = String(e.key || '');
+                const isEditing = cell.getAttribute('contenteditable') === 'true';
+                if (!isEditing) {
+                    if (key === 'Enter' || key === 'F2') {
+                        e.preventDefault();
+                        this._startEditCell(cell);
+                        return;
+                    }
+                    if (key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                        e.preventDefault();
+                        this._startEditCell(cell, key);
+                        return;
+                    }
+                    if (key === 'Backspace' || key === 'Delete') {
+                        e.preventDefault();
+                        this._startEditCell(cell, '');
+                    }
+                    return;
+                }
+                if (key === 'Escape') {
+                    e.preventDefault();
+                    this._commitEditCell(cell, { cancel: true });
+                    return;
+                }
+                if (key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    this._commitEditCell(cell);
+                    const nextR = Math.min(this.data.length - 1, r + 1);
+                    this._setSelection(nextR, c);
+                    const next = this.container.querySelector(`.sheet-cell[data-r="${nextR}"][data-c="${c}"]`);
+                    if (next) next.focus();
+                }
             });
             cell.addEventListener('paste', (e) => {
                 // Excel-копирование: tab-separated + newline-separated.
@@ -1506,6 +1773,13 @@ class CustomSheetEditor {
                                         else if (low.includes('right')) st.align = 'right';
                                         else st.align = 'left';
                                     }
+                                    const va = styleMap['vertical-align'];
+                                    if (va) {
+                                        const low = va.toLowerCase();
+                                        if (low.includes('top')) st.vAlign = 'top';
+                                        else if (low.includes('bottom')) st.vAlign = 'bottom';
+                                        else st.vAlign = 'middle';
+                                    }
                                     const color = styleMap['color'];
                                     if (color) st.textColor = color;
                                     const bg = styleMap['background-color'] || styleMap['background'];
@@ -1544,13 +1818,10 @@ class CustomSheetEditor {
                 }
                 if (this.isSelecting && (e.buttons & 1)) this._setSelection(r, c, true);
             });
-            cell.addEventListener('input', () => {
-                this.data[r][c] = cell.textContent || '';
-                this._markDirty();
-            });
             cell.addEventListener('blur', () => {
-                this.data[r][c] = cell.textContent || '';
-                this._markDirty();
+                if (cell.getAttribute('contenteditable') === 'true') {
+                    this._commitEditCell(cell);
+                }
             });
         });
         this._bindResizers();
@@ -1670,6 +1941,7 @@ class CustomSheetEditor {
             el.addEventListener('mousedown', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
+                this._pushUndo();
                 const col = Number(el.dataset.colResizer);
                 const startX = e.clientX;
                 const startW = this.colWidths[col] || 90;
@@ -1690,6 +1962,7 @@ class CustomSheetEditor {
             el.addEventListener('mousedown', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
+                this._pushUndo();
                 const row = Number(el.dataset.rowResizer);
                 const startY = e.clientY;
                 const startH = this.rowHeights[row] || 28;
@@ -1860,6 +2133,16 @@ class CustomSheetEditor {
         });
         this.render();
     }
+    setVAlign(vAlign) {
+        this._pushUndo();
+        this._forEachSelectedCell((r, c) => {
+            const k = this._cellKey(r, c);
+            const s = { ...(this.styles[k] || {}) };
+            s.vAlign = vAlign;
+            this.styles[k] = s;
+        });
+        this.render();
+    }
     setTextColor(color) {
         this._pushUndo();
         this._forEachSelectedCell((r, c) => {
@@ -1931,12 +2214,24 @@ class CustomSheetEditor {
     }
     undo() {
         if (!this.undoStack.length) return;
-        this.redoStack.push(JSON.stringify({ data: this.data, styles: this.styles, columnFilters: this.columnFilters }));
+        this.redoStack.push(JSON.stringify({
+            data: this.data,
+            styles: this.styles,
+            columnFilters: this.columnFilters,
+            colWidths: this.colWidths,
+            rowHeights: this.rowHeights,
+        }));
         this._applySnapshot(this.undoStack.pop());
     }
     redo() {
         if (!this.redoStack.length) return;
-        this.undoStack.push(JSON.stringify({ data: this.data, styles: this.styles, columnFilters: this.columnFilters }));
+        this.undoStack.push(JSON.stringify({
+            data: this.data,
+            styles: this.styles,
+            columnFilters: this.columnFilters,
+            colWidths: this.colWidths,
+            rowHeights: this.rowHeights,
+        }));
         this._applySnapshot(this.redoStack.pop());
     }
 }
@@ -2101,10 +2396,14 @@ class MultiSheetWorkbook {
     toggleBold() { if (this._editor) this._editor.toggleBold(); }
     toggleItalic() { if (this._editor) this._editor.toggleItalic(); }
     setAlign(a) { if (this._editor) this._editor.setAlign(a); }
+    setVAlign(a) { if (this._editor) this._editor.setVAlign(a); }
     setTextColor(c) { if (this._editor) this._editor.setTextColor(c); }
     setFillColor(c) { if (this._editor) this._editor.setFillColor(c); }
     setFontFamily(f) { if (this._editor) this._editor.setFontFamily(f); }
     setFontSize(px) { if (this._editor) this._editor.setFontSize(px); }
+    armFormatPainter() { if (this._editor) this._editor.armFormatPainter(); }
+    clearFormatPainter() { if (this._editor) this._editor.clearFormatPainter(); }
+    getSelectionStyleState() { return this._editor ? this._editor.getSelectionStyleState() : null; }
     insertRowBelow() { if (this._editor) this._editor.insertRowBelow(); }
     insertColRight() { if (this._editor) this._editor.insertColRight(); }
     undo() { if (this._editor) this._editor.undo(); }
@@ -2139,6 +2438,7 @@ function initHandsontable(doc, restoredSelection = null) {
     if (restoredSelection && sheetEditor?.setSelectionMeta) {
         sheetEditor.setSelectionMeta(restoredSelection);
     }
+    refreshSheetToolbarState();
     workbookBaseSnapshot = sheetEditor ? deepClone(sheetEditor.export()) : null;
     clearSheetDirty();
     saveEditorState();
@@ -2190,6 +2490,7 @@ function initHandsontable(doc, restoredSelection = null) {
             if (restoreSel && sheetEditor?.setSelectionMeta) {
                 sheetEditor.setSelectionMeta(restoreSel);
             }
+            refreshSheetToolbarState();
             if (currentDocument?.is_readonly && container) {
                 setTimeout(() => {
                     container.querySelectorAll('.sheet-cell').forEach((cell) => {
@@ -2217,6 +2518,15 @@ function toggleSelectionItalic() {
 
 function setSelectionAlign(align) {
     if (sheetEditor) sheetEditor.setAlign(align);
+}
+function setSelectionVAlign(vAlign) {
+    if (sheetEditor) sheetEditor.setVAlign(vAlign);
+}
+function toggleFormatPainter() {
+    if (!sheetEditor) return;
+    const state = sheetEditor.getSelectionStyleState ? sheetEditor.getSelectionStyleState() : null;
+    if (state?.formatPainterArmed) sheetEditor.clearFormatPainter();
+    else sheetEditor.armFormatPainter();
 }
 function setSelectionTextColor(color) {
     if (sheetEditor) sheetEditor.setTextColor(color);
@@ -2256,6 +2566,25 @@ function undoTableEdit() {
 function redoTableEdit() {
     if (sheetEditor) sheetEditor.redo();
 }
+function refreshSheetToolbarState(state) {
+    const current = state || (sheetEditor?.getSelectionStyleState ? sheetEditor.getSelectionStyleState() : null);
+    if (!current) return;
+    const boldBtn = document.getElementById('sheetBoldBtn');
+    const italicBtn = document.getElementById('sheetItalicBtn');
+    const painterBtn = document.getElementById('sheetFormatPainterBtn');
+    if (boldBtn) boldBtn.classList.toggle('active', !!current.bold);
+    if (italicBtn) italicBtn.classList.toggle('active', !!current.italic);
+    if (painterBtn) painterBtn.classList.toggle('active', !!current.formatPainterArmed);
+    document.querySelectorAll('[data-align-btn]').forEach((el) => {
+        el.classList.toggle('active', el.dataset.alignBtn === current.align);
+    });
+    document.querySelectorAll('[data-valign-btn]').forEach((el) => {
+        el.classList.toggle('active', el.dataset.valignBtn === current.vAlign);
+    });
+}
+document.addEventListener('sheet:toolbar-state', (event) => {
+    refreshSheetToolbarState(event?.detail || null);
+});
 
 function insertRowBelow() {
     if (sheetEditor) sheetEditor.insertRowBelow();
