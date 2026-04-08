@@ -852,6 +852,17 @@ class CustomSheetEditor {
         window.addEventListener('blur', this._onGlobalMouseUp);
         window.addEventListener('mouseup', this._onFillEnd);
 
+        this._onKeyDown = (e) => {
+            if (e.ctrlKey && e.key.toLowerCase() === 'z') {
+                e.preventDefault();
+                this.undo();
+            } else if (e.ctrlKey && e.key.toLowerCase() === 'y') {
+                e.preventDefault();
+                this.redo();
+            }
+        };
+        window.addEventListener('keydown', this._onKeyDown);
+
         const norm = normalizeSheetPayload(payload || {});
         this.sheetName = norm.name;
         this.data = norm.data.map((row) => row.slice());
@@ -1160,6 +1171,7 @@ class CustomSheetEditor {
                 <div class="sheet-filter-list" id="sheetFilterList"></div>
                 <div class="sheet-filter-actions">
                     <button type="button" class="btn btn-secondary btn-sm" id="sheetFilterAll">Выделить все</button>
+                    <button type="button" class="btn btn-secondary btn-sm" id="sheetFilterNone">Снять все</button>
                     <button type="button" class="btn btn-secondary btn-sm" id="sheetFilterClear">Сбросить фильтр</button>
                     <button type="button" class="btn btn-primary btn-sm" id="sheetFilterOk">Применить</button>
                 </div>
@@ -1183,6 +1195,9 @@ class CustomSheetEditor {
         overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
         overlay.querySelector('#sheetFilterAll').onclick = () => {
             listEl.querySelectorAll('input[type=checkbox]').forEach((c) => { c.checked = true; });
+        };
+        overlay.querySelector('#sheetFilterNone').onclick = () => {
+            listEl.querySelectorAll('input[type=checkbox]').forEach((c) => { c.checked = false; });
         };
         overlay.querySelector('#sheetFilterClear').onclick = () => {
             this._pushUndo();
@@ -1267,7 +1282,8 @@ class CustomSheetEditor {
         if (!this.fillHandle || !this.wrapEl) return;
         const s = this._normalizeSelection();
         const endCell = this.container.querySelector(`[data-r="${s.r2}"][data-c="${s.c2}"]`);
-        if (!endCell) return;
+        if (!endCell) { this.fillHandle.style.display = 'none'; return; }
+        this.fillHandle.style.display = 'block';
         const r1 = this.wrapEl.getBoundingClientRect();
         const r2 = endCell.getBoundingClientRect();
         this.fillHandle.style.left = `${r2.right - r1.left + this.wrapEl.scrollLeft - 4}px`;
@@ -1342,6 +1358,7 @@ class CustomSheetEditor {
     destroy() {
         window.removeEventListener('mouseup', this._onGlobalMouseUp);
         window.removeEventListener('blur', this._onGlobalMouseUp);
+        window.removeEventListener('keydown', this._onKeyDown);
         if (this._onFillEnd) {
             window.removeEventListener('mouseup', this._onFillEnd);
             this._onFillEnd = null;
@@ -1516,6 +1533,16 @@ class MultiSheetWorkbook {
             btn.className = 'sheet-tab' + (idx === this.activeIndex ? ' active' : '');
             btn.textContent = sh.name || `Лист${idx + 1}`;
             btn.onclick = () => this._switchSheet(idx);
+            const delBtn = document.createElement('span');
+            delBtn.className = 'sheet-tab-del';
+            delBtn.innerHTML = '&times;';
+            delBtn.title = 'Удалить лист';
+            delBtn.onclick = (e) => {
+                e.stopPropagation();
+                if (this.sheets.length <= 1) { alert('Нельзя удалить единственный лист'); return; }
+                if (confirm(`Удалить лист "${sh.name || 'Лист'}"?`)) this.deleteSheet(idx);
+            };
+            btn.appendChild(delBtn);
             btn.ondblclick = () => {
                 const oldName = (this.sheets[idx]?.name || `Лист${idx + 1}`).trim();
                 const next = prompt('Переименовать лист', oldName);
@@ -1559,6 +1586,11 @@ class MultiSheetWorkbook {
         });
         this.sheets.push(newSheet);
         this._switchSheet(this.sheets.length - 1, true);
+    }
+    deleteSheet(idx) {
+        this.sheets.splice(idx, 1);
+        if (this.activeIndex >= this.sheets.length) this.activeIndex = this.sheets.length - 1;
+        this._switchSheet(this.activeIndex, true);
     }
     renameActiveSheet(name) {
         const cleaned = String(name || '').trim();
@@ -1628,6 +1660,16 @@ function initHandsontable(doc) {
                 cell.setAttribute('contenteditable', 'false');
             });
         }, 0);
+    } else if (doc && !doc.is_readonly) {
+        // Периодическое сохранение
+        if (window._sheetSyncInterval) clearInterval(window._sheetSyncInterval);
+        window._sheetSyncInterval = setInterval(() => {
+            if (currentDocument && currentDocument.id === doc.id && sheetEditor) {
+                saveDocumentSilent();
+            } else {
+                clearInterval(window._sheetSyncInterval);
+            }
+        }, 15000);
     }
 }
 
