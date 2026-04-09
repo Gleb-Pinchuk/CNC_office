@@ -3272,4 +3272,3 @@ function setupEventListeners() {
         if (currentPresenceItems.length) applyLivePresence(currentPresenceItems);
     }, true);
 }
-}
