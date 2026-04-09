@@ -1271,6 +1271,7 @@ class CustomSheetEditor {
             const isUndo = hasMod && !e.shiftKey && key === 'z';
             const isRedo = (hasMod && key === 'y') || (hasMod && e.shiftKey && key === 'z');
             const isDeleteKey = key === 'backspace' || key === 'delete';
+            const isPaste = hasMod && key === 'v';
             const activeEl = document.activeElement;
             const modalOpen = documentModal?.classList?.contains('show');
             const insideEditor = !!(activeEl && this.container.contains(activeEl));
@@ -1279,8 +1280,13 @@ class CustomSheetEditor {
                 activeEl.tagName === 'TEXTAREA' ||
                 activeEl.tagName === 'SELECT'
             ));
-            const canHandleSheetHotkeys = modalOpen && (!isTypingInput || insideEditor);
+
+            // Если мы внутри ячейки, но НЕ в режиме редактирования текста (contenteditable=true)
+            const isCellFocused = insideEditor && activeEl.classList.contains('sheet-cell') && activeEl.getAttribute('contenteditable') !== 'true';
+
+            const canHandleSheetHotkeys = modalOpen && (!isTypingInput || isCellFocused);
             if (!canHandleSheetHotkeys) return;
+
             if (isUndo) {
                 e.preventDefault();
                 this.undo();
@@ -1288,14 +1294,18 @@ class CustomSheetEditor {
                 e.preventDefault();
                 this.redo();
             } else if (isDeleteKey) {
-                const isEditingCell = !!this.editingCellKey;
-                if (!isEditingCell && insideEditor) {
+                if (isCellFocused) {
                     e.preventDefault();
                     this.clearSelectedCells();
                 }
+            } else if (isPaste) {
+                // Позволяем стандартному событию paste сработать, 
+                // но если фокус на ячейке без редактирования, мы поймаем его в слушателе paste
+                if (isCellFocused) {
+                    // Фокус на ячейке есть, событие paste всплывет к ячейке
+                }
             }
-        };
-        document.addEventListener('keydown', this._onKeyDown, true);
+        };        document.addEventListener('keydown', this._onKeyDown, true);
 
         const norm = normalizeSheetPayload(payload || {});
         this.sheetName = norm.name;
@@ -1691,16 +1701,30 @@ class CustomSheetEditor {
             }
             if (changed) break;
         }
+        // Также проверяем стили, если данных нет, но есть стили - тоже считаем изменением
+        if (!changed) {
+            for (let r = s.r1; r <= s.r2; r++) {
+                for (let c = s.c1; c <= s.c2; c++) {
+                    if (this.styles[this._cellKey(r, c)]) {
+                        changed = true;
+                        break;
+                    }
+                }
+                if (changed) break;
+            }
+        }
+
         if (!changed) return;
         this._pushUndo();
         for (let r = s.r1; r <= s.r2; r++) {
             for (let c = s.c1; c <= s.c2; c++) {
                 this.data[r][c] = '';
+                delete this.styles[this._cellKey(r, c)];
             }
         }
         this.render();
-    }
-    _getEditingCellEl() {
+        this._markDirty();
+    }    _getEditingCellEl() {
         if (!this.editingCellKey) return null;
         const [r, c] = this.editingCellKey.split(':').map(Number);
         if (!Number.isFinite(r) || !Number.isFinite(c)) return null;
@@ -1891,7 +1915,15 @@ class CustomSheetEditor {
                     const html = dt.getData('text/html') || '';
                     if (!text && !html) return;
 
+                    // Если мы в режиме редактирования текста внутри ячейки, 
+                    // позволяем стандартную вставку, если это не многострочный текст из Excel
+                    const isEditing = cell.getAttribute('contenteditable') === 'true';
+                    if (isEditing && !text.includes('\t') && !text.includes('\n')) {
+                        return; 
+                    }
+
                     e.preventDefault();
+                    e.stopPropagation();
                     this._pushUndo();
 
                     const start = this._normalizeSelection();
@@ -1904,7 +1936,7 @@ class CustomSheetEditor {
                     // Убираем пустые хвостовые строки (часто Excel добавляет trailing \n)
                     while (matrix.length > 1) {
                         const last = matrix[matrix.length - 1];
-                        const allEmpty = !last || last.every((v) => String(v ?? '').trim() === '');
+                        const allEmpty = !last || (last.length === 1 && String(last[0] ?? '').trim() === '');
                         if (!allEmpty) break;
                         matrix.pop();
                     }
@@ -1926,15 +1958,16 @@ class CustomSheetEditor {
 
                     // Apply values
                     for (let rr = 0; rr < matrix.length; rr++) {
-                        for (let cc = 0; cc < maxCols; cc++) {
-                            const val = (matrix[rr] && matrix[rr][cc] !== undefined) ? String(matrix[rr][cc] ?? '') : '';
+                        for (let cc = 0; cc < matrix[rr].length; cc++) {
+                            const val = String(matrix[rr][cc] ?? '');
                             this.data[startR + rr][startC + cc] = val;
                         }
                     }
 
                     // 2) Styles: try parse HTML table (best-effort)
                     if (html && html.toLowerCase().includes('<table')) {
-                        const doc = new DOMParser().parseFromString(html, 'text/html');
+                        const parser = new DOMParser();
+                        const doc = parser.parseFromString(html, 'text/html');
                         const tbl = doc.querySelector('table');
                         if (tbl) {
                             const trList = Array.from(tbl.querySelectorAll('tr'));
@@ -1943,47 +1976,50 @@ class CustomSheetEditor {
                                 for (let cc = 0; cc < cells.length; cc++) {
                                     const el = cells[cc];
                                     const styleText = el.getAttribute('style') || '';
-                                    if (!styleText) continue;
-
-                                    const styleMap = {};
-                                    styleText.split(';').forEach((p) => {
-                                        const idx = p.indexOf(':');
-                                        if (idx === -1) return;
-                                        const key = p.slice(0, idx).trim().toLowerCase();
-                                        const val = p.slice(idx + 1).trim();
-                                        if (key && val) styleMap[key] = val;
-                                    });
-
+                                    
                                     const st = {};
-                                    const fw = styleMap['font-weight'];
+                                    // Пытаемся извлечь стили напрямую из свойств элемента, если style аттрибут пуст
+                                    const computedStyle = el.style;
+
+                                    const getStyle = (prop) => el.style[prop] || '';
+
+                                    const fw = getStyle('fontWeight');
                                     if (fw && (fw.toLowerCase() === 'bold' || Number(fw) >= 600)) st.bold = true;
-                                    const fs = styleMap['font-style'];
+                                    
+                                    const fs = getStyle('fontStyle');
                                     if (fs && fs.toLowerCase() === 'italic') st.italic = true;
-                                    const ta = styleMap['text-align'];
+                                    
+                                    const ta = getStyle('textAlign');
                                     if (ta) {
                                         const low = ta.toLowerCase();
                                         if (low.includes('center')) st.align = 'center';
                                         else if (low.includes('right')) st.align = 'right';
                                         else st.align = 'left';
                                     }
-                                    const va = styleMap['vertical-align'];
+                                    
+                                    const va = getStyle('verticalAlign');
                                     if (va) {
                                         const low = va.toLowerCase();
                                         if (low.includes('top')) st.vAlign = 'top';
                                         else if (low.includes('bottom')) st.vAlign = 'bottom';
                                         else st.vAlign = 'middle';
                                     }
-                                    const color = styleMap['color'];
+                                    
+                                    const color = getStyle('color');
                                     if (color) st.textColor = color;
-                                    const bg = styleMap['background-color'] || styleMap['background'];
-                                    if (bg) st.fillColor = bg;
-                                    const ff = styleMap['font-family'];
+                                    
+                                    const bg = getStyle('backgroundColor') || getStyle('background');
+                                    if (bg && bg !== 'transparent' && bg !== 'rgba(0, 0, 0, 0)') st.fillColor = bg;
+                                    
+                                    const ff = getStyle('fontFamily');
                                     if (ff) st.fontFamily = ff;
-                                    const size = styleMap['font-size'];
-                                    if (size) {
-                                        const n = Number(String(size).replace('px', '').trim());
+                                    
+                                    const fontSize = getStyle('fontSize');
+                                    if (fontSize) {
+                                        const n = Number(String(fontSize).replace('px', '').trim());
                                         if (Number.isFinite(n)) st.fontSize = n;
                                     }
+
                                     if (Object.keys(st).length) {
                                         this.styles[this._cellKey(startR + rr, startC + cc)] = st;
                                     }
@@ -1999,11 +2035,11 @@ class CustomSheetEditor {
                         c2: startC + maxCols - 1,
                     };
                     this.render();
+                    this._markDirty();
                 } catch (err) {
                     console.error('❌ Paste error:', err);
                 }
-            });
-            cell.addEventListener('mouseenter', (e) => {
+            });            cell.addEventListener('mouseenter', (e) => {
                 if (this.fillDrag) {
                     this.fillDrag.target = { r, c };
                     this._paintFillTarget();
@@ -2409,14 +2445,33 @@ class CustomSheetEditor {
     }
     undo() {
         if (!this.undoStack.length) return;
-        this.redoStack.push(JSON.stringify({
+        this._syncActiveCellFromDom();
+        const current = JSON.stringify({
             data: this.data,
             styles: this.styles,
             columnFilters: this.columnFilters,
             colWidths: this.colWidths,
             rowHeights: this.rowHeights,
-        }));
-        this._applySnapshot(this.undoStack.pop());
+        });
+        this.redoStack.push(current);
+        const last = this.undoStack.pop();
+        this._applySnapshot(last);
+        this._markDirty();
+    }
+    redo() {
+        if (!this.redoStack.length) return;
+        this._syncActiveCellFromDom();
+        const current = JSON.stringify({
+            data: this.data,
+            styles: this.styles,
+            columnFilters: this.columnFilters,
+            colWidths: this.colWidths,
+            rowHeights: this.rowHeights,
+        });
+        this.undoStack.push(current);
+        const next = this.redoStack.pop();
+        this._applySnapshot(next);
+        this._markDirty();
     }
     redo() {
         if (!this.redoStack.length) return;
@@ -3222,7 +3277,3 @@ function setupEventListeners() {
         if (currentPresenceItems.length) applyLivePresence(currentPresenceItems);
     }, true);
 }
-
-
-
-
