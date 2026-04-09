@@ -1943,15 +1943,6 @@ class CustomSheetEditor {
                             return val;
                         });
                     }).filter(row => row !== null);
-                    let matrix = lines.map((ln) => {
-                        if (!ln.trim() && lines.indexOf(ln) === lines.length - 1) return null;
-                        return ln.split('\t').map(v => {
-                            let val = v.trim();
-                            if (val.startsWith('"') && val.endsWith('"')) {
-                                val = val.slice(1, -1).replace(/""/g, '"');
-                            }
-                            return val;
-                        });
 
                     if (matrix.length === 0) return;
 
