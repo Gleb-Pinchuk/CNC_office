@@ -10,8 +10,8 @@ let hotInstance = null;
 let sheetEditor = null;
 let workbookBaseSnapshot = null;
 let sheetDirtySince = 0;
-const VIEW_STORAGE_KEY = 'cnc_current_view';
-const EDITOR_STATE_KEY = 'cnc_editor_state_v2';
+let lastSheetLocalEditAt = 0;
+const VIEW_STORAGE_KEY = 'cnc_current_view';const EDITOR_STATE_KEY = 'cnc_editor_state_v2';
 const PRESENCE_PING_MS = 1200;
 const HASH_EDITOR_KEY = 'editor';
 let realtimeSaveTimer = null;
@@ -96,12 +96,18 @@ function deepClone(value) {
 }
 
 function markSheetDirty() {
-    sheetDirtySince = Date.now();
+    const now = Date.now();
+    sheetDirtySince = now;
+    lastSheetLocalEditAt = now;
     scheduleRealtimeSheetSave();
 }
 
 function clearSheetDirty() {
     sheetDirtySince = 0;
+}
+
+function hasRecentLocalSheetEdit(windowMs = 15000) {
+    return (Date.now() - Number(lastSheetLocalEditAt || 0)) < windowMs;
 }
 
 function hasPendingSheetChanges() {
@@ -2709,13 +2715,14 @@ function initHandsontable(doc, restoredSelection = null) {
         }, 5000);
     }
     // Периодическое обновление контента (для всех: write/read)
+    // Важно: не перезатираем локальные правки сразу после вставки из Excel.
     window._sheetRefreshInterval = setInterval(async () => {
         if (!currentDocument || currentDocument.id !== doc.id || !sheetEditor) {
             clearInterval(window._sheetRefreshInterval);
             window._sheetRefreshInterval = null;
             return;
         }
-        if (hasPendingSheetChanges() || (sheetEditor?.isEditing && sheetEditor.isEditing())) return;
+        if (hasPendingSheetChanges() || (sheetEditor?.isEditing && sheetEditor.isEditing()) || hasRecentLocalSheetEdit(15000)) return;
         try {
             const endpoint = isCurrentSectionTable()
                 ? `${API_BASE}/section-tables/${currentDocument.id}/`
@@ -2726,6 +2733,14 @@ function initHandsontable(doc, restoredSelection = null) {
             if (!fresh?.updated_at || fresh.updated_at === currentDocument.updated_at) return;
             const payloadFresh = fresh?.content?.custom_sheet || null;
             if (!payloadFresh) return;
+
+            // Если сервер прислал более старую версию, игнорируем её.
+            if (hasRecentLocalSheetEdit(60000)) {
+                const serverTs = Date.parse(String(fresh.updated_at || ''));
+                const localTs = Number(sheetDirtySince || lastSheetLocalEditAt || 0);
+                if (Number.isFinite(serverTs) && localTs && serverTs * 1 < localTs) return;
+            }
+
             const restoreSel = sheetEditor?.getSelectionMeta ? sheetEditor.getSelectionMeta() : null;
             currentDocument.updated_at = fresh.updated_at;
             currentDocument.content = fresh.content || {};
@@ -2751,9 +2766,8 @@ function initHandsontable(doc, restoredSelection = null) {
         } catch (e) {
             console.debug('Sheet refresh skip:', e?.message || e);
         }
-    }, 1000);
+    }, 3000);
 }
-
 function toggleSelectionBold() {
     if (sheetEditor) sheetEditor.toggleBold();
 }
@@ -3265,10 +3279,17 @@ function setupEventListeners() {
         saveEditorState();
         sendPresenceLeave();
     });
-    window.addEventListener('resize', () => {
-        if (currentPresenceItems.length) applyLivePresence(currentPresenceItems);
-    });
-    window.addEventListener('scroll', () => {
-        if (currentPresenceItems.length) applyLivePresence(currentPresenceItems);
-    }, true);
+
+    let presenceUiRaf = null;
+    const schedulePresenceUiRefresh = () => {
+        if (!currentPresenceItems.length) return;
+        if (presenceUiRaf) return;
+        presenceUiRaf = window.requestAnimationFrame(() => {
+            presenceUiRaf = null;
+            applyLivePresence(currentPresenceItems);
+        });
+    };
+
+    window.addEventListener('resize', schedulePresenceUiRefresh);
+    window.addEventListener('scroll', schedulePresenceUiRefresh, true);
 }
