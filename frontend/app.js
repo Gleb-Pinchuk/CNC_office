@@ -1829,9 +1829,8 @@ class CustomSheetEditor {
             for (let c = 0; c < cols; c++) {
                 const w = this.colWidths[c] || 90;
                 const shown = this._getDisplayedValue(r, c, displayMemo);
-                html += `<td class="sheet-cell" contenteditable="false" data-r="${r}" data-c="${c}" style="width:${w}px;min-width:${w}px;max-width:${w}px;height:${h}px;">${escapeHtml(shown)}</td>`;
-            }
-            html += '</tr>';
+                html += `<td class="sheet-cell" tabindex="0" contenteditable="false" data-r="${r}" data-c="${c}" style="width:${w}px;min-width:${w}px;max-width:${w}px;height:${h}px;">${escapeHtml(shown)}</td>`;
+            }            html += '</tr>';
         }
         html += '</tbody></table></div>';
         this.container.innerHTML = html;
@@ -1931,15 +1930,22 @@ class CustomSheetEditor {
                     const startC = start.c1;
 
                     // 1) Values: parse text/plain
-                    const lines = text.replace(/\r/g, '').split('\n');
-                    let matrix = lines.map((ln) => ln.split('\t'));
-                    // Убираем пустые хвостовые строки (часто Excel добавляет trailing \n)
-                    while (matrix.length > 1) {
-                        const last = matrix[matrix.length - 1];
-                        const allEmpty = !last || (last.length === 1 && String(last[0] ?? '').trim() === '');
-                        if (!allEmpty) break;
-                        matrix.pop();
-                    }
+                    // Excel использует \r\n для строк и \t для колонок.
+                    // Очищаем от лишних кавычек, которые Excel добавляет при наличии спецсимволов.
+                    const lines = text.split(/\r?\n/);
+                    let matrix = lines.map((ln) => {
+                        if (!ln.trim() && lines.indexOf(ln) === lines.length - 1) return null;
+                        return ln.split('\t').map(v => {
+                            let val = v.trim();
+                            if (val.startsWith('"') && val.endsWith('"')) {
+                                val = val.slice(1, -1).replace(/""/g, '"');
+                            }
+                            return val;
+                        });
+                    }).filter(row => row !== null);
+
+                    if (matrix.length === 0) return;
+
                     const maxCols = matrix.reduce((m, row) => Math.max(m, row.length), 0);
                     const neededRows = startR + matrix.length;
                     const neededCols = startC + maxCols;
@@ -1954,6 +1960,81 @@ class CustomSheetEditor {
                         this.data.forEach((row) => {
                             for (let i = 0; i < add; i++) row.push('');
                         });
+                    }
+
+                    // Apply values
+                    for (let rr = 0; rr < matrix.length; rr++) {
+                        for (let cc = 0; cc < matrix[rr].length; cc++) {
+                            const val = String(matrix[rr][cc] ?? '');
+                            this.data[startR + rr][startC + cc] = val;
+                        }
+                    }
+
+                    // 2) Styles: try parse HTML table (best-effort)
+                    if (html && html.toLowerCase().includes('<table')) {
+                        const parser = new DOMParser();
+                        const doc = parser.parseFromString(html, 'text/html');
+                        const tbl = doc.querySelector('table');
+                        if (tbl) {
+                            const trList = Array.from(tbl.querySelectorAll('tr'));
+                            for (let rr = 0; rr < trList.length; rr++) {
+                                if (startR + rr >= this.data.length) break;
+                                const cells = Array.from(trList[rr].querySelectorAll('td,th'));
+                                for (let cc = 0; cc < cells.length; cc++) {
+                                    if (startC + cc >= this.data[0].length) break;
+                                    const el = cells[cc];
+                                    
+                                    const st = {};
+                                    // Пытаемся извлечь стили напрямую из свойств элемента
+                                    const style = el.style;
+
+                                    if (style.fontWeight === 'bold' || parseInt(style.fontWeight) >= 600) st.bold = true;
+                                    if (style.fontStyle === 'italic') st.italic = true;
+                                    
+                                    if (style.textAlign) {
+                                        const ta = style.textAlign.toLowerCase();
+                                        if (ta.includes('center')) st.align = 'center';
+                                        else if (ta.includes('right')) st.align = 'right';
+                                        else st.align = 'left';
+                                    }
+                                    
+                                    if (style.verticalAlign) {
+                                        const va = style.verticalAlign.toLowerCase();
+                                        if (va.includes('top')) st.vAlign = 'top';
+                                        else if (va.includes('bottom')) st.vAlign = 'bottom';
+                                        else st.vAlign = 'middle';
+                                    }
+                                    
+                                    if (style.color) st.textColor = style.color;
+                                    if (style.backgroundColor && style.backgroundColor !== 'transparent' && style.backgroundColor !== 'rgba(0, 0, 0, 0)') {
+                                        st.fillColor = style.backgroundColor;
+                                    }
+                                    if (style.fontFamily) st.fontFamily = style.fontFamily;
+                                    if (style.fontSize) {
+                                        const n = parseFloat(style.fontSize);
+                                        if (!isNaN(n)) st.fontSize = n;
+                                    }
+
+                                    if (Object.keys(st).length) {
+                                        this.styles[this._cellKey(startR + rr, startC + cc)] = st;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    this.selection = {
+                        r1: startR,
+                        c1: startC,
+                        r2: startR + matrix.length - 1,
+                        c2: startC + maxCols - 1,
+                    };
+                    this.render();
+                    this._markDirty();
+                } catch (err) {
+                    console.error('❌ Paste error:', err);
+                }
+            });
                     }
 
                     // Apply values
