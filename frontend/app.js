@@ -1943,6 +1943,15 @@ class CustomSheetEditor {
                             return val;
                         });
                     }).filter(row => row !== null);
+                    let matrix = lines.map((ln) => {
+                        if (!ln.trim() && lines.indexOf(ln) === lines.length - 1) return null;
+                        return ln.split('\t').map(v => {
+                            let val = v.trim();
+                            if (val.startsWith('"') && val.endsWith('"')) {
+                                val = val.slice(1, -1).replace(/""/g, '"');
+                            }
+                            return val;
+                        });
 
                     if (matrix.length === 0) return;
 
@@ -2035,93 +2044,7 @@ class CustomSheetEditor {
                     console.error('❌ Paste error:', err);
                 }
             });
-                    }
-
-                    // Apply values
-                    for (let rr = 0; rr < matrix.length; rr++) {
-                        for (let cc = 0; cc < matrix[rr].length; cc++) {
-                            const val = String(matrix[rr][cc] ?? '');
-                            this.data[startR + rr][startC + cc] = val;
-                        }
-                    }
-
-                    // 2) Styles: try parse HTML table (best-effort)
-                    if (html && html.toLowerCase().includes('<table')) {
-                        const parser = new DOMParser();
-                        const doc = parser.parseFromString(html, 'text/html');
-                        const tbl = doc.querySelector('table');
-                        if (tbl) {
-                            const trList = Array.from(tbl.querySelectorAll('tr'));
-                            for (let rr = 0; rr < trList.length; rr++) {
-                                const cells = Array.from(trList[rr].querySelectorAll('td,th'));
-                                for (let cc = 0; cc < cells.length; cc++) {
-                                    const el = cells[cc];
-                                    const styleText = el.getAttribute('style') || '';
-                                    
-                                    const st = {};
-                                    // Пытаемся извлечь стили напрямую из свойств элемента, если style аттрибут пуст
-                                    const computedStyle = el.style;
-
-                                    const getStyle = (prop) => el.style[prop] || '';
-
-                                    const fw = getStyle('fontWeight');
-                                    if (fw && (fw.toLowerCase() === 'bold' || Number(fw) >= 600)) st.bold = true;
-                                    
-                                    const fs = getStyle('fontStyle');
-                                    if (fs && fs.toLowerCase() === 'italic') st.italic = true;
-                                    
-                                    const ta = getStyle('textAlign');
-                                    if (ta) {
-                                        const low = ta.toLowerCase();
-                                        if (low.includes('center')) st.align = 'center';
-                                        else if (low.includes('right')) st.align = 'right';
-                                        else st.align = 'left';
-                                    }
-                                    
-                                    const va = getStyle('verticalAlign');
-                                    if (va) {
-                                        const low = va.toLowerCase();
-                                        if (low.includes('top')) st.vAlign = 'top';
-                                        else if (low.includes('bottom')) st.vAlign = 'bottom';
-                                        else st.vAlign = 'middle';
-                                    }
-                                    
-                                    const color = getStyle('color');
-                                    if (color) st.textColor = color;
-                                    
-                                    const bg = getStyle('backgroundColor') || getStyle('background');
-                                    if (bg && bg !== 'transparent' && bg !== 'rgba(0, 0, 0, 0)') st.fillColor = bg;
-                                    
-                                    const ff = getStyle('fontFamily');
-                                    if (ff) st.fontFamily = ff;
-                                    
-                                    const fontSize = getStyle('fontSize');
-                                    if (fontSize) {
-                                        const n = Number(String(fontSize).replace('px', '').trim());
-                                        if (Number.isFinite(n)) st.fontSize = n;
-                                    }
-
-                                    if (Object.keys(st).length) {
-                                        this.styles[this._cellKey(startR + rr, startC + cc)] = st;
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    this.selection = {
-                        r1: startR,
-                        c1: startC,
-                        r2: startR + matrix.length - 1,
-                        c2: startC + maxCols - 1,
-                    };
-                    this.render();
-                    this._markDirty();
-                } catch (err) {
-                    console.error('❌ Paste error:', err);
-                }
-            });            cell.addEventListener('mouseenter', (e) => {
-                if (this.fillDrag) {
+            cell.addEventListener('mouseenter', (e) => {                if (this.fillDrag) {
                     this.fillDrag.target = { r, c };
                     this._paintFillTarget();
                     return;
@@ -3357,4 +3280,5 @@ function setupEventListeners() {
     window.addEventListener('scroll', () => {
         if (currentPresenceItems.length) applyLivePresence(currentPresenceItems);
     }, true);
+}
 }
