@@ -154,8 +154,8 @@ jobs:
             # ============================================
             # 10. Перезапуск сервисов
             # ============================================
-            echo "🔄 Перезапуск nginx и web..."
-            docker compose restart nginx web
+            echo "🔄 Перезапуск caddy и web..."
+            docker compose restart caddy web
             
             # ============================================
             # 11. Ожидание после перезапуска
@@ -184,25 +184,25 @@ jobs:
             fi
             
             # ============================================
-            # 13. Проверка через Nginx (внешний доступ)
+            # 13. Проверка через Caddy (внешний доступ)
             # ============================================
-            echo "🌐 Проверка через Nginx (внешний доступ)..."
+            echo "🌐 Проверка через Caddy (внешний доступ)..."
             sleep 3
             
-            EXTERNAL_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8002/api/ 2>/dev/null || echo "000")
-            echo "📊 HTTP код от Nginx (external): $EXTERNAL_CODE"
+            EXTERNAL_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/api/ 2>/dev/null || echo "000")
+            echo "📊 HTTP код от Caddy (external): $EXTERNAL_CODE"
             
             if [ "$EXTERNAL_CODE" = "200" ] || [ "$EXTERNAL_CODE" = "401" ] || [ "$EXTERNAL_CODE" = "403" ]; then
-              echo "✅ Nginx проксирует корректно!"
+              echo "✅ Caddy проксирует корректно!"
             elif [ "$EXTERNAL_CODE" = "502" ] || [ "$EXTERNAL_CODE" = "503" ]; then
-              echo "❌ ОШИБКА 502/503 от Nginx — backend не отвечает!"
-              echo "=== Логи Nginx ==="
-              docker compose logs nginx --tail=30
+              echo "❌ ОШИБКА 502/503 от Caddy — backend не отвечает!"
+              echo "=== Логи Caddy ==="
+              docker compose logs caddy --tail=30
               echo "=== Логи Web ==="
               docker compose logs web --tail=30
               exit 1
             else
-              echo "⚠️ Неожиданный код от Nginx: $EXTERNAL_CODE"
+              echo "⚠️ Неожиданный код от Caddy: $EXTERNAL_CODE"
             fi
             
             # ============================================
@@ -218,13 +218,13 @@ jobs:
             echo "✅ ============================================"
             echo "✅ Деплой завершён успешно: $(date)"
             echo "✅ ============================================"
-            echo "🔗 Приложение доступно: http://${{ secrets.DEPLOY_HOST }}:8002/"
+            echo "🔗 Приложение доступно: http://${{ secrets.DEPLOY_HOST }}/"
             echo ""
             echo "📋 Чеклист:"
             echo "  ✅ Контейнеры запущены"
             echo "  ✅ Миграции применены"
             echo "  ✅ Статика собрана"
             echo "  ✅ Backend отвечает"
-            echo "  ✅ Nginx проксирует"
+            echo "  ✅ Caddy проксирует"
             echo ""
             echo "🔄 В браузере: нажмите Ctrl+Shift+R для очистки кэша"
