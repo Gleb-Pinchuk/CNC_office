@@ -1,13 +1,6 @@
 ---
 services:
-  nginx:
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx/nginx.https.conf:/etc/nginx/nginx.conf:ro
-      - static_volume:/app/staticfiles:ro
-      - media_volume:/app/media:ro
-      - ./certbot/www:/var/www/certbot:ro
-      - /etc/letsencrypt:/etc/letsencrypt:ro
-
+  caddy:
+    environment:
+      - SITE_ADDRESS=${SITE_ADDRESS:-app.example.com}
+      - ACME_EMAIL=${ACME_EMAIL:-admin@example.com}

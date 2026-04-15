@@ -1,4 +1,5 @@
 import os
+from hmac import compare_digest
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -19,7 +20,8 @@ def _bot_secret_ok(request) -> bool:
     )
     if not secret:
         return False
-    return request.headers.get("X-CNC-Bot-Token") == secret
+    token = request.headers.get("X-CNC-Bot-Token", "")
+    return compare_digest(token, secret)
 
 
 def _get_bot_owner():

@@ -9,9 +9,8 @@ from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.getenv(
-    "SECRET_KEY", "django-insecure-k+6l5pe((b=%)u1kzr5do+sch9#iker1i5=t+7++yuim=+_+^d"
-)
+DEFAULT_SECRET_KEY = "django-insecure-k+6l5pe((b=%)u1kzr5do+sch9#iker1i5=t+7++yuim=+_+^d"
+SECRET_KEY = os.getenv("SECRET_KEY", DEFAULT_SECRET_KEY)
 
 DEBUG = os.getenv("DEBUG", "False").lower() in ("true", "1", "yes")
 
@@ -22,6 +21,8 @@ for local_host in ("localhost", "127.0.0.1", "[::1]"):
         ALLOWED_HOSTS.append(local_host)
 if not DEBUG and (not ALLOWED_HOSTS or "*" in ALLOWED_HOSTS):
     raise ImproperlyConfigured('In production set ALLOWED_HOSTS without "*"')
+if not DEBUG and SECRET_KEY == DEFAULT_SECRET_KEY:
+    raise ImproperlyConfigured("In production set SECRET_KEY to a unique random value")
 
 # ✅ Application definition
 INSTALLED_APPS = [
@@ -124,7 +125,11 @@ MEDIA_ROOT = BASE_DIR / "media"
 CORS_ALLOW_ALL_ORIGINS = os.getenv(
     "CORS_ALLOW_ALL_ORIGINS", "True" if DEBUG else "False"
 ).lower() in ("true", "1", "yes")
-CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_CREDENTIALS = os.getenv("CORS_ALLOW_CREDENTIALS", "False").lower() in (
+    "true",
+    "1",
+    "yes",
+)
 CORS_ALLOWED_ORIGINS_ENV = os.getenv("CORS_ALLOWED_ORIGINS", "")
 if CORS_ALLOWED_ORIGINS_ENV:
     CORS_ALLOWED_ORIGINS = [
@@ -183,7 +188,17 @@ SESSION_COOKIE_SECURE = os.getenv(
 CSRF_COOKIE_SECURE = os.getenv(
     "CSRF_COOKIE_SECURE", "False" if DEBUG else "True"
 ).lower() in ("true", "1", "yes")
-SECURE_HSTS_SECONDS = int(os.getenv("SECURE_HSTS_SECONDS", "0" if DEBUG else "60"))
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = os.getenv("SESSION_COOKIE_SAMESITE", "Lax")
+CSRF_COOKIE_HTTPONLY = os.getenv("CSRF_COOKIE_HTTPONLY", "True").lower() in (
+    "true",
+    "1",
+    "yes",
+)
+CSRF_COOKIE_SAMESITE = os.getenv("CSRF_COOKIE_SAMESITE", "Lax")
+SECURE_HSTS_SECONDS = int(
+    os.getenv("SECURE_HSTS_SECONDS", "0" if DEBUG else "31536000")
+)
 SECURE_HSTS_INCLUDE_SUBDOMAINS = os.getenv(
     "SECURE_HSTS_INCLUDE_SUBDOMAINS", "False"
 ).lower() in ("true", "1", "yes")
@@ -192,10 +207,17 @@ SECURE_HSTS_PRELOAD = os.getenv("SECURE_HSTS_PRELOAD", "False").lower() in (
     "1",
     "yes",
 )
-SECURE_SSL_REDIRECT = os.getenv("SECURE_SSL_REDIRECT", "False").lower() in (
+SECURE_SSL_REDIRECT = os.getenv("SECURE_SSL_REDIRECT", "False" if DEBUG else "True").lower() in (
     "true",
     "1",
     "yes",
+)
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_REFERRER_POLICY = os.getenv(
+    "SECURE_REFERRER_POLICY", "strict-origin-when-cross-origin"
+)
+SECURE_CROSS_ORIGIN_OPENER_POLICY = os.getenv(
+    "SECURE_CROSS_ORIGIN_OPENER_POLICY", "same-origin"
 )
 
 # ✅ Content Security Policy (разрешаем CDN для handsontable)
@@ -291,19 +313,7 @@ LOGGING = {
     },
 }
 
-# ✅ ПРОДАКШЕН НАСТРОЙКИ (когда DEBUG=False)
+# ✅ Production hardening (when DEBUG=False)
 if not DEBUG:
-    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
-    SECURE_CONTENT_TYPE_NOSNIFF = True
-    SECURE_BROWSER_XSS_FILTER = True
     X_FRAME_OPTIONS = "DENY"
-
-    # ✅ Куки: пока нет HTTPS — оставляем False
-    SESSION_COOKIE_SECURE = False
-    CSRF_COOKIE_SECURE = False
-
-    # ✅ HSTS: пока нет HTTPS — отключаем
-    SECURE_HSTS_SECONDS = 0
-
-    MEDIA_ROOT = BASE_DIR / "media"
-    STATIC_ROOT = BASE_DIR / "staticfiles"
+    SECURE_BROWSER_XSS_FILTER = True

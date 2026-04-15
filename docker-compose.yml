@@ -9,7 +9,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-cnc_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cnc_password}
     volumes:
-      - postgres_data:/var/lib/postgresql/data  # ✅ ИСПРАВЛЕНО
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-cnc_user}']
       interval: 10s
@@ -17,7 +17,7 @@ services:
       retries: 10
       start_period: 30s
     networks:
-      - app-network
+      - db-network
     logging:
       driver: json-file
       options:
@@ -44,7 +44,7 @@ services:
       - DB_HOST=db
       - DB_PORT=5432
       - DEBUG=${DEBUG:-False}
-      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-*}
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-localhost,127.0.0.1}
     depends_on:
       db:
         condition: service_healthy
@@ -55,28 +55,35 @@ services:
       retries: 10
       start_period: 120s
     networks:
-      - app-network
+      - edge-network
+      - db-network
+      - bot-network
     logging:
       driver: json-file
       options:
         max-size: '20m'
         max-file: '5'
 
-  nginx:
-    build:
-      context: ./nginx
-      dockerfile: Dockerfile
-    container_name: cnc_office_nginx
+  caddy:
+    image: caddy:2.9-alpine
+    container_name: cnc_office_caddy
     restart: unless-stopped
     ports:
-      - '8002:80'
+      - '80:80'
+      - '443:443'
     volumes:
-      - static_volume:/app/staticfiles:ro
-      - media_volume:/app/media:ro
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - static_volume:/srv/static:ro
+      - media_volume:/srv/media:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      - SITE_ADDRESS=${SITE_ADDRESS:-:80}
+      - ACME_EMAIL=${ACME_EMAIL:-}
     depends_on:
       - web
     networks:
-      - app-network
+      - edge-network
     logging:
       driver: json-file
       options:
@@ -97,7 +104,7 @@ services:
       web:
         condition: service_started
     networks:
-      - app-network
+      - bot-network
     logging:
       driver: json-file
       options:
@@ -105,12 +112,22 @@ services:
         max-file: '2'
 
 volumes:
-  postgres_data:  # ✅ ИСПРАВЛЕНО (было postgres_)
+  postgres_data:
   static_volume:
   media_volume:
   logs_volume:
+  caddy_data:
+  caddy_config:
 
 networks:
-  app-network:
+  edge-network:
     driver: bridge
-    name: cnc_office_network
+    name: cnc_office_edge
+  db-network:
+    driver: bridge
+    internal: true
+    name: cnc_office_db_internal
+  bot-network:
+    driver: bridge
+    internal: true
+    name: cnc_office_bot_internal

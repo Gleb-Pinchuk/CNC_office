@@ -1,0 +1,38 @@
+{
+  email {$ACME_EMAIL:}
+}
+
+{$SITE_ADDRESS:80} {
+  encode gzip zstd
+
+  # Apply strict headers on all responses.
+  header {
+    -Server
+    X-Content-Type-Options "nosniff"
+    X-Frame-Options "DENY"
+    Referrer-Policy "strict-origin-when-cross-origin"
+    Permissions-Policy "camera=(), microphone=(), geolocation=()"
+  }
+
+  request_body {
+    max_size 100MB
+  }
+
+  @static path /static/*
+  handle @static {
+    root * /srv/static
+    file_server
+    header Cache-Control "public, max-age=2592000, immutable"
+  }
+
+  @media path /media/*
+  handle @media {
+    root * /srv/media
+    file_server
+    header Cache-Control "public, max-age=604800"
+  }
+
+  handle {
+    reverse_proxy web:8000
+  }
+}
