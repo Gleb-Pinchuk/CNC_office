@@ -138,6 +138,46 @@ class TestBotApiViews:
     @override_settings(
         CNC_BOT_API_SECRET="secret-token", CNC_BOT_TABLE_OWNER_USERNAME="bot_owner"
     )
+    def test_set_cell_sends_event_to_nextcloud_writer(self, client, monkeypatch):
+        from django.contrib.auth import get_user_model
+
+        owner = get_user_model().objects.create_user(
+            username="bot_owner", password="pass"
+        )
+        table = SectionTable.objects.create(
+            owner=owner,
+            title="Attendance",
+            section_type="attendance",
+            content={"custom_sheet": {"data": [["Name"]], "name": "Sheet A"}},
+        )
+        seen = {}
+
+        def fake_send(payload):
+            seen.update(payload)
+
+        monkeypatch.setattr("bot_api.views.nextcloud_writer.safe_write_set_cell_event", fake_send)
+        response = client.post(
+            "/api/bot/gateway/",
+            {
+                "action": "set_cell",
+                "table_id": table.id,
+                "sheet_name": "Sheet A",
+                "row": 2,
+                "col": 3,
+                "value": "hello",
+            },
+            format="json",
+            HTTP_X_CNC_BOT_TOKEN="secret-token",
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        assert seen["event"] == "set_cell"
+        assert seen["table_id"] == table.id
+        assert seen["value"] == "hello"
+
+    @override_settings(
+        CNC_BOT_API_SECRET="secret-token", CNC_BOT_TABLE_OWNER_USERNAME="bot_owner"
+    )
     def test_set_cell_rejects_invalid_coordinates(self, client):
         from django.contrib.auth import get_user_model
 

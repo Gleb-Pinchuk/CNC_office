@@ -49,6 +49,24 @@ INSTALLED_APPS = [
 CNC_BOT_API_SECRET = os.getenv("CNC_BOT_API_SECRET", "")
 CNC_BOT_TABLE_OWNER_USERNAME = os.getenv("CNC_BOT_TABLE_OWNER_USERNAME", "")
 
+# Nextcloud (WebDAV) event storage for VK bot writes
+NEXTCLOUD_BOT_WRITE_ENABLED = os.getenv("NEXTCLOUD_BOT_WRITE_ENABLED", "False").lower() in (
+    "true",
+    "1",
+    "yes",
+)
+NEXTCLOUD_BOT_WRITE_STRICT = os.getenv("NEXTCLOUD_BOT_WRITE_STRICT", "False").lower() in (
+    "true",
+    "1",
+    "yes",
+)
+NEXTCLOUD_BASE_URL = os.getenv("NEXTCLOUD_BASE_URL", "")
+NEXTCLOUD_USERNAME = os.getenv("NEXTCLOUD_USERNAME", "")
+NEXTCLOUD_APP_PASSWORD = os.getenv("NEXTCLOUD_APP_PASSWORD", "")
+NEXTCLOUD_BOT_ROOT = os.getenv("NEXTCLOUD_BOT_ROOT", "CNC_office/vk_bot")
+NEXTCLOUD_TIMEOUT_SECONDS = int(os.getenv("NEXTCLOUD_TIMEOUT_SECONDS", "10"))
+NEXTCLOUD_RETRY_COUNT = int(os.getenv("NEXTCLOUD_RETRY_COUNT", "2"))
+
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",

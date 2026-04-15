@@ -1,4 +1,5 @@
 import os
+from datetime import datetime, timezone
 from hmac import compare_digest
 
 from django.conf import settings
@@ -11,7 +12,10 @@ from rest_framework.views import APIView
 
 from sections.models import SectionTable
 
+from .nextcloud import NextcloudEventWriter
 from .sheet_utils import find_sheet_by_name, get_workbook_sheets, set_cell_value
+
+nextcloud_writer = NextcloudEventWriter()
 
 
 def _bot_secret_ok(request) -> bool:
@@ -157,6 +161,19 @@ class BotGatewayView(APIView):
             )
             table.content = content
             table.save(update_fields=["content", "updated_at"])
+        nextcloud_writer.safe_write_set_cell_event(
+            {
+                "event": "set_cell",
+                "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+                "table_id": table.id,
+                "table_title": table.title,
+                "sheet_name": sheet_name or "",
+                "row": row,
+                "col": col,
+                "value": "" if value is None else str(value),
+                "owner_username": owner.username,
+            }
+        )
         return Response({"status": "ok", "table_id": table.id, "row": row, "col": col})
 
 
