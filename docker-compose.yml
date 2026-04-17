@@ -56,7 +56,7 @@ services:
     networks:
       - edge-network
       - db-network
-      - bot-network
+      - app-network
     logging:
       driver: json-file
       options:
@@ -103,8 +103,7 @@ services:
       web:
         condition: service_started
     networks:
-      - bot-network
-    # Добавлено DNS для решения проблем с резолвингом внутри контейнера
+      - app-network
     dns:
       - 8.8.8.8
       - 1.1.1.1
@@ -130,7 +129,8 @@ networks:
     driver: bridge
     internal: true
     name: cnc_office_db_internal
-  bot-network:
+  app-network:
     driver: bridge
-    internal: false  # ИСПРАВЛЕНО: было true, теперь false для доступа в интернет
-    name: cnc_office_bot_internal
+    name: cnc_office_app_internal
+    # internal: false (по умолчанию) - позволяет боту и вебу ходить в Nextcloud/VK,
+    # но доступ извне возможен только через Caddy
