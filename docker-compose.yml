@@ -56,7 +56,7 @@ services:
     networks:
       - edge-network
       - db-network
-      - app-network
+      - internal-app  # <-- Добавлена общая сеть с ботом
     logging:
       driver: json-file
       options:
@@ -103,7 +103,7 @@ services:
       web:
         condition: service_started
     networks:
-      - app-network
+      - internal-app  # <-- Бот в той же сети, что и web
     dns:
       - 8.8.8.8
       - 1.1.1.1
@@ -129,8 +129,8 @@ networks:
     driver: bridge
     internal: true
     name: cnc_office_db_internal
-  app-network:
+  internal-app:
     driver: bridge
+    # internal: false (по умолчанию) - нужно для выхода в Nextcloud/VK
+    # Но доступа извне нет, так как нет портов (ports) и нет в edge-network
     name: cnc_office_app_internal
-    # internal: false (по умолчанию) - позволяет боту и вебу ходить в Nextcloud/VK,
-    # но доступ извне возможен только через Caddy
