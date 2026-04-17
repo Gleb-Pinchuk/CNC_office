@@ -8,7 +8,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-cnc_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cnc_password}
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_/var/lib/postgresql/data
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-cnc_user}']
       interval: 10s
@@ -43,7 +43,7 @@ services:
       - DB_HOST=db
       - DB_PORT=5432
       - DEBUG=${DEBUG:-False}
-      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-localhost,127.0.0.1}
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-localhost,127.0.0.1,web,cnc_office_web}
     depends_on:
       db:
         condition: service_healthy
@@ -74,11 +74,11 @@ services:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - static_volume:/srv/static:ro
       - media_volume:/srv/media:ro
-      - caddy_data:/data
+      - caddy_/data
       - caddy_config:/config
     environment:
-      - SITE_ADDRESS=${SITE_ADDRESS:-:80}
-      - ACME_EMAIL=${ACME_EMAIL:-}
+      - SITE_ADDRESS=:80
+      - ACME_EMAIL=your-email@example.com
     depends_on:
       - web
     networks:
@@ -114,11 +114,11 @@ services:
         max-file: '2'
 
 volumes:
-  postgres_data:
+  postgres_
   static_volume:
   media_volume:
   logs_volume:
-  caddy_data:
+  caddy_
   caddy_config:
 
 networks:
@@ -131,6 +131,4 @@ networks:
     name: cnc_office_db_internal
   app-network:
     driver: bridge
-    # Убрали явное имя, чтобы Docker сам сгенерировал корректное (project_app-network)
-    # Это предотвращает конфликт меток при изменении имен в compose файле
-    internal: false
+    name: cnc_office_app

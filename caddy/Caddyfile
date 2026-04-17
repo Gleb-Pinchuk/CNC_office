@@ -1,38 +1,31 @@
 {
-  email {$ACME_EMAIL:}
+    # Глобальные настройки
+    glebpincuk@gmail.com
+    admin off
 }
 
-{$SITE_ADDRESS:80} {
-  encode gzip zstd
-
-  # Apply strict headers on all responses.
-  header {
-    -Server
-    X-Content-Type-Options "nosniff"
-    X-Frame-Options "DENY"
-    Referrer-Policy "strict-origin-when-cross-origin"
-    Permissions-Policy "camera=(), microphone=(), geolocation=()"
-  }
-
-  request_body {
-    max_size 100MB
-  }
-
-  @static path /static/*
-  handle @static {
-    root * /srv/static
-    file_server
-    header Cache-Control "public, max-age=2592000, immutable"
-  }
-
-  @media path /media/*
-  handle @media {
-    root * /srv/media
-    file_server
-    header Cache-Control "public, max-age=604800"
-  }
-
-  handle {
+# Основной сайт
+https://eli.it.tabdigital.cloud {
     reverse_proxy web:8000
-  }
+
+    # Настройки безопасности
+    header {
+        -Server
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        X-XSS-Protection "1; mode=block"
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+
+    # Логирование
+    log {
+        output stdout
+        format json
+    }
 }
+
+# Если нужно обслуживать статику отдельно (опционально, обычно reverse_proxy справляется)
+# handle_path /static/* {
+#     root * /srv/static
+#     file_server
+# }
