@@ -1,4 +1,3 @@
----
 services:
   db:
     image: postgres:15-alpine
@@ -105,6 +104,10 @@ services:
         condition: service_started
     networks:
       - bot-network
+    # Добавлено DNS для решения проблем с резолвингом внутри контейнера
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     logging:
       driver: json-file
       options:
@@ -129,5 +132,5 @@ networks:
     name: cnc_office_db_internal
   bot-network:
     driver: bridge
-    internal: true
+    internal: false  # ИСПРАВЛЕНО: было true, теперь false для доступа в интернет
     name: cnc_office_bot_internal
