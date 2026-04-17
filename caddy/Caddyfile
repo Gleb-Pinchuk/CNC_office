@@ -1,14 +1,12 @@
 {
-    # Глобальные настройки
     email glebpincuk@gmail.com
     admin off
 }
 
-# Основной сайт
-https://cloud.tassadara.ru {
+# Слушаем только порт 80 (HTTP)
+:80 {
     reverse_proxy web:8000
 
-    # Настройки безопасности
     header {
         -Server
         X-Content-Type-Options "nosniff"
@@ -17,7 +15,6 @@ https://cloud.tassadara.ru {
         Referrer-Policy "strict-origin-when-cross-origin"
     }
 
-    # Логирование
     log {
         output stdout
         format json

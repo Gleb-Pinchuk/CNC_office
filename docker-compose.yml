@@ -54,9 +54,8 @@ services:
       retries: 10
       start_period: 120s
     networks:
-      - edge-network
-      - db-network
       - app-network
+      - db-network
     logging:
       driver: json-file
       options:
@@ -69,20 +68,16 @@ services:
     restart: unless-stopped
     ports:
       - '80:80'
-      - '443:443'
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - static_volume:/srv/static:ro
       - media_volume:/srv/media:ro
       - caddy_data:/data
       - caddy_config:/config
-    environment:
-      - SITE_ADDRESS=${SITE_ADDRESS:-:80}
-      - ACME_EMAIL=${ACME_EMAIL:-}
     depends_on:
       - web
     networks:
-      - edge-network
+      - app-network
     logging:
       driver: json-file
       options:
@@ -122,13 +117,10 @@ volumes:
   caddy_config:
 
 networks:
-  edge-network:
+  app-network:
     driver: bridge
-    name: cnc_office_edge
+    name: cnc_office_app
   db-network:
     driver: bridge
     internal: true
     name: cnc_office_db_internal
-  app-network:
-    driver: bridge
-    name: cnc_office_app_internal
