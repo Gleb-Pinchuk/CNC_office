@@ -56,7 +56,7 @@ services:
     networks:
       - edge-network
       - db-network
-      - internal-app  # <-- Добавлена общая сеть с ботом
+      - app-network
     logging:
       driver: json-file
       options:
@@ -103,7 +103,7 @@ services:
       web:
         condition: service_started
     networks:
-      - internal-app  # <-- Бот в той же сети, что и web
+      - app-network
     dns:
       - 8.8.8.8
       - 1.1.1.1
@@ -129,8 +129,8 @@ networks:
     driver: bridge
     internal: true
     name: cnc_office_db_internal
-  internal-app:
+  app-network:
     driver: bridge
-    # internal: false (по умолчанию) - нужно для выхода в Nextcloud/VK
-    # Но доступа извне нет, так как нет портов (ports) и нет в edge-network
-    name: cnc_office_app_internal
+    # Убрали явное имя, чтобы Docker сам сгенерировал корректное (project_app-network)
+    # Это предотвращает конфликт меток при изменении имен в compose файле
+    internal: false
