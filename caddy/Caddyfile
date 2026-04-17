@@ -1,11 +1,11 @@
 {
     # Глобальные настройки
-    glebpincuk@gmail.com
+    email glebpincuk@gmail.com
     admin off
 }
 
 # Основной сайт
-https://eli.it.tabdigital.cloud {
+https://cloud.tassadara.ru {
     reverse_proxy web:8000
 
     # Настройки безопасности
@@ -23,9 +23,3 @@ https://eli.it.tabdigital.cloud {
         format json
     }
 }
-
-# Если нужно обслуживать статику отдельно (опционально, обычно reverse_proxy справляется)
-# handle_path /static/* {
-#     root * /srv/static
-#     file_server
-# }
