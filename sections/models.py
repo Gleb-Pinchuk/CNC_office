@@ -27,6 +27,15 @@ class SectionTable(models.Model):
     content = models.JSONField(
         default=dict, blank=True, verbose_name="Содержимое (Handsontable data)"
     )
+    needs_nextcloud_push = models.BooleanField(
+        default=False,
+        verbose_name="Есть несинхронизированные изменения для Nextcloud",
+    )
+    last_nextcloud_push_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Последняя отправка в Nextcloud",
+    )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Дата создания")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Дата обновления")
 

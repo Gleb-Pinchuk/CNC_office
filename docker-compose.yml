@@ -108,6 +108,37 @@ services:
         max-size: '5m'
         max-file: '2'
 
+  nextcloud_sync:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cnc_nextcloud_sync
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+    command:
+      - sh
+      - -c
+      - "python manage.py sync_nextcloud_sheet --loop --interval 300"
+    depends_on:
+      db:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    networks:
+      - app-network
+      - db-network
+    logging:
+      driver: json-file
+      options:
+        max-size: '5m'
+        max-file: '2'
+
 volumes:
   postgres_data:
   static_volume:

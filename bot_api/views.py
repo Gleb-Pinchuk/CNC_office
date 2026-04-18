@@ -209,7 +209,8 @@ class BotGatewayView(APIView):
                 content, sheet_name, row, col, "" if value is None else str(value)
             )
             table.content = content
-            table.save(update_fields=["content", "updated_at"])
+            table.needs_nextcloud_push = True
+            table.save(update_fields=["content", "needs_nextcloud_push", "updated_at"])
         logger.info(f"Ячейка обновлена: table_id={table_id}, sheet={sheet_name}, row={row}, col={col}, value={value}")
         return Response({"status": "ok", "table_id": table.id, "row": row, "col": col})
 
@@ -220,4 +221,4 @@ class BotHealthView(APIView):
     def get(self, request):
         if not _bot_secret_ok(request):
             return Response({"ok": False}, status=status.HTTP_403_FORBIDDEN)
-        return Response({"ok": True, "bot_api": "cnc-office"})
+        return Response({"ok": True, "bot_api": "nextcloud-db-sync"})

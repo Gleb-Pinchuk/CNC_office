@@ -45,6 +45,10 @@ INSTALLED_APPS = [
     "bot_api",
 ]
 
+ENABLE_OIDC = os.getenv("ENABLE_OIDC", "False").lower() in ("true", "1", "yes")
+if ENABLE_OIDC:
+    INSTALLED_APPS.append("mozilla_django_oidc")
+
 # Токен для VK-бота (заголовок X-CNC-Bot-Token) и пользователь-владелец таблиц разделов
 CNC_BOT_API_SECRET = os.getenv("CNC_BOT_API_SECRET", "")
 CNC_BOT_TABLE_OWNER_USERNAME = os.getenv("CNC_BOT_TABLE_OWNER_USERNAME", "")
@@ -56,6 +60,12 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+]
+
+if ENABLE_OIDC:
+    MIDDLEWARE.append("mozilla_django_oidc.middleware.SessionRefresh")
+
+MIDDLEWARE += [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -137,8 +147,7 @@ if CORS_ALLOWED_ORIGINS_ENV:
     ]
 
 # ✅ REST Framework
-# 🔧 ИСПРАВЛЕНО: Убран SessionAuthentication — он требует CSRF для POST-запросов
-# Для API с токенами достаточно TokenAuthentication
+# Token по умолчанию; при ENABLE_OIDC добавляется SessionAuthentication (OIDC + POST /session-token/).
 REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
@@ -152,10 +161,44 @@ REST_FRAMEWORK = {
     ],
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework.authentication.TokenAuthentication",
-    ],
+    ]
+    + (
+        ["rest_framework.authentication.SessionAuthentication"]
+        if ENABLE_OIDC
+        else []
+    ),
     "DEFAULT_THROTTLE_CLASSES": [],
     "DEFAULT_THROTTLE_RATES": {"anon": "100/day", "user": "1000/day"},
 }
+
+AUTHENTICATION_BACKENDS = ["django.contrib.auth.backends.ModelBackend"]
+if ENABLE_OIDC:
+    AUTHENTICATION_BACKENDS = [
+        "mozilla_django_oidc.auth.OIDCAuthenticationBackend",
+        "django.contrib.auth.backends.ModelBackend",
+    ]
+    LOGIN_URL = "/oidc/authenticate/"
+    OIDC_RP_CLIENT_ID = os.getenv("OIDC_RP_CLIENT_ID", "").strip()
+    OIDC_RP_CLIENT_SECRET = os.getenv("OIDC_RP_CLIENT_SECRET", "").strip()
+    OIDC_OP_AUTHORIZATION_ENDPOINT = os.getenv(
+        "OIDC_OP_AUTHORIZATION_ENDPOINT", ""
+    ).strip()
+    OIDC_OP_TOKEN_ENDPOINT = os.getenv("OIDC_OP_TOKEN_ENDPOINT", "").strip()
+    OIDC_OP_USER_ENDPOINT = os.getenv("OIDC_OP_USER_ENDPOINT", "").strip()
+    OIDC_RP_SIGN_ALGO = os.getenv("OIDC_RP_SIGN_ALGO", "RS256").strip()
+    OIDC_RP_SCOPES = os.getenv("OIDC_RP_SCOPES", "openid email profile").strip()
+    _oidc_required = {
+        "OIDC_RP_CLIENT_ID": OIDC_RP_CLIENT_ID,
+        "OIDC_RP_CLIENT_SECRET": OIDC_RP_CLIENT_SECRET,
+        "OIDC_OP_AUTHORIZATION_ENDPOINT": OIDC_OP_AUTHORIZATION_ENDPOINT,
+        "OIDC_OP_TOKEN_ENDPOINT": OIDC_OP_TOKEN_ENDPOINT,
+        "OIDC_OP_USER_ENDPOINT": OIDC_OP_USER_ENDPOINT,
+    }
+    for _key, _val in _oidc_required.items():
+        if not _val:
+            raise ImproperlyConfigured(
+                f"ENABLE_OIDC=True: задайте переменную окружения {_key}"
+            )
 
 # ✅ File upload settings (100MB)
 FILE_UPLOAD_MAX_MEMORY_SIZE = 100 * 1024 * 1024

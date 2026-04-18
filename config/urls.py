@@ -27,6 +27,12 @@ router.register(r"audit-logs", AuditLogViewSet, basename="audit-log")
 
 urlpatterns = [
     path("admin/", admin.site.urls),
+]
+
+if getattr(settings, "ENABLE_OIDC", False):
+    urlpatterns.append(path("oidc/", include("mozilla_django_oidc.urls")))
+
+urlpatterns += [
     path("api/", include(router.urls)),
     path("api/bot/", include("bot_api.urls")),
     path("api/users/", include("users.urls")),
@@ -41,7 +47,7 @@ if settings.DEBUG:
 
 urlpatterns += [
     re_path(
-        r"^(?!api/|static/|media/|admin/|favicon\.ico).*$",
+        r"^(?!api/|static/|media/|admin/|oidc/|favicon\.ico).*$",
         TemplateView.as_view(template_name="index.html"),
     ),
 ]

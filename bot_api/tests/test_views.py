@@ -134,6 +134,7 @@ class TestBotApiViews:
         assert response.status_code == status.HTTP_200_OK
         table.refresh_from_db()
         assert table.content["custom_sheet"]["data"][1][1] == "42"
+        assert table.needs_nextcloud_push is True
 
     @override_settings(
         CNC_BOT_API_SECRET="secret-token", CNC_BOT_TABLE_OWNER_USERNAME="bot_owner"
