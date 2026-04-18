@@ -31,7 +31,8 @@ def _get_bot_owner():
     )
     if not username:
         return None
-    return User.objects.filter(username=username).first()
+    owner, _ = User.objects.get_or_create(username=username)
+    return owner
 
 
 class BotGatewayView(APIView):
