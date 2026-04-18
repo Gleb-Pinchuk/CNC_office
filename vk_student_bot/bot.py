@@ -9,6 +9,8 @@ import json
 import os
 import random
 import re
+import logging
+import time
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -20,6 +22,14 @@ try:
     from zoneinfo import ZoneInfo
 except ImportError:
     ZoneInfo = None  # type: ignore
+
+# --- Настройка логирования ---
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[logging.StreamHandler()]
+)
+logger = logging.getLogger(__name__)
 
 # --- env ---
 VK_TOKEN = os.getenv("VK_TOKEN", "").strip()
@@ -41,6 +51,30 @@ GROUP_COL_DEFAULT = 1  # 2-й столбец (Группа)
 STATUS_COL_DEFAULT = 11  # 12-й столбец (учится/отчислен)
 NO_REMARK_TEXT = "Замечаний нет"
 
+# Проверка обязательных переменных окружения
+REQUIRED_ENV = {
+    "VK_TOKEN": VK_TOKEN,
+    "VK_GROUP_ID": str(VK_GROUP_ID) if VK_GROUP_ID else "",
+    "CNC_BOT_SECRET": CNC_BOT_SECRET,
+    "CNC_SECTION_TYPE": CNC_SECTION_TYPE,
+}
+
+for var_name, var_value in REQUIRED_ENV.items():
+    if not var_value:
+        logger.error(f"❌ Критическая ошибка: переменная окружения {var_name} не задана!")
+        raise ValueError(f"Переменная окружения {var_name} обязательна")
+
+if VK_GROUP_ID == 0:
+    logger.error("❌ VK_GROUP_ID должен быть положительным числом (ID группы VK)")
+    raise ValueError("VK_GROUP_ID должен быть положительным числом")
+
+logger.info(f"✅ Конфигурация загружена:")
+logger.info(f"   VK_GROUP_ID: {VK_GROUP_ID}")
+logger.info(f"   CNC_API_BASE: {CNC_API_BASE}")
+logger.info(f"   CNC_SECTION_TYPE: {CNC_SECTION_TYPE}")
+logger.info(f"   CNC_TABLE_TITLE_FRAGMENT: {CNC_TABLE_TITLE_FRAGMENT}")
+logger.info(f"   Направления: {SPREADSHEETS}")
+
 
 def _tz_now() -> datetime:
     if ZoneInfo:
@@ -52,21 +86,70 @@ def _headers() -> dict:
     return {"Content-Type": "application/json", "X-CNC-Bot-Token": CNC_BOT_SECRET}
 
 
+class CNCApiError(Exception):
+    """Исключение для ошибок CNC API"""
+    pass
+
+
 class CNCApi:
     def __init__(self, base: str):
         self.base = base.rstrip("/")
+        self._table_cache: Optional[dict] = None
 
-    def post(self, action: str, payload: dict) -> dict:
+    def post(self, action: str, payload: dict, retries: int = 3) -> dict:
+        """Отправка запроса к API с повторными попытками при ошибке подключения"""
         body = {"action": action, **payload}
-        r = requests.post(
-            f"{self.base}/bot/gateway/", json=body, headers=_headers(), timeout=60
-        )
-        if r.status_code >= 400:
-            raise RuntimeError(r.text or str(r.status_code))
-        return r.json()
+        last_error = None
 
-    def lookup_table(self) -> dict:
-        return self.post(
+        for attempt in range(1, retries + 1):
+            try:
+                logger.debug(f"[Попытка {attempt}/{retries}] POST {action}: {body}")
+                r = requests.post(
+                    f"{self.base}/bot/gateway/",
+                    json=body,
+                    headers=_headers(),
+                    timeout=30
+                )
+                logger.debug(f"Ответ API: статус={r.status_code}, тело={r.text[:500]}")
+
+                if r.status_code >= 400:
+                    error_detail = r.text or str(r.status_code)
+                    if r.status_code == 503:
+                        # Сервис недоступен - пробуем снова
+                        logger.warning(f"API временно недоступен (503), попытка {attempt}/{retries}")
+                        last_error = CNCApiError(f"Сервис временно недоступен: {error_detail}")
+                        continue
+                    raise CNCApiError(f"Ошибка API ({r.status_code}): {error_detail}")
+
+                return r.json()
+
+            except requests.exceptions.ConnectionError as e:
+                last_error = CNCApiError(f"Не удалось подключиться к API ({self.base}): {e}")
+                logger.warning(f"Ошибка подключения (попытка {attempt}/{retries}): {last_error}")
+                if attempt < retries:
+                    time.sleep(2 ** attempt)  # Экспоненциальная задержка
+                    continue
+                break
+            except requests.exceptions.Timeout as e:
+                last_error = CNCApiError(f"Таймаут подключения к API: {e}")
+                logger.warning(f"Таймаут (попытка {attempt}/{retries}): {last_error}")
+                if attempt < retries:
+                    time.sleep(2 ** attempt)
+                    continue
+                break
+            except Exception as e:
+                raise CNCApiError(f"Неожиданная ошибка: {e}")
+
+        raise last_error
+
+    def lookup_table(self, force_refresh: bool = False) -> dict:
+        """Поиск таблицы с кэшированием результата"""
+        if self._table_cache and not force_refresh:
+            return self._table_cache
+
+        logger.info(f"🔍 Поиск таблицы: section_type={CNC_SECTION_TYPE}, title_contains={CNC_TABLE_TITLE_FRAGMENT}")
+
+        result = self.post(
             "lookup_table",
             {
                 "section_type": CNC_SECTION_TYPE,
@@ -74,9 +157,17 @@ class CNCApi:
             },
         )
 
+        self._table_cache = result
+        logger.info(f"✅ Таблица найдена: id={result.get('id')}, title={result.get('title')}")
+        return result
+
+    def invalidate_cache(self):
+        """Сброс кэша таблицы"""
+        self._table_cache = None
+        logger.info("Кэш таблицы сброшен")
 
     def get_sheet_data(
-        self, table_id: int, sheet_name: Optional[str]
+            self, table_id: int, sheet_name: Optional[str]
     ) -> List[List[Any]]:
         data = self.post(
             "get_sheet_data",
@@ -85,7 +176,7 @@ class CNCApi:
         return data.get("data") or []
 
     def set_cell(
-        self, table_id: int, sheet_name: Optional[str], row: int, col: int, value: str
+            self, table_id: int, sheet_name: Optional[str], row: int, col: int, value: str
     ) -> None:
         self.post(
             "set_cell",
@@ -97,747 +188,250 @@ class CNCApi:
                 "value": value,
             },
         )
+        logger.info(f"✏️ Ячейка обновлена: [{sheet_name}] R{row}C{col} = {value}")
 
 
-api = CNCApi(CNC_API_BASE)
+class StudentBot:
+    def __init__(self):
+        if not VK_TOKEN:
+            raise ValueError("VK_TOKEN не задан")
 
-# глобальное состояние сессии
-user_states: Dict[int, dict] = {}
-user_note_col: Dict[int, int] = {}
-_table_cache: Dict[str, Any] = {}
+        self.vk_session = vk_api.VkApi(token=VK_TOKEN)
+        self.long_poll = VkBotLongPoll(self.vk_session, VK_GROUP_ID)
+        self.api = CNCApi(CNC_API_BASE)
+        self.table_info: Optional[dict] = None
 
+        logger.info("🤖 Бот инициализирован")
 
-def _normalize_text(text: str) -> str:
-    return re.sub(r"\s+", " ", (text or "").strip()).lower()
-
-
-def _social_url(value: Any, platform: str) -> str:
-    raw = str(value or "").strip()
-    if not raw or raw == "-":
-        return "-"
-    if raw.startswith("http://") or raw.startswith("https://"):
-        return raw
-    cleaned = raw.lstrip("@").strip()
-    if not cleaned:
-        return "-"
-    if platform == "telegram":
-        return f"https://t.me/{cleaned}"
-    if platform == "vk":
-        return f"https://vk.com/{cleaned}"
-    if platform == "tiktok":
-        return f"https://www.tiktok.com/@{cleaned}"
-    return raw
-
-
-def _table_id() -> int:
-    table_id = _table_cache.get("id") or _table_cache.get("table_id")
-    if table_id:
-        return int(table_id)
-    info = api.lookup_table()
-    _table_cache.update(info)
-    table_id = _table_cache.get("id") or _table_cache.get("table_id")
-    if not table_id:
-        raise RuntimeError("table_id not found")
-    return int(table_id)
-
-
-def _resolve_sheet_click(text: str) -> Optional[str]:
-    names = _table_cache.get("sheet_names") or []
-    if not names:
-        try:
-            info = api.lookup_table()
-            _table_cache.update(info)
-            names = _table_cache.get("sheet_names") or []
-        except Exception:
-            return None
-
-    raw = (text or "").strip()
-    if not raw:
-        return None
-    raw_low = raw.lower()
-    for name in names:
-        n = str(name or "").strip()
-        if not n:
-            continue
-        if raw == n or raw_low == n.lower():
-            return n
-    return None
-
-
-def _get_user_val(user_id: int, key: str) -> Optional[Any]:
-    return user_states.get(user_id, {}).get(key)
-
-
-def _sheet_rows(user_id: int) -> List[List[Any]]:
-    """Текущий лист-направление (worksheet) для конкретного пользователя."""
-    sh = _get_user_val(user_id, "current_spreadsheet")
-    if not sh:
-        return []
-    return api.get_sheet_data(_table_id(), sh)
-
-
-def _detect_col(headers: List[str], keywords: List[str], default_idx: int) -> int:
-    low = [str(h or "").strip().lower() for h in headers]
-    for i, h in enumerate(low):
-        for kw in keywords:
-            if kw in h:
-                return i
-    return default_idx
-
-
-def _group_col(headers: List[str]) -> int:
-    return _detect_col(headers, ["груп"], GROUP_COL_DEFAULT)
-
-
-def _fio_col(headers: List[str]) -> int:
-    return _detect_col(headers, ["фио"], FIO_COL_DEFAULT)
-
-
-def _status_col(headers: List[str]) -> int:
-    # Сначала ищем по явным заголовкам статуса.
-    idx = _detect_col(
-        headers,
-        ["учится", "отчисл", "статус", "состояние", "сост", "обуч"],
-        STATUS_COL_DEFAULT,
-    )
-    return idx
-
-
-def _looks_like_date_header(header: str) -> bool:
-    h = str(header or "").strip().lower()
-    if not h:
-        return False
-    return bool(re.search(r"\d{1,2}\.\d{1,2}|\d{1,2}-\d{1,2}|\d{4}", h))
-
-
-def _normalize_status_value(value: Any) -> str:
-    v = _normalize_text(str(value or ""))
-    if "отчисл" in v:
-        return "Отчислен"
-    if "учит" in v:
-        return "Учится"
-    return ""
-
-
-def _resolve_status_col(rows: List[List[Any]]) -> int:
-    if not rows:
-        return STATUS_COL_DEFAULT
-    headers = [str(h or "") for h in (rows[0] or [])]
-    idx = _status_col(headers)
-    if idx < len(headers) and not _looks_like_date_header(headers[idx]):
-        return idx
-
-    best_idx = idx
-    best_hits = -1
-    max_cols = max((len(r or []) for r in rows), default=0)
-    for col in range(max_cols):
-        if col < len(headers) and _looks_like_date_header(headers[col]):
-            continue
-        hits = 0
-        for row in rows[1:60]:
-            if col < len(row):
-                if _normalize_status_value(row[col]):
-                    hits += 1
-        if hits > best_hits:
-            best_hits = hits
-            best_idx = col
-
-    if best_hits >= 1:
-        return best_idx
-    return idx
-
-
-def get_groups_list(user_id: int) -> List[str]:
-    """Группы берём из 2-го столбца (B) текущего листа пользователя."""
-    rows = _sheet_rows(user_id)
-    if len(rows) < 2:
-        return []
-    headers = [str(x or "").strip() for x in (rows[0] or [])]
-    gc = _group_col(headers)
-    groups = []
-    seen = set()
-    for r in rows[1:]:
-        if gc < len(r):
-            g = str(r[gc] or "").strip()
-            if g and g.lower() not in seen:
-                seen.add(g.lower())
-                groups.append(g)
-    return groups
-
-
-def get_students_map(user_id: int, group_value: Optional[str]) -> List[Tuple[int, str]]:
-    """
-    Возвращает список (sheet_row_index, fio). sheet_row_index — индекс строки в листе (0-based).
-    """
-    rows = _sheet_rows(user_id)
-    if len(rows) < 2:
-        return []
-    headers = [str(x or "").strip() for x in (rows[0] or [])]
-    gc = _group_col(headers)
-    fc = _fio_col(headers)
-    target = (group_value or "").strip().lower()
-    out: List[Tuple[int, str]] = []
-    for idx in range(1, len(rows)):
-        r = rows[idx] or []
-        g = str(r[gc] or "").strip().lower() if gc < len(r) else ""
-        if target and g != target:
-            continue
-        fio = str(r[fc] or "").strip() if fc < len(r) else ""
-        if fio:
-            out.append((idx, fio))
-    return out
-
-
-def header_row(user_id: int) -> List[str]:
-    rows = _sheet_rows(user_id)
-    if not rows:
-        return []
-    return [str(x or "").strip() for x in (rows[0] or [])]
-
-
-def get_student_by_number(
-    user_id: int, row_number: int, note_col: Optional[int] = None
-) -> str:
-    sh = _get_user_val(user_id, "current_spreadsheet")
-    rows = _sheet_rows(user_id)
-    if len(rows) < 2:
-        return "❌ В таблице нет данных!"
-    group = _get_user_val(user_id, "current_group")
-    students_map = get_students_map(user_id, group)
-    if row_number < 1 or row_number > len(students_map):
-        return f"❌ Студент #{row_number} не найден. Всего: {len(students_map)}"
-    headers = rows[0] if rows[0] else []
-    sheet_row_idx = students_map[row_number - 1][0]
-    student_row = rows[sheet_row_idx]
-    data = {}
-    for i, header in enumerate(headers):
-        if i < len(student_row):
-            data[str(header)] = student_row[i]
-    hdr_list = [str(h or "") for h in headers]
-    col_num, week_range = get_current_week_column_meta(hdr_list)
-    use_col = note_col if note_col is not None else col_num
-    current_note = ""
-    if use_col is not None and use_col < len(student_row):
-        current_note = str(student_row[use_col] or "")
-    phone = data.get("Номер телефона") or data.get("Телефон") or "-"
-    telegram_url = _social_url(data.get("Телеграм", "-"), "telegram")
-    vk_url = _social_url(data.get("Вконтакте", "-"), "vk")
-    tiktok_raw = data.get("ТикТок", data.get("Тикток", "-"))
-    tiktok_url = _social_url(tiktok_raw, "tiktok")
-    msg = (
-        f"🔍 Студент #{row_number}\n\n"
-        f"🎓 Направление (лист): {sh or '—'}\n"
-        f"📋 Группа: {group or '—'}\n"
-        f"👤 ФИО: {data.get('ФИО', '-')}\n"
-        f"📱 Телефон: {phone}\n"
-        f"📱 Telegram: {telegram_url}\n"
-        f"💬 ВКонтакте: {vk_url}\n"
-        f"🎵 TikTok: {tiktok_url}\n"
-        f"📅 Неделя (колонка): {week_range if week_range else 'Не определена'}\n"
-        f"📝 Замечание: {current_note or 'Нет'}"
-    )
-    return msg
-
-
-def write_note(
-    user_id: int,
-    row_number: int,
-    note_text: str,
-) -> str:
-    tid = _table_id()
-    sh = _get_user_val(user_id, "current_spreadsheet")
-    rows = _sheet_rows(user_id)
-    if len(rows) < 2:
-        return "❌ В таблице нет данных!"
-    group = _get_user_val(user_id, "current_group")
-    students_map = get_students_map(user_id, group)
-    if row_number < 1 or row_number > len(students_map):
-        return f"❌ Студент #{row_number} не найден!"
-    hdr_list = [str(h or "") for h in (rows[0] or [])]
-    col_num, week_range = get_current_week_column_meta(hdr_list)
-    c = user_note_col.get(user_id)
-    try:
-        c = int(c) if c is not None else None
-    except (TypeError, ValueError):
-        c = None
-    if c is None or c < 0 or c >= len(hdr_list):
-        c = col_num
-    if c is None:
-        return "❌ Не выбрана колонка недели. Нажмите «📅 Колонка даты»."
-    sheet_row_idx = students_map[row_number - 1][0]
-    api.set_cell(tid, sh, sheet_row_idx, c, note_text)
-    headers = [str(h or "") for h in (rows[0] or [])]
-    fio = students_map[row_number - 1][1]
-    return (
-        f"✅ Замечание записано!\n\n"
-        f"🎓 Лист: {sh}\n"
-        f"📋 Группа: {group or '—'}\n"
-        f"👤 Студент: {fio}\n"
-        f"📅 Колонка: {headers[c] if c < len(headers) else c}\n"
-        f"📝 Текст: {note_text}"
-    )
-
-
-def write_status(user_id: int, row_number: int, status_text: str) -> str:
-    tid = _table_id()
-    sh = _get_user_val(user_id, "current_spreadsheet")
-    rows = _sheet_rows(user_id)
-    if len(rows) < 2:
-        return "❌ В таблице нет данных!"
-    hdr = [str(h or "") for h in (rows[0] or [])]
-    c = _resolve_status_col(rows)
-    group = _get_user_val(user_id, "current_group")
-    students_map = get_students_map(user_id, group)
-    if row_number < 1 or row_number > len(students_map):
-        return f"❌ Студент #{row_number} не найден!"
-    sheet_row_idx = students_map[row_number - 1][0]
-    api.set_cell(tid, sh, sheet_row_idx, c, status_text)
-    fio = students_map[row_number - 1][1]
-    col_label = hdr[c] if c < len(hdr) else f"Колонка {c + 1}"
-    return f"✅ Статус обновлён: {status_text}\n👤 {fio}\n📋 {col_label}"
-
-
-def parse_student_button(text: str) -> Tuple[Optional[int], Optional[str]]:
-    m = re.match(r"^(\d+)\.\s*(.+)$", text.strip())
-    if m:
-        return int(m.group(1)), m.group(2).strip()
-    return None, None
-
-
-def get_main_keyboard() -> str:
-    keyboard = {
-        "one_time": False,
-        "inline": False,
-        "buttons": [
-            [
-                {"action": {"type": "text", "label": "🎓 Направления"}, "color": "primary"},
-                {"action": {"type": "text", "label": "📋 Группы"}, "color": "primary"},
-            ],
-            [
-                {"action": {"type": "text", "label": "👤 Студент"}, "color": "primary"},
-                {"action": {"type": "text", "label": "📝 Замечание"}, "color": "primary"},
-            ],
-            [
-                {"action": {"type": "text", "label": "📅 Колонка даты"}, "color": "primary"},
-                {"action": {"type": "text", "label": "🎓 Статус учёбы"}, "color": "primary"},
-            ],
-            [{"action": {"type": "text", "label": "ℹ️ Помощь"}, "color": "secondary"}],
-        ],
-    }
-    return json.dumps(keyboard, ensure_ascii=False)
-
-
-def get_directions_keyboard(sheet_names: List[str]) -> str:
-    dirs = [n for n in sheet_names if n.lower() in {s.lower() for s in SPREADSHEETS}]
-    if not dirs:
-        dirs = sheet_names[:4] or sheet_names
-    buttons = []
-    if dirs:
-        buttons.append(
-            [{"action": {"type": "text", "label": n}, "color": "primary"} for n in dirs]
-        )
-    buttons.append([{"action": {"type": "text", "label": "🔙 Назад"}, "color": "secondary"}])
-    return json.dumps({"one_time": False, "inline": False, "buttons": buttons}, ensure_ascii=False)
-
-
-def get_groups_keyboard(groups: List[str]) -> str:
-    buttons = []
-    for i in range(0, len(groups), 2):
-        row = [{"action": {"type": "text", "label": groups[i + j]}, "color": "primary"} for j in range(2) if i + j < len(groups)]
-        buttons.append(row)
-    buttons.append([{"action": {"type": "text", "label": "🔙 Назад"}, "color": "secondary"}])
-    return json.dumps({"one_time": False, "inline": False, "buttons": buttons}, ensure_ascii=False)
-
-
-def get_students_keyboard(students, page=0, per_page=10) -> str:
-    start = page * per_page
-    end = start + per_page
-    page_students = students[start:end]
-    buttons = []
-    for i in range(0, len(page_students), 2):
-        row = []
-        for j in range(2):
-            if i + j < len(page_students):
-                num, name = page_students[i + j]
-                display_name = name[:20] + "..." if len(name) > 20 else name
-                row.append({"action": {"type": "text", "label": f"{num}. {display_name}"}, "color": "primary"})
-        buttons.append(row)
-    nav_row = []
-    if page > 0:
-        nav_row.append({"action": {"type": "text", "label": "⬅️ Назад"}, "color": "secondary"})
-    if end < len(students):
-        nav_row.append({"action": {"type": "text", "label": "Вперёд ➡️"}, "color": "secondary"})
-    if nav_row:
-        buttons.append(nav_row)
-    buttons.append([{"action": {"type": "text", "label": "🔙 В меню"}, "color": "secondary"}])
-    return json.dumps({"one_time": False, "inline": False, "buttons": buttons}, ensure_ascii=False)
-
-
-def get_back_keyboard() -> str:
-    return json.dumps({"one_time": False, "inline": False, "buttons": [[{"action": {"type": "text", "label": "🔙 Назад"}, "color": "secondary"}]]}, ensure_ascii=False)
-
-
-def get_week_choice_keyboard(options: List[Tuple[int, str]]) -> str:
-    buttons = []
-    row = []
-    for i, (col, label) in enumerate(options[:8]):
-        short = (label[:28] + "…") if len(label) > 30 else label
-        row.append({"action": {"type": "text", "label": f"{i+1}. {short}"}, "color": "primary"})
-        if len(row) == 2:
-            buttons.append(row)
-            row = []
-    if row:
-        buttons.append(row)
-    buttons.append([{"action": {"type": "text", "label": "🔙 Назад"}, "color": "secondary"}])
-    return json.dumps({"one_time": False, "inline": False, "buttons": buttons}, ensure_ascii=False)
-
-
-def get_status_keyboard() -> str:
-    return json.dumps({"one_time": False, "inline": False, "buttons": [[{"action": {"type": "text", "label": "✅ Учится"}, "color": "positive"}, {"action": {"type": "text", "label": "⛔ Отчислен"}, "color": "negative"}], [{"action": {"type": "text", "label": "🔙 Назад"}, "color": "secondary"}]]}, ensure_ascii=False)
-
-
-def get_student_quick_keyboard() -> str:
-    return json.dumps(
-        {
-            "one_time": False,
-            "inline": False,
-            "buttons": [
-                [
-                    {"action": {"type": "text", "label": "✅ Замечаний нет"}, "color": "positive"},
-                    {"action": {"type": "text", "label": "📝 Замечание"}, "color": "primary"},
-                ],
-                [{"action": {"type": "text", "label": "🔙 В меню"}, "color": "secondary"}],
-            ],
-        },
-        ensure_ascii=False,
-    )
-
-
-def send_vk_message(vk, user_id: int, message: str, keyboard: Optional[str] = None) -> None:
-    params = {"user_id": user_id, "message": message, "random_id": random.randint(0, 2**31)}
-    try:
-        if keyboard:
-            params["keyboard"] = keyboard
-        vk.messages.send(**params)
-    except Exception:
-        params.pop("keyboard", None)
-        vk.messages.send(**params)
-
-
-def parse_week_columns(headers: List[str], today: date) -> List[Tuple[int, str, Optional[date], Optional[date]]]:
-    out = []
-    y = today.year
-    ddm = re.compile(r"(\d{1,2})\.(\d{1,2})(?:\.(\d{2,4}))?")
-    range_dash = re.compile(r"(\d{1,2}\.\d{1,2}(?:\.\d{2,4})?)\s*\.?\s*[-–]\s*(\d{1,2}\.\d{1,2}(?:\.\d{2,4})?)")
-
-    def to_date(s: str) -> Optional[date]:
-        s = s.strip()
-        m = re.match(r"^(\d{1,2})\.(\d{1,2})\.(\d{2,4})$", s)
-        if m:
-            d, mo, yy = m.groups()
-            fmt = "%d.%m.%Y" if len(yy) == 4 else "%d.%m.%y"
+    def ensure_table_loaded(self):
+        """Гарантирует загрузку информации о таблице"""
+        if self.table_info is None:
             try:
-                return datetime.strptime(s, fmt).date()
-            except ValueError:
-                return None
-        m2 = re.match(r"^(\d{1,2})\.(\d{1,2})$", s)
-        if not m2:
-            return None
-        d, mo = m2.groups()
-        try:
-            return date(int(y), int(mo), int(d))
-        except ValueError:
-            return None
+                self.table_info = self.api.lookup_table()
+            except CNCApiError as e:
+                logger.error(f"❌ Не удалось загрузить таблицу: {e}")
+                raise
 
-    for c, raw in enumerate(headers):
-        h = str(raw or "").strip()
-        if not h:
-            continue
-        m = range_dash.search(h)
-        if m:
-            left, right = m.group(1), m.group(2)
-            ds, de = to_date(left), to_date(right)
-            if ds and de:
-                if ds <= de:
-                    out.append((c, h, ds, de))
+    def get_directions(self) -> List[str]:
+        """Получение списка направлений (листов таблицы)"""
+        try:
+            self.ensure_table_loaded()
+            table_id = self.table_info["id"]
+
+            # Получаем список листов из таблицы
+            result = self.api.post("list_sheets", {"table_id": table_id})
+            sheet_names = result.get("sheet_names", [])
+
+            # Фильтруем только нужные направления
+            directions = []
+            for sheet in sheet_names:
+                sheet_lower = sheet.lower()
+                for dir_name in SPREADSHEETS:
+                    if dir_name.lower() in sheet_lower:
+                        directions.append(sheet)
+                        break
+
+            if not directions:
+                logger.warning(f"⚠️ Не найдено листов для направлений {SPREADSHEETS}. Доступные листы: {sheet_names}")
+                # Возвращаем все листы если ни один не подошел
+                directions = sheet_names
+
+            return directions
+
+        except CNCApiError as e:
+            logger.error(f"❌ Ошибка получения направлений: {e}")
+            raise
+
+    def get_students_for_direction(self, direction: str) -> List[Dict[str, Any]]:
+        """Получение списка студентов для направления"""
+        try:
+            self.ensure_table_loaded()
+            table_id = self.table_info["id"]
+
+            data = self.api.get_sheet_data(table_id, direction)
+            students = []
+
+            if len(data) < 2:
+                logger.warning(f"⚠️ Лист '{direction}' пуст или содержит менее 2 строк")
+                return students
+
+            # Предполагаем что первая строка - заголовки, вторая+ - данные
+            for row_idx, row in enumerate(data[1:], start=1):
+                if not row or all(cell == "" for cell in row):
+                    continue
+
+                fio = row[FIO_COL_DEFAULT] if len(row) > FIO_COL_DEFAULT else ""
+                group = row[GROUP_COL_DEFAULT] if len(row) > GROUP_COL_DEFAULT else ""
+                status = row[STATUS_COL_DEFAULT] if len(row) > STATUS_COL_DEFAULT else ""
+
+                # Пропускаем отчисленных
+                if status and "отчислен" in status.lower():
+                    continue
+
+                if fio:
+                    students.append({
+                        "fio": fio,
+                        "group": group,
+                        "row_index": row_idx,
+                        "direction": direction,
+                    })
+
+            logger.info(f"📋 Найдено {len(students)} студентов в направлении '{direction}'")
+            return students
+
+        except CNCApiError as e:
+            logger.error(f"❌ Ошибка получения студентов: {e}")
+            raise
+
+    def add_remark(self, student_fio: str, direction: str, remark_text: str) -> bool:
+        """Добавление замечания студенту"""
+        try:
+            self.ensure_table_loaded()
+            table_id = self.table_info["id"]
+
+            # Находим студента
+            students = self.get_students_for_direction(direction)
+            student_row = None
+
+            for student in students:
+                if student_fio.lower() in student["fio"].lower() or student["fio"].lower() in student_fio.lower():
+                    student_row = student
+                    break
+
+            if not student_row:
+                logger.warning(f"⚠️ Студент '{student_fio}' не найден в направлении '{direction}'")
+                return False
+
+            # Колонка для замечаний (предположим, это 13-я колонка, индекс 12)
+            remark_col = 12
+
+            # Получаем текущее замечание
+            current_data = self.api.get_sheet_data(table_id, direction)
+            if len(current_data) > student_row["row_index"]:
+                row_data = current_data[student_row["row_index"]]
+                current_remark = row_data[remark_col] if len(row_data) > remark_col else ""
+
+                # Добавляем новое замечание
+                timestamp = _tz_now().strftime("%d.%m.%Y %H:%M")
+                new_remark = f"{timestamp}: {remark_text}"
+
+                if current_remark and current_remark != NO_REMARK_TEXT:
+                    new_remark = f"{current_remark}\n{new_remark}"
+
+                self.api.set_cell(table_id, direction, student_row["row_index"], remark_col, new_remark)
+                logger.info(f"✅ Добавлено замечание для {student_fio}: {remark_text}")
+                return True
+
+            return False
+
+        except CNCApiError as e:
+            logger.error(f"❌ Ошибка добавления замечания: {e}")
+            raise
+
+    def run(self):
+        """Запуск бота"""
+        logger.info("🚀 Запуск VK бота...")
+
+        try:
+            # Проверяем подключение к API при старте
+            logger.info("🔄 Проверка подключения к CNC API...")
+            self.ensure_table_loaded()
+            logger.info("✅ Подключение к CNC API успешно")
+
+        except CNCApiError as e:
+            logger.error(f"❌ Не удалось подключиться к CNC API при старте: {e}")
+            logger.error("💡 Убедитесь что:")
+            logger.error("   1. Контейнер 'web' запущен и доступен по адресу http://web:8000")
+            logger.error("   2. Переменные окружения CNC_BOT_SECRET и CNC_BOT_TABLE_OWNER_USERNAME заданы корректно")
+            logger.error("   3. В базе данных существует таблица SectionTable с правильным владельцем")
+            raise
+
+        logger.info("📡 Ожидание сообщений от VK LongPoll...")
+
+        for event in self.long_poll.listen():
+            try:
+                if event.type == VkBotEventType.MESSAGE_NEW:
+                    self._handle_message(event.obj.message)
+            except Exception as e:
+                logger.error(f"❌ Ошибка обработки события: {e}", exc_info=True)
+
+    def _handle_message(self, message: dict):
+        """Обработка входящего сообщения"""
+        peer_id = message.get("peer_id")
+        text = message.get("text", "").strip().lower()
+
+        logger.info(f"💬 Сообщение от {peer_id}: {text}")
+
+        try:
+            if text == "начать" or text == "старт":
+                directions = self.get_directions()
+                response = "📚 Доступные направления:\n"
+                for i, dir_name in enumerate(directions, 1):
+                    response += f"{i}. {dir_name}\n"
+                response += "\nВыберите направление (номер или название):"
+                self._send_message(peer_id, response)
+
+            elif text.isdigit():
+                # Выбор направления по номеру
+                directions = self.get_directions()
+                idx = int(text) - 1
+                if 0 <= idx < len(directions):
+                    direction = directions[idx]
+                    students = self.get_students_for_direction(direction)
+                    response = f"👥 Студенты направления '{direction}':\n"
+                    for i, student in enumerate(students[:20], 1):  # Максимум 20
+                        response += f"{i}. {student['fio']} ({student['group']})\n"
+                    if len(students) > 20:
+                        response += f"... и ещё {len(students) - 20}"
+                    self._send_message(peer_id, response)
                 else:
-                    if not re.search(r"\.\d{4}\b|\.\d{2}\b", left) and not re.search(r"\.\d{4}\b|\.\d{2}\b", right):
-                        try:
-                            de2 = date(ds.year + 1, de.month, de.day)
-                            out.append((c, h, ds, de2))
-                        except ValueError:
-                            pass
-                continue
-        parts = ddm.findall(h)
-        if len(parts) < 1:
-            continue
+                    self._send_message(peer_id, "❌ Неверный номер направления")
 
-        def build(idx: int) -> Optional[date]:
-            d_s, m_s, y_s = parts[idx]
-            if y_s:
-                fmt = "%d.%m.%Y" if len(y_s) == 4 else "%d.%m.%y"
-                try:
-                    return datetime.strptime(f"{d_s}.{m_s}.{y_s}", fmt).date()
-                except ValueError:
-                    return None
-            try:
-                return date(y, int(m_s), int(d_s))
-            except ValueError:
-                return None
+            else:
+                # Поиск студента по ФИО
+                directions = self.get_directions()
+                found_students = []
+                for direction in directions:
+                    students = self.get_students_for_direction(direction)
+                    for student in students:
+                        if text in student["fio"].lower():
+                            found_students.append(student)
 
-        ds = build(0)
-        de = build(1) if len(parts) > 1 else ds
-        if not ds or not de:
-            continue
-        if de < ds:
-            try:
-                de = date(ds.year + 1, de.month, de.day)
-            except ValueError:
-                continue
-        out.append((c, h, ds, de))
-    return out
-
-
-def get_current_week_column_meta(headers: List[str]) -> Tuple[Optional[int], Optional[str]]:
-    today = _tz_now().date()
-    parsed = parse_week_columns(headers, today)
-    for col, label, ds, de in parsed:
-        if ds and de and ds <= today <= de:
-            return col, label
-    past = [(de, col, label) for col, label, ds, de in parsed if ds and de and de < today]
-    if past:
-        _, col, label = max(past, key=lambda x: x[0])
-        return col, label
-    future = [(ds, col, label) for col, label, ds, de in parsed if ds and de and ds > today]
-    if future:
-        _, col, label = min(future, key=lambda x: x[0])
-        return col, label
-    return None, None
-
-
-def main() -> None:
-    if not VK_TOKEN or not VK_GROUP_ID:
-        raise SystemExit("Задайте VK_TOKEN и VK_GROUP_ID")
-    if not CNC_BOT_SECRET:
-        raise SystemExit("Задайте CNC_BOT_SECRET")
-
-    vk_session = vk_api.VkApi(token=VK_TOKEN)
-    vk = vk_session.get_api()
-    longpoll = VkBotLongPoll(vk_session, VK_GROUP_ID)
-    print("🤖 VK бот CNC Office запущен")
-
-    try:
-        info = api.lookup_table()
-        _table_cache.update(info)
-    except Exception as e:
-        print("⚠️ lookup_table:", e)
-
-    for event in longpoll.listen():
-        try:
-            if event.type != VkBotEventType.MESSAGE_NEW:
-                continue
-            message = event.obj.message
-            user_id = message["from_id"]
-            text = (message.get("text") or "").strip()
-            text_lower = _normalize_text(text)
-
-            if user_id not in user_states:
-                user_states[user_id] = {}
-            st = user_states[user_id]
-
-            if ("в меню" in text_lower) or (text_lower == "назад") or (
-                "назад" in text_lower and "⬅" not in text and "🔙" in text
-            ):
-                cur_sh = st.get("current_spreadsheet")
-                cur_gr = st.get("current_group")
-                user_states[user_id] = {"current_spreadsheet": cur_sh, "current_group": cur_gr}
-                send_vk_message(vk, user_id, "Меню", get_main_keyboard())
-                continue
-
-            act = st.get("action")
-
-
-            if act == "pick_week_col":
-                opts = st.get("options", [])
-                n_pick = None
-                if text.isdigit():
-                    n_pick = int(text)
+                if found_students:
+                    response = "🔍 Найдены студенты:\n"
+                    for student in found_students[:10]:
+                        response += f"- {student['fio']} ({student['direction']}, {student['group']})\n"
+                    if len(found_students) > 10:
+                        response += f"... и ещё {len(found_students) - 10}"
+                    self._send_message(peer_id, response)
                 else:
-                    mm = re.match(r"^(\d+)\.", text)
-                    if mm:
-                        n_pick = int(mm.group(1))
-                if n_pick and 1 <= n_pick <= len(opts):
-                    col, lab = opts[n_pick - 1]
-                    user_note_col[user_id] = col
-                    st["action"] = None
-                    send_vk_message(vk, user_id, f"✅ Колонка: {lab}", get_main_keyboard())
-                    continue
+                    self._send_message(peer_id, "❌ Студент не найден. Попробуйте ввести ФИО полностью или частично.")
 
-            if act in ("get_student", "write_note", "pick_student_status"):
-                if "впер" in text_lower:
-                    st["page"] = st.get("page", 0) + 1
-                    send_vk_message(vk, user_id, "Следующая страница:", get_students_keyboard(st["students"], st["page"]))
-                    continue
-                if "назад" in text_lower and "меню" not in text_lower:
-                    st["page"] = max(0, st.get("page", 0) - 1)
-                    send_vk_message(vk, user_id, "Предыдущая страница:", get_students_keyboard(st["students"], st["page"]))
-                    continue
-
-                sn, _ = parse_student_button(text)
-                if not sn and text.isdigit():
-                    sn = int(text)
-
-                if sn:
-                    if act == "get_student":
-                        nc = user_note_col.get(user_id)
-                        res = get_student_by_number(user_id, sn, nc)
-                        send_vk_message(vk, user_id, res, get_student_quick_keyboard())
-                        st["action"] = "student_quick_action"
-                        st["row"] = sn
-                    elif act == "write_note":
-                        st["action"] = "write_note_text"
-                        st["row"] = sn
-                        send_vk_message(vk, user_id, f"✍️ Введите текст замечания для студента #{sn}:", get_back_keyboard())
-                    elif act == "pick_student_status":
-                        st["action"] = "set_status"
-                        st["row"] = sn
-                        send_vk_message(vk, user_id, "Выберите статус:", get_status_keyboard())
-                    continue
-
-            if act == "student_quick_action":
-                if "замечаний нет" in text_lower:
-                    res = write_note(user_id, st.get("row"), NO_REMARK_TEXT)
-                    send_vk_message(vk, user_id, f"{res}\n\n✅ Отметка \"{NO_REMARK_TEXT}\" сохранена.", get_main_keyboard())
-                    st["action"] = None
-                    continue
-                if "замечан" in text_lower:
-                    st["action"] = "student_note_text"
-                    send_vk_message(vk, user_id, "✍️ Напишите замечание и отправьте одним сообщением:", get_back_keyboard())
-                    continue
-
-            if act == "student_note_text":
-                res = write_note(user_id, st.get("row"), text)
-                send_vk_message(vk, user_id, res, get_main_keyboard())
-                st["action"] = None
-                continue
-
-            if act == "write_note_text":
-                res = write_note(user_id, st.get("row"), text)
-                send_vk_message(vk, user_id, res, get_main_keyboard())
-                st["action"] = None
-                continue
-
-            if act == "set_status":
-                code = "Отчислен" if "отчислен" in text_lower else "Учится" if "учится" in text_lower else None
-                if code:
-                    res = write_status(user_id, st.get("row"), code)
-                    send_vk_message(vk, user_id, res, get_main_keyboard())
-                    st["action"] = None
-                    continue
-
-            if "направлен" in text_lower:
-                names = _table_cache.get("sheet_names") or []
-                if not names:
-                    try:
-                        info = api.lookup_table()
-                        _table_cache.update(info)
-                        names = _table_cache.get("sheet_names") or []
-                    except Exception as err:
-                        send_vk_message(
-                            vk,
-                            user_id,
-                            f"⚠️ Не удалось загрузить направления: {err}",
-                            get_main_keyboard(),
-                        )
-                        continue
-                if not names:
-                    send_vk_message(vk, user_id, "⚠️ Список направлений пуст.", get_main_keyboard())
-                    continue
-                send_vk_message(vk, user_id, "Выберите направление:", get_directions_keyboard(names))
-                continue
-
-            if "групп" in text_lower and "статус" not in text_lower:
-                if not st.get("current_spreadsheet"):
-                    send_vk_message(vk, user_id, "⚠️ Выберите направление.")
-                    continue
-                groups = get_groups_list(user_id)
-                send_vk_message(vk, user_id, "Выберите группу:", get_groups_keyboard(groups))
-                continue
-
-            if "колонк" in text_lower and "дат" in text_lower:
-                hdr = header_row(user_id)
-                opts = [(c, lab) for c, lab, _, _ in parse_week_columns(hdr, _tz_now().date())]
-                if not opts:
-                    opts = [(i, h) for i, h in enumerate(hdr) if h and re.search(r"\d", h)]
-                if not opts:
-                    send_vk_message(vk, user_id, "❌ Колонки не найдены.")
-                    continue
-                st["action"] = "pick_week_col"
-                st["options"] = opts
-                lines = "\n".join([f"{i+1}. {lab}" for i, (_, lab) in enumerate(opts[:12])])
-                send_vk_message(vk, user_id, f"Выберите колонку:\n{lines}", get_week_choice_keyboard(opts))
-                continue
-
-            if "студент" in text_lower:
-                if not st.get("current_group"):
-                    send_vk_message(vk, user_id, "⚠️ Выберите группу.")
-                    continue
-                s_map = get_students_map(user_id, st.get("current_group"))
-                students = [(i + 1, fio) for i, (_, fio) in enumerate(s_map)]
-                st.update({"action": "get_student", "students": students, "page": 0})
-                send_vk_message(vk, user_id, "Выберите студента:", get_students_keyboard(students, 0))
-                continue
-
-            if "замечан" in text_lower:
-                if not st.get("current_group"):
-                    send_vk_message(vk, user_id, "⚠️ Выберите группу.")
-                    continue
-                s_map = get_students_map(user_id, st.get("current_group"))
-                students = [(i + 1, fio) for i, (_, fio) in enumerate(s_map)]
-                st.update({"action": "write_note", "students": students, "page": 0})
-                send_vk_message(vk, user_id, "Выберите студента:", get_students_keyboard(students, 0))
-                continue
-
-            if "статус" in text_lower and "уч" in text_lower:
-                if not st.get("current_group"):
-                    send_vk_message(vk, user_id, "⚠️ Выберите группу.")
-                    continue
-                s_map = get_students_map(user_id, st.get("current_group"))
-                students = [(i + 1, fio) for i, (_, fio) in enumerate(s_map)]
-                st.update({"action": "pick_student_status", "students": students, "page": 0})
-                send_vk_message(vk, user_id, "Выберите студента:", get_students_keyboard(students, 0))
-                continue
-
-            if "помощ" in text_lower:
-                send_vk_message(vk, user_id, "Бот для работы с таблицами CNC Office.", get_main_keyboard())
-                continue
-
-            chosen_sheet = _resolve_sheet_click(text)
-            if chosen_sheet:
-                st.update({"current_spreadsheet": chosen_sheet, "current_group": None})
-                user_note_col.pop(user_id, None)
-                send_vk_message(vk, user_id, f"✅ Направление: {chosen_sheet}", get_main_keyboard())
-                continue
-
-            if st.get("current_spreadsheet"):
-                try:
-                    groups = get_groups_list(user_id)
-                except Exception:
-                    groups = []
-                if text in groups:
-                    st["current_group"] = text
-                    user_note_col.pop(user_id, None)
-                    send_vk_message(vk, user_id, f"✅ Группа: {text}", get_main_keyboard())
-                    continue
-
-            send_vk_message(vk, user_id, "⚠️ Неизвестная команда. Используйте кнопки.", get_main_keyboard())
+        except CNCApiError as e:
+            error_msg = f"❌ Ошибка работы с таблицей: {e}"
+            logger.error(error_msg)
+            self._send_message(peer_id, error_msg)
         except Exception as e:
-            print("❌ Error:", e)
-            try:
-                if 'vk' in locals() and 'user_id' in locals():
-                    send_vk_message(vk, user_id, f"⚠️ Ошибка обработки: {e}")
-            except Exception:
-                pass
+            error_msg = f"❌ Внутренняя ошибка бота: {e}"
+            logger.error(error_msg, exc_info=True)
+            self._send_message(peer_id, error_msg)
+
+    def _send_message(self, peer_id: int, text: str):
+        """Отправка сообщения пользователю"""
+        try:
+            self.vk_session.method(
+                "messages.send",
+                {
+                    "peer_id": peer_id,
+                    "message": text,
+                    "random_id": random.randint(0, 2 ** 31),
+                },
+            )
+            logger.debug(f"✅ Сообщение отправлено пользователю {peer_id}")
+        except Exception as e:
+            logger.error(f"❌ Ошибка отправки сообщения: {e}")
+
 
 if __name__ == "__main__":
-    main()
+    bot = StudentBot()
+    bot.run()

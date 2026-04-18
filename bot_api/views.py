@@ -1,4 +1,5 @@
 import os
+import logging
 from hmac import compare_digest
 
 from django.conf import settings
@@ -13,12 +14,15 @@ from sections.models import SectionTable
 
 from .sheet_utils import find_sheet_by_name, get_workbook_sheets, set_cell_value
 
+logger = logging.getLogger(__name__)
+
 
 def _bot_secret_ok(request) -> bool:
     secret = getattr(settings, "CNC_BOT_API_SECRET", "") or os.getenv(
         "CNC_BOT_API_SECRET", ""
     )
     if not secret:
+        logger.warning("CNC_BOT_API_SECRET не задан")
         return False
     token = request.headers.get("X-CNC-Bot-Token", "")
     return compare_digest(token, secret)
@@ -30,8 +34,12 @@ def _get_bot_owner():
         "CNC_BOT_TABLE_OWNER_USERNAME", ""
     )
     if not username:
+        logger.error("CNC_BOT_TABLE_OWNER_USERNAME не задан в окружении")
         return None
-    owner, _ = User.objects.get_or_create(username=username)
+    # Создаем пользователя если он не существует
+    owner, created = User.objects.get_or_create(username=username)
+    if created:
+        logger.info(f"Создан пользователь-владелец таблиц: {username}")
     return owner
 
 
@@ -75,21 +83,65 @@ class BotGatewayView(APIView):
     def _find_table(self, owner, section_type: str, title_contains: str):
         qs = SectionTable.objects.filter(owner=owner, section_type=section_type)
         if title_contains:
-            qs = qs.filter(title__icontains=title_contains.strip())
-        return qs.order_by("-updated_at").first()
+            # Нормализуем поисковый запрос: убираем лишние пробелы, заменяем дефисы/подчеркивания
+            search_term = title_contains.strip().lower()
+            # Пробуем найти по частичному совпадению
+            qs = qs.filter(title__icontains=search_term)
+
+        table = qs.order_by("-updated_at").first()
+
+        # Если не нашли, пробуем без учета title_contains (возможно таблица называется иначе)
+        if not table and title_contains:
+            logger.warning(
+                f"Таблица с '{title_contains}' не найдена, пробуем найти любую таблицу типа {section_type}"
+            )
+            qs_fallback = SectionTable.objects.filter(owner=owner, section_type=section_type)
+            table = qs_fallback.order_by("-updated_at").first()
+
+        return table
 
     def _lookup_table(self, request, owner):
         section_type = request.data.get("section_type") or "rangers"
         title_contains = (
-            request.data.get("title_contains") or request.data.get("table_title") or ""
+                request.data.get("title_contains") or request.data.get("table_title") or ""
         )
+
+        logger.info(
+            f"Поиск таблицы: owner={owner.username}, section_type={section_type}, title_contains={title_contains}")
+
         table = self._find_table(owner, section_type, title_contains)
+
         if not table:
+            # Детальная отладка: какие таблицы вообще есть
+            all_tables = SectionTable.objects.filter(owner=owner)
+            if all_tables.exists():
+                all_info = [(t.id, t.title, t.section_type) for t in all_tables]
+                logger.error(f"Таблица не найдена. Доступные таблицы у владельца {owner.username}: {all_info}")
+            else:
+                logger.error(f"У владельца {owner.username} нет ни одной таблицы в БД")
+
+            # Проверяем таблицы без привязки к владельцу (для диагностики)
+            all_any = SectionTable.objects.filter(section_type=section_type)
+            if all_any.exists():
+                other_owners = [(t.id, t.title, t.owner.username if t.owner else 'None') for t in all_any[:10]]
+                logger.warning(f"Таблицы типа '{section_type}' существуют, но у других владельцев: {other_owners}")
+
             return Response(
-                {"detail": "Таблица не найдена"}, status=status.HTTP_404_NOT_FOUND
+                {
+                    "detail": f"Таблица не найдена. Проверьте: 1) CNC_BOT_TABLE_OWNER_USERNAME='{owner.username}' 2) section_type='{section_type}' 3) title содержит '{title_contains}'. Таблицы в БД могут иметь другого владельца.",
+                    "debug": {
+                        "owner_username": owner.username,
+                        "section_type": section_type,
+                        "title_search": title_contains,
+                        "tables_count": all_tables.count(),
+                    }
+                },
+                status=status.HTTP_404_NOT_FOUND
             )
+
+        logger.info(f"Таблица найдена: id={table.id}, title={table.title}")
         sheets, ai = get_workbook_sheets(table.content or {})
-        names = [str(s.get("name") or f"Лист{i+1}") for i, s in enumerate(sheets)]
+        names = [str(s.get("name") or f"Лист{i + 1}") for i, s in enumerate(sheets)]
         return Response(
             {
                 "id": table.id,
@@ -108,7 +160,7 @@ class BotGatewayView(APIView):
                 {"detail": "Таблица не найдена"}, status=status.HTTP_404_NOT_FOUND
             )
         sheets, ai = get_workbook_sheets(table.content or {})
-        names = [str(s.get("name") or f"Лист{i+1}") for i, s in enumerate(sheets)]
+        names = [str(s.get("name") or f"Лист{i + 1}") for i, s in enumerate(sheets)]
         return Response({"sheet_names": names, "active_sheet_index": ai})
 
     def _get_sheet_data(self, request, owner):
@@ -158,6 +210,7 @@ class BotGatewayView(APIView):
             )
             table.content = content
             table.save(update_fields=["content", "updated_at"])
+        logger.info(f"Ячейка обновлена: table_id={table_id}, sheet={sheet_name}, row={row}, col={col}, value={value}")
         return Response({"status": "ok", "table_id": table.id, "row": row, "col": col})
 
 
