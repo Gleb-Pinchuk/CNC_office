@@ -3,6 +3,7 @@ Django settings for config project.
 """
 
 import os
+from datetime import timedelta
 from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured
@@ -52,6 +53,26 @@ if ENABLE_OIDC:
 # Токен для VK-бота (заголовок X-CNC-Bot-Token) и пользователь-владелец таблиц разделов
 CNC_BOT_API_SECRET = os.getenv("CNC_BOT_API_SECRET", "")
 CNC_BOT_TABLE_OWNER_USERNAME = os.getenv("CNC_BOT_TABLE_OWNER_USERNAME", "")
+
+# Индексы колонок в листах Excel (0-based), должны совпадать с vk_student_bot
+BOT_SHEET_FIO_COL = int(os.getenv("BOT_SHEET_FIO_COL", "2"))
+BOT_SHEET_GROUP_COL = int(os.getenv("BOT_SHEET_GROUP_COL", "1"))
+BOT_SHEET_STATUS_COL = int(os.getenv("BOT_SHEET_STATUS_COL", "11"))
+BOT_SHEET_REMARK_COL = int(os.getenv("BOT_SHEET_REMARK_COL", "12"))
+
+# Celery / Redis
+CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://redis:6379/0")
+CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", CELERY_BROKER_URL)
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_SERIALIZER = "json"
+CELERY_TIMEZONE = os.getenv("TIMEZONE", "Europe/Moscow")
+CELERY_BEAT_SCHEDULE = {
+    "push-pending-nextcloud": {
+        "task": "bot_api.tasks.push_pending_nextcloud",
+        "schedule": timedelta(minutes=5),
+    },
+}
 
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",

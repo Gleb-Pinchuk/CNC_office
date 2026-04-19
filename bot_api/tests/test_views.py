@@ -180,3 +180,83 @@ class TestBotApiViews:
         )
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    @override_settings(
+        CNC_BOT_API_SECRET="secret-token",
+        CNC_BOT_TABLE_OWNER_USERNAME="bot_owner",
+        BOT_SHEET_FIO_COL=0,
+        BOT_SHEET_GROUP_COL=1,
+        BOT_SHEET_STATUS_COL=2,
+        BOT_SHEET_REMARK_COL=3,
+    )
+    def test_list_groups_search_set_student_remark(self, client):
+        from django.contrib.auth import get_user_model
+
+        owner = get_user_model().objects.create_user(
+            username="bot_owner", password="pass"
+        )
+        table = SectionTable.objects.create(
+            owner=owner,
+            title="Test",
+            section_type="rangers",
+            content={
+                "custom_sheet": {
+                    "version": 2,
+                    "activeSheetIndex": 0,
+                    "sheets": [
+                        {
+                            "name": "Robo",
+                            "data": [
+                                ["ФИО", "Группа", "Статус", "Замечания"],
+                                ["Иванов Иван", "Г1", "учится", ""],
+                            ],
+                        }
+                    ],
+                }
+            },
+        )
+        lg = client.post(
+            "/api/bot/gateway/",
+            {
+                "action": "list_groups",
+                "table_id": table.id,
+                "sheet_name": "Robo",
+            },
+            format="json",
+            HTTP_X_CNC_BOT_TOKEN="secret-token",
+        )
+        assert lg.status_code == status.HTTP_200_OK
+        assert lg.data["groups"] == ["Г1"]
+
+        sr = client.post(
+            "/api/bot/gateway/",
+            {
+                "action": "search_students",
+                "table_id": table.id,
+                "sheet_name": "Robo",
+                "query": "иван",
+            },
+            format="json",
+            HTTP_X_CNC_BOT_TOKEN="secret-token",
+        )
+        assert sr.status_code == status.HTTP_200_OK
+        assert len(sr.data["students"]) == 1
+
+        rm = client.post(
+            "/api/bot/gateway/",
+            {
+                "action": "set_student_remark",
+                "table_id": table.id,
+                "sheet_name": "Robo",
+                "student_fio": "Иванов",
+                "remark_date": "18.04.2026",
+                "remark_text": "опоздал",
+            },
+            format="json",
+            HTTP_X_CNC_BOT_TOKEN="secret-token",
+        )
+        assert rm.status_code == status.HTTP_200_OK
+        table.refresh_from_db()
+        row = table.content["custom_sheet"]["sheets"][0]["data"][1]
+        assert "18.04.2026" in row[3]
+        assert "опоздал" in row[3]

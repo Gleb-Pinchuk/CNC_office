@@ -1,18 +1,18 @@
 """
-VK-бот: работа с таблицей CNC Office (SectionTable) через /api/bot/gateway/.
-Секреты только из переменных окружения.
+VK-бот мониторинга студентов: данные из БД (SectionTable) через /api/bot/gateway/,
+синхронизация с Nextcloud — Celery на стороне Django (каждые 5 мин).
 """
 
 from __future__ import annotations
 
-import json
+import logging
 import os
 import random
 import re
-import logging
 import time
-from datetime import date, datetime
-from typing import Any, Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any, Dict, List, Optional
 
 import requests
 import vk_api
@@ -23,15 +23,13 @@ try:
 except ImportError:
     ZoneInfo = None  # type: ignore
 
-# --- Настройка логирования ---
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[logging.StreamHandler()]
+    handlers=[logging.StreamHandler()],
 )
 logger = logging.getLogger(__name__)
 
-# --- env ---
 VK_TOKEN = os.getenv("VK_TOKEN", "").strip()
 VK_GROUP_ID = int(os.getenv("VK_GROUP_ID", "0"))
 CNC_API_BASE = os.getenv("CNC_API_BASE", "http://web:8000/api").rstrip("/")
@@ -46,34 +44,18 @@ DIRS_RAW = os.getenv("CNC_DIRECTION_SHEETS", "ЧПУ,РОБО,Аэро,микр�
 SPREADSHEETS = [x.strip() for x in DIRS_RAW.split(",") if x.strip()]
 TZ_NAME = os.getenv("TIMEZONE", "Europe/Moscow")
 
-FIO_COL_DEFAULT = 2  # 3-й столбец
-GROUP_COL_DEFAULT = 1  # 2-й столбец (Группа)
-STATUS_COL_DEFAULT = 11  # 12-й столбец (учится/отчислен)
-NO_REMARK_TEXT = "Замечаний нет"
-
-# Проверка обязательных переменных окружения
 REQUIRED_ENV = {
     "VK_TOKEN": VK_TOKEN,
     "VK_GROUP_ID": str(VK_GROUP_ID) if VK_GROUP_ID else "",
     "CNC_BOT_SECRET": CNC_BOT_SECRET,
     "CNC_SECTION_TYPE": CNC_SECTION_TYPE,
 }
-
 for var_name, var_value in REQUIRED_ENV.items():
     if not var_value:
-        logger.error(f"❌ Критическая ошибка: переменная окружения {var_name} не задана!")
+        logger.error("Переменная окружения %s обязательна", var_name)
         raise ValueError(f"Переменная окружения {var_name} обязательна")
-
 if VK_GROUP_ID == 0:
-    logger.error("❌ VK_GROUP_ID должен быть положительным числом (ID группы VK)")
     raise ValueError("VK_GROUP_ID должен быть положительным числом")
-
-logger.info(f"✅ Конфигурация загружена:")
-logger.info(f"   VK_GROUP_ID: {VK_GROUP_ID}")
-logger.info(f"   CNC_API_BASE: {CNC_API_BASE}")
-logger.info(f"   CNC_SECTION_TYPE: {CNC_SECTION_TYPE}")
-logger.info(f"   CNC_TABLE_TITLE_FRAGMENT: {CNC_TABLE_TITLE_FRAGMENT}")
-logger.info(f"   Направления: {SPREADSHEETS}")
 
 
 def _tz_now() -> datetime:
@@ -87,7 +69,6 @@ def _headers() -> dict:
 
 
 class CNCApiError(Exception):
-    """Исключение для ошибок CNC API"""
     pass
 
 
@@ -97,58 +78,48 @@ class CNCApi:
         self._table_cache: Optional[dict] = None
 
     def post(self, action: str, payload: dict, retries: int = 3) -> dict:
-        """Отправка запроса к API с повторными попытками при ошибке подключения"""
         body = {"action": action, **payload}
         last_error = None
-
         for attempt in range(1, retries + 1):
             try:
-                logger.debug(f"[Попытка {attempt}/{retries}] POST {action}: {body}")
                 r = requests.post(
                     f"{self.base}/bot/gateway/",
                     json=body,
                     headers=_headers(),
-                    timeout=30
+                    timeout=30,
                 )
-                logger.debug(f"Ответ API: статус={r.status_code}, тело={r.text[:500]}")
-
                 if r.status_code >= 400:
                     error_detail = r.text or str(r.status_code)
                     if r.status_code == 503:
-                        # Сервис недоступен - пробуем снова
-                        logger.warning(f"API временно недоступен (503), попытка {attempt}/{retries}")
                         last_error = CNCApiError(f"Сервис временно недоступен: {error_detail}")
                         continue
-                    raise CNCApiError(f"Ошибка API ({r.status_code}): {error_detail}")
-
+                    try:
+                        detail = r.json().get("detail", error_detail)
+                    except Exception:
+                        detail = error_detail
+                    raise CNCApiError(f"Ошибка API ({r.status_code}): {detail}")
                 return r.json()
-
             except requests.exceptions.ConnectionError as e:
-                last_error = CNCApiError(f"Не удалось подключиться к API ({self.base}): {e}")
-                logger.warning(f"Ошибка подключения (попытка {attempt}/{retries}): {last_error}")
+                last_error = CNCApiError(f"Нет подключения к API: {e}")
                 if attempt < retries:
-                    time.sleep(2 ** attempt)  # Экспоненциальная задержка
+                    time.sleep(2**attempt)
                     continue
                 break
             except requests.exceptions.Timeout as e:
-                last_error = CNCApiError(f"Таймаут подключения к API: {e}")
-                logger.warning(f"Таймаут (попытка {attempt}/{retries}): {last_error}")
+                last_error = CNCApiError(f"Таймаут: {e}")
                 if attempt < retries:
-                    time.sleep(2 ** attempt)
+                    time.sleep(2**attempt)
                     continue
                 break
+            except CNCApiError:
+                raise
             except Exception as e:
-                raise CNCApiError(f"Неожиданная ошибка: {e}")
-
+                raise CNCApiError(str(e)) from e
         raise last_error
 
     def lookup_table(self, force_refresh: bool = False) -> dict:
-        """Поиск таблицы с кэшированием результата"""
         if self._table_cache and not force_refresh:
             return self._table_cache
-
-        logger.info(f"🔍 Поиск таблицы: section_type={CNC_SECTION_TYPE}, title_contains={CNC_TABLE_TITLE_FRAGMENT}")
-
         result = self.post(
             "lookup_table",
             {
@@ -156,19 +127,13 @@ class CNCApi:
                 "title_contains": CNC_TABLE_TITLE_FRAGMENT,
             },
         )
-
         self._table_cache = result
-        logger.info(f"✅ Таблица найдена: id={result.get('id')}, title={result.get('title')}")
         return result
 
     def invalidate_cache(self):
-        """Сброс кэша таблицы"""
         self._table_cache = None
-        logger.info("Кэш таблицы сброшен")
 
-    def get_sheet_data(
-            self, table_id: int, sheet_name: Optional[str]
-    ) -> List[List[Any]]:
+    def get_sheet_data(self, table_id: int, sheet_name: Optional[str]) -> List[List[Any]]:
         data = self.post(
             "get_sheet_data",
             {"table_id": table_id, "sheet_name": sheet_name or ""},
@@ -176,7 +141,7 @@ class CNCApi:
         return data.get("data") or []
 
     def set_cell(
-            self, table_id: int, sheet_name: Optional[str], row: int, col: int, value: str
+        self, table_id: int, sheet_name: Optional[str], row: int, col: int, value: str
     ) -> None:
         self.post(
             "set_cell",
@@ -188,250 +153,316 @@ class CNCApi:
                 "value": value,
             },
         )
-        logger.info(f"✏️ Ячейка обновлена: [{sheet_name}] R{row}C{col} = {value}")
+
+    def list_groups(self, table_id: int, sheet_name: str) -> List[str]:
+        r = self.post("list_groups", {"table_id": table_id, "sheet_name": sheet_name})
+        return r.get("groups") or []
+
+    def search_students(
+        self,
+        table_id: int,
+        sheet_name: str,
+        *,
+        group: Optional[str] = None,
+        query: Optional[str] = None,
+    ) -> List[dict]:
+        body: Dict[str, Any] = {"table_id": table_id, "sheet_name": sheet_name}
+        if group:
+            body["group"] = group
+        if query:
+            body["query"] = query
+        r = self.post("search_students", body)
+        return r.get("students") or []
+
+    def set_student_remark(
+        self,
+        table_id: int,
+        sheet_name: str,
+        student_fio: str,
+        remark_date: str,
+        remark_text: Optional[str] = None,
+        group: Optional[str] = None,
+    ) -> dict:
+        body: Dict[str, Any] = {
+            "table_id": table_id,
+            "sheet_name": sheet_name,
+            "student_fio": student_fio,
+            "remark_date": remark_date,
+        }
+        if remark_text is not None:
+            body["remark_text"] = remark_text
+        if group:
+            body["group"] = group
+        return self.post("set_student_remark", body)
+
+
+@dataclass
+class UserCtx:
+    direction: Optional[str] = None
+    group: Optional[str] = None
+
+
+def _pick_direction(directions: List[str], token: str) -> Optional[str]:
+    t = token.strip().lower()
+    for d in directions:
+        if t == d.lower() or t in d.lower() or d.lower() in t:
+            return d
+    if token.strip().isdigit():
+        i = int(token.strip()) - 1
+        if 0 <= i < len(directions):
+            return directions[i]
+    return None
 
 
 class StudentBot:
+    """Сценарии: направление → группа → поиск; замечание с датой через API."""
+
     def __init__(self):
         if not VK_TOKEN:
             raise ValueError("VK_TOKEN не задан")
-
         self.vk_session = vk_api.VkApi(token=VK_TOKEN)
         self.long_poll = VkBotLongPoll(self.vk_session, VK_GROUP_ID)
         self.api = CNCApi(CNC_API_BASE)
         self.table_info: Optional[dict] = None
-
-        logger.info("🤖 Бот инициализирован")
+        self._ctx: Dict[int, UserCtx] = {}
 
     def ensure_table_loaded(self):
-        """Гарантирует загрузку информации о таблице"""
         if self.table_info is None:
-            try:
-                self.table_info = self.api.lookup_table()
-            except CNCApiError as e:
-                logger.error(f"❌ Не удалось загрузить таблицу: {e}")
-                raise
+            self.table_info = self.api.lookup_table()
+
+    def _ctx_for(self, peer_id: int) -> UserCtx:
+        if peer_id not in self._ctx:
+            self._ctx[peer_id] = UserCtx()
+        return self._ctx[peer_id]
 
     def get_directions(self) -> List[str]:
-        """Получение списка направлений (листов таблицы)"""
-        try:
-            self.ensure_table_loaded()
-            table_id = self.table_info["id"]
-
-            # Получаем список листов из таблицы
-            result = self.api.post("list_sheets", {"table_id": table_id})
-            sheet_names = result.get("sheet_names", [])
-
-            # Фильтруем только нужные направления
-            directions = []
-            for sheet in sheet_names:
-                sheet_lower = sheet.lower()
-                for dir_name in SPREADSHEETS:
-                    if dir_name.lower() in sheet_lower:
-                        directions.append(sheet)
-                        break
-
-            if not directions:
-                logger.warning(f"⚠️ Не найдено листов для направлений {SPREADSHEETS}. Доступные листы: {sheet_names}")
-                # Возвращаем все листы если ни один не подошел
-                directions = sheet_names
-
-            return directions
-
-        except CNCApiError as e:
-            logger.error(f"❌ Ошибка получения направлений: {e}")
-            raise
-
-    def get_students_for_direction(self, direction: str) -> List[Dict[str, Any]]:
-        """Получение списка студентов для направления"""
-        try:
-            self.ensure_table_loaded()
-            table_id = self.table_info["id"]
-
-            data = self.api.get_sheet_data(table_id, direction)
-            students = []
-
-            if len(data) < 2:
-                logger.warning(f"⚠️ Лист '{direction}' пуст или содержит менее 2 строк")
-                return students
-
-            # Предполагаем что первая строка - заголовки, вторая+ - данные
-            for row_idx, row in enumerate(data[1:], start=1):
-                if not row or all(cell == "" for cell in row):
-                    continue
-
-                fio = row[FIO_COL_DEFAULT] if len(row) > FIO_COL_DEFAULT else ""
-                group = row[GROUP_COL_DEFAULT] if len(row) > GROUP_COL_DEFAULT else ""
-                status = row[STATUS_COL_DEFAULT] if len(row) > STATUS_COL_DEFAULT else ""
-
-                # Пропускаем отчисленных
-                if status and "отчислен" in status.lower():
-                    continue
-
-                if fio:
-                    students.append({
-                        "fio": fio,
-                        "group": group,
-                        "row_index": row_idx,
-                        "direction": direction,
-                    })
-
-            logger.info(f"📋 Найдено {len(students)} студентов в направлении '{direction}'")
-            return students
-
-        except CNCApiError as e:
-            logger.error(f"❌ Ошибка получения студентов: {e}")
-            raise
-
-    def add_remark(self, student_fio: str, direction: str, remark_text: str) -> bool:
-        """Добавление замечания студенту"""
-        try:
-            self.ensure_table_loaded()
-            table_id = self.table_info["id"]
-
-            # Находим студента
-            students = self.get_students_for_direction(direction)
-            student_row = None
-
-            for student in students:
-                if student_fio.lower() in student["fio"].lower() or student["fio"].lower() in student_fio.lower():
-                    student_row = student
+        self.ensure_table_loaded()
+        table_id = self.table_info["id"]
+        result = self.api.post("list_sheets", {"table_id": table_id})
+        sheet_names = result.get("sheet_names", [])
+        directions = []
+        for sheet in sheet_names:
+            sl = sheet.lower()
+            for dir_name in SPREADSHEETS:
+                if dir_name.lower() in sl:
+                    directions.append(sheet)
                     break
-
-            if not student_row:
-                logger.warning(f"⚠️ Студент '{student_fio}' не найден в направлении '{direction}'")
-                return False
-
-            # Колонка для замечаний (предположим, это 13-я колонка, индекс 12)
-            remark_col = 12
-
-            # Получаем текущее замечание
-            current_data = self.api.get_sheet_data(table_id, direction)
-            if len(current_data) > student_row["row_index"]:
-                row_data = current_data[student_row["row_index"]]
-                current_remark = row_data[remark_col] if len(row_data) > remark_col else ""
-
-                # Добавляем новое замечание
-                timestamp = _tz_now().strftime("%d.%m.%Y %H:%M")
-                new_remark = f"{timestamp}: {remark_text}"
-
-                if current_remark and current_remark != NO_REMARK_TEXT:
-                    new_remark = f"{current_remark}\n{new_remark}"
-
-                self.api.set_cell(table_id, direction, student_row["row_index"], remark_col, new_remark)
-                logger.info(f"✅ Добавлено замечание для {student_fio}: {remark_text}")
-                return True
-
-            return False
-
-        except CNCApiError as e:
-            logger.error(f"❌ Ошибка добавления замечания: {e}")
-            raise
+        if not directions:
+            directions = sheet_names
+        return directions
 
     def run(self):
-        """Запуск бота"""
-        logger.info("🚀 Запуск VK бота...")
-
-        try:
-            # Проверяем подключение к API при старте
-            logger.info("🔄 Проверка подключения к CNC API...")
-            self.ensure_table_loaded()
-            logger.info("✅ Подключение к CNC API успешно")
-
-        except CNCApiError as e:
-            logger.error(f"❌ Не удалось подключиться к CNC API при старте: {e}")
-            logger.error("💡 Убедитесь что:")
-            logger.error("   1. Контейнер 'web' запущен и доступен по адресу http://web:8000")
-            logger.error("   2. Переменные окружения CNC_BOT_SECRET и CNC_BOT_TABLE_OWNER_USERNAME заданы корректно")
-            logger.error("   3. В базе данных существует таблица SectionTable с правильным владельцем")
-            raise
-
-        logger.info("📡 Ожидание сообщений от VK LongPoll...")
-
+        logger.info("Запуск VK-бота мониторинга…")
+        self.ensure_table_loaded()
+        logger.info("Таблица id=%s", self.table_info.get("id"))
         for event in self.long_poll.listen():
             try:
                 if event.type == VkBotEventType.MESSAGE_NEW:
                     self._handle_message(event.obj.message)
             except Exception as e:
-                logger.error(f"❌ Ошибка обработки события: {e}", exc_info=True)
+                logger.error("Ошибка обработки события: %s", e, exc_info=True)
 
     def _handle_message(self, message: dict):
-        """Обработка входящего сообщения"""
         peer_id = message.get("peer_id")
-        text = message.get("text", "").strip().lower()
+        raw = message.get("text", "").strip()
+        text = raw.lower()
+        ctx = self._ctx_for(peer_id)
 
-        logger.info(f"💬 Сообщение от {peer_id}: {text}")
+        logger.info("Сообщение peer=%s: %s", peer_id, raw[:200])
 
         try:
-            if text == "начать" or text == "старт":
-                directions = self.get_directions()
-                response = "📚 Доступные направления:\n"
-                for i, dir_name in enumerate(directions, 1):
-                    response += f"{i}. {dir_name}\n"
-                response += "\nВыберите направление (номер или название):"
-                self._send_message(peer_id, response)
+            if text in ("помощь", "help", "?", "меню"):
+                self._send_help(peer_id)
+                return
 
-            elif text.isdigit():
-                # Выбор направления по номеру
-                directions = self.get_directions()
-                idx = int(text) - 1
-                if 0 <= idx < len(directions):
-                    direction = directions[idx]
-                    students = self.get_students_for_direction(direction)
-                    response = f"👥 Студенты направления '{direction}':\n"
-                    for i, student in enumerate(students[:20], 1):  # Максимум 20
-                        response += f"{i}. {student['fio']} ({student['group']})\n"
-                    if len(students) > 20:
-                        response += f"... и ещё {len(students) - 20}"
-                    self._send_message(peer_id, response)
-                else:
-                    self._send_message(peer_id, "❌ Неверный номер направления")
+            if text in ("начать", "старт", "направление", "направления"):
+                dirs = self.get_directions()
+                lines = ["📚 Направления (листы Excel):"]
+                for i, d in enumerate(dirs, 1):
+                    lines.append(f"{i}. {d}")
+                lines.append("")
+                lines.append("Выберите: номер или название, затем «группы» / «группа …».")
+                self._send(peer_id, "\n".join(lines))
+                return
 
-            else:
-                # Поиск студента по ФИО
-                directions = self.get_directions()
-                found_students = []
-                for direction in directions:
-                    students = self.get_students_for_direction(direction)
-                    for student in students:
-                        if text in student["fio"].lower():
-                            found_students.append(student)
+            dirs = self.get_directions()
+            picked = _pick_direction(dirs, raw.strip())
+            if picked and (raw.strip().isdigit() or len(raw.strip()) >= 2):
+                ctx.direction = picked
+                self._send(
+                    peer_id,
+                    f"✅ Направление: {picked}\n"
+                    f"Дальше: «группы» — список групп, «группа ИВТ-1», "
+                    f"«кто Иванов» — поиск.\n"
+                    f"Замечание: «замечание {picked} ДД.ММ.ГГГГ ФИО | текст»\n"
+                    f"Без замечаний: «нет замечаний {picked} ДД.ММ.ГГГГ ФИО»",
+                )
+                return
 
-                if found_students:
-                    response = "🔍 Найдены студенты:\n"
-                    for student in found_students[:10]:
-                        response += f"- {student['fio']} ({student['direction']}, {student['group']})\n"
-                    if len(found_students) > 10:
-                        response += f"... и ещё {len(found_students) - 10}"
-                    self._send_message(peer_id, response)
-                else:
-                    self._send_message(peer_id, "❌ Студент не найден. Попробуйте ввести ФИО полностью или частично.")
+            m_groups = re.match(r"^группы?\s*$", text, re.I)
+            if m_groups:
+                self._cmd_groups(peer_id, ctx, None)
+                return
+
+            m_group = re.match(r"^группа\s+(.+)$", raw, re.I)
+            if m_group:
+                ctx.group = m_group.group(1).strip()
+                self._send(peer_id, f"✅ Группа: {ctx.group}")
+                return
+
+            m_who = re.match(r"^кто\s+(.+)$", raw, re.I)
+            if m_who:
+                self._cmd_who(peer_id, ctx, m_who.group(1).strip())
+                return
+
+            m_rm = re.match(
+                r"^замечание\s+(.+?)\s+(\d{1,2}\.\d{1,2}\.\d{2,4})\s+(.+?)\s*\|\s*(.+)$",
+                raw,
+                re.I | re.S,
+            )
+            if m_rm:
+                sheet = m_rm.group(1).strip()
+                dt = m_rm.group(2).strip()
+                fio = m_rm.group(3).strip()
+                rtxt = m_rm.group(4).strip()
+                self._cmd_remark(peer_id, sheet, dt, fio, rtxt, ctx.group)
+                return
+
+            m_no = re.match(
+                r"^(?:нет\s+замечаний|замечаний\s+нет)\s+(.+?)\s+(\d{1,2}\.\d{1,2}\.\d{2,4})\s+(.+)$",
+                raw,
+                re.I | re.S,
+            )
+            if m_no:
+                sheet = m_no.group(1).strip()
+                dt = m_no.group(2).strip()
+                fio = m_no.group(3).strip()
+                self._cmd_remark(peer_id, sheet, dt, fio, None, ctx.group)
+                return
+
+            if len(text) >= 3:
+                self._cmd_search_all(peer_id, raw.strip())
+                return
+
+            self._send(peer_id, "Не понял команду. Напишите «помощь».")
 
         except CNCApiError as e:
-            error_msg = f"❌ Ошибка работы с таблицей: {e}"
-            logger.error(error_msg)
-            self._send_message(peer_id, error_msg)
+            self._send(peer_id, f"❌ {e}")
         except Exception as e:
-            error_msg = f"❌ Внутренняя ошибка бота: {e}"
-            logger.error(error_msg, exc_info=True)
-            self._send_message(peer_id, error_msg)
+            logger.exception("handle_message")
+            self._send(peer_id, f"❌ Ошибка: {e}")
 
-    def _send_message(self, peer_id: int, text: str):
-        """Отправка сообщения пользователю"""
+    def _send_help(self, peer_id: int):
+        self._send(
+            peer_id,
+            "📖 Мониторинг студентов\n\n"
+            "• начать — список направлений\n"
+            "• номер или название листа — выбрать направление\n"
+            "• группы — список групп (нужно выбранное направление)\n"
+            "• группа ИВТ-1 — фильтр по группе\n"
+            "• кто Иванов — поиск в текущем направлении\n"
+            "• замечание <лист> ДД.ММ.ГГГГ ФИО | текст замечания\n"
+            "• нет замечаний <лист> ДД.ММ.ГГГГ ФИО\n\n"
+            "Лист укажите как в Excel (например РОБО). "
+            "Синхронизация с Nextcloud — каждые 5 мин (Celery).",
+        )
+
+    def _resolve_sheet(self, token: str) -> Optional[str]:
+        dirs = self.get_directions()
+        return _pick_direction(dirs, token)
+
+    def _cmd_groups(self, peer_id: int, ctx: UserCtx, _arg):
+        if not ctx.direction:
+            self._send(peer_id, "Сначала выберите направление (начать → номер).")
+            return
+        self.ensure_table_loaded()
+        tid = self.table_info["id"]
+        groups = self.api.list_groups(tid, ctx.direction)
+        if not groups:
+            self._send(peer_id, "Группы не найдены.")
+            return
+        self._send(peer_id, "📂 Группы:\n" + "\n".join(f"• {g}" for g in groups[:40]))
+
+    def _cmd_who(self, peer_id: int, ctx: UserCtx, q: str):
+        if not ctx.direction:
+            self._send(peer_id, "Сначала выберите направление.")
+            return
+        self.ensure_table_loaded()
+        tid = self.table_info["id"]
+        st = self.api.search_students(
+            tid, ctx.direction, group=ctx.group, query=q
+        )
+        if not st:
+            self._send(peer_id, "Никого не найдено.")
+            return
+        lines = [f"Найдено: {len(st)}"]
+        for s in st[:15]:
+            lines.append(f"• {s.get('fio')} ({s.get('group')})")
+        if len(st) > 15:
+            lines.append(f"… ещё {len(st) - 15}")
+        self._send(peer_id, "\n".join(lines))
+
+    def _cmd_search_all(self, peer_id: int, q: str):
+        self.ensure_table_loaded()
+        tid = self.table_info["id"]
+        found = []
+        for d in self.get_directions():
+            for s in self.api.search_students(tid, d, query=q.lower()):
+                found.append((d, s))
+        if not found:
+            self._send(peer_id, "❌ Не найдено. Уточните ФИО или выберите направление.")
+            return
+        lines = []
+        for d, s in found[:12]:
+            lines.append(f"• {s.get('fio')} — {d}, гр. {s.get('group')}")
+        if len(found) > 12:
+            lines.append(f"… всего совпадений: {len(found)}")
+        self._send(peer_id, "\n".join(lines))
+
+    def _cmd_remark(
+        self,
+        peer_id: int,
+        sheet_token: str,
+        date_str: str,
+        fio: str,
+        text: Optional[str],
+        group: Optional[str],
+    ):
+        sheet = self._resolve_sheet(sheet_token) or sheet_token
+        self.ensure_table_loaded()
+        tid = self.table_info["id"]
         try:
-            self.vk_session.method(
-                "messages.send",
-                {
-                    "peer_id": peer_id,
-                    "message": text,
-                    "random_id": random.randint(0, 2 ** 31),
-                },
+            self.api.set_student_remark(
+                tid,
+                sheet,
+                fio,
+                date_str,
+                remark_text=text,
+                group=group,
             )
-            logger.debug(f"✅ Сообщение отправлено пользователю {peer_id}")
-        except Exception as e:
-            logger.error(f"❌ Ошибка отправки сообщения: {e}")
+        except CNCApiError as e:
+            if "409" in str(e) or "Несколько" in str(e):
+                self._send(
+                    peer_id,
+                    "Несколько студентов подходят. Укажите «группа …» и повторите.",
+                )
+                return
+            raise
+        if text:
+            self._send(peer_id, f"✅ Замечание на {date_str} записано для {fio}.")
+        else:
+            self._send(peer_id, f"✅ На {date_str} для {fio}: замечаний нет.")
+
+    def _send(self, peer_id: int, text: str):
+        self.vk_session.method(
+            "messages.send",
+            {
+                "peer_id": peer_id,
+                "message": text[:3900],
+                "random_id": random.randint(0, 2**31),
+            },
+        )
 
 
 if __name__ == "__main__":
-    bot = StudentBot()
-    bot.run()
+    StudentBot().run()

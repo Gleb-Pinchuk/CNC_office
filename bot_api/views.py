@@ -12,7 +12,9 @@ from rest_framework.views import APIView
 
 from sections.models import SectionTable
 
+from .remark_utils import parse_input_date, set_remark_for_date
 from .sheet_utils import find_sheet_by_name, get_workbook_sheets, set_cell_value
+from .student_sheet import find_one_student_row, list_groups, search_students
 
 logger = logging.getLogger(__name__)
 
@@ -75,9 +77,169 @@ class BotGatewayView(APIView):
             return self._get_sheet_data(request, owner)
         if action == "set_cell":
             return self._set_cell(request, owner)
+        if action == "list_groups":
+            return self._list_groups(request, owner)
+        if action == "search_students":
+            return self._search_students(request, owner)
+        if action == "set_student_remark":
+            return self._set_student_remark(request, owner)
         return Response(
             {"detail": f"Неизвестное action: {action}"},
             status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    def _sheet_data_for_table(self, table: SectionTable, sheet_name: str):
+        sheets, _ = get_workbook_sheets(table.content or {})
+        sh = find_sheet_by_name(sheets, sheet_name)
+        if not sh:
+            return None, None
+        return sh, sh.get("data") or []
+
+    def _bot_cols(self):
+        return (
+            int(getattr(settings, "BOT_SHEET_FIO_COL", 2)),
+            int(getattr(settings, "BOT_SHEET_GROUP_COL", 1)),
+            int(getattr(settings, "BOT_SHEET_STATUS_COL", 11)),
+            int(getattr(settings, "BOT_SHEET_REMARK_COL", 12)),
+        )
+
+    def _list_groups(self, request, owner):
+        table_id = request.data.get("table_id")
+        sheet_name = request.data.get("sheet_name")
+        table = SectionTable.objects.filter(owner=owner, id=table_id).first()
+        if not table:
+            return Response(
+                {"detail": "Таблица не найдена"}, status=status.HTTP_404_NOT_FOUND
+            )
+        _, _, _, gcol = self._bot_cols()
+        _, data = self._sheet_data_for_table(table, sheet_name)
+        if data is None:
+            return Response(
+                {"detail": "Лист не найден"}, status=status.HTTP_404_NOT_FOUND
+            )
+        groups = list_groups(data, gcol)
+        return Response({"groups": groups, "sheet_name": sheet_name})
+
+    def _search_students(self, request, owner):
+        table_id = request.data.get("table_id")
+        sheet_name = request.data.get("sheet_name")
+        group_filter = request.data.get("group") or request.data.get("group_name")
+        query = request.data.get("query") or request.data.get("q")
+        table = SectionTable.objects.filter(owner=owner, id=table_id).first()
+        if not table:
+            return Response(
+                {"detail": "Таблица не найдена"}, status=status.HTTP_404_NOT_FOUND
+            )
+        fio_c, gcol, st_c, _ = self._bot_cols()
+        _, data = self._sheet_data_for_table(table, sheet_name)
+        if data is None:
+            return Response(
+                {"detail": "Лист не найден"}, status=status.HTTP_404_NOT_FOUND
+            )
+        students = search_students(
+            data,
+            fio_col=fio_c,
+            group_col=gcol,
+            status_col=st_c,
+            group_filter=group_filter,
+            query=query,
+        )
+        return Response({"students": students, "sheet_name": sheet_name})
+
+    def _set_student_remark(self, request, owner):
+        table_id = request.data.get("table_id")
+        sheet_name = request.data.get("sheet_name")
+        student_fio = (request.data.get("student_fio") or "").strip()
+        remark_date_raw = (request.data.get("remark_date") or "").strip()
+        remark_text = request.data.get("remark_text")
+        if remark_text is not None:
+            remark_text = str(remark_text).strip()
+        group_filter = request.data.get("group") or request.data.get("group_name")
+        no_phrase = (request.data.get("no_remarks_phrase") or "замечаний нет").strip()
+
+        if not student_fio or not remark_date_raw:
+            return Response(
+                {"detail": "Нужны student_fio и remark_date (ДД.ММ.ГГГГ или ГГГГ-ММ-ДД)"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        rd = parse_input_date(remark_date_raw)
+        if not rd:
+            return Response(
+                {"detail": "Неверный формат даты remark_date"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        fio_c, gcol, st_c, rcol = self._bot_cols()
+        with transaction.atomic():
+            table = (
+                SectionTable.objects.select_for_update()
+                .filter(owner=owner, id=table_id)
+                .first()
+            )
+            if not table:
+                return Response(
+                    {"detail": "Таблица не найдена"}, status=status.HTTP_404_NOT_FOUND
+                )
+            sh, data = self._sheet_data_for_table(table, sheet_name)
+            if data is None:
+                return Response(
+                    {"detail": "Лист не найден"}, status=status.HTTP_404_NOT_FOUND
+                )
+            one, allm = find_one_student_row(
+                data,
+                student_fio,
+                fio_col=fio_c,
+                group_col=gcol,
+                status_col=st_c,
+                group_filter=group_filter,
+            )
+            if not one:
+                return Response(
+                    {"detail": "Студент не найден"},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            if len(allm) > 1 and not (group_filter or "").strip():
+                return Response(
+                    {
+                        "detail": "Несколько совпадений, укажите group",
+                        "candidates": allm[:15],
+                    },
+                    status=status.HTTP_409_CONFLICT,
+                )
+            row_idx = one["row_index"]
+            if row_idx >= len(data):
+                return Response(
+                    {"detail": "Некорректная строка"}, status=status.HTTP_400_BAD_REQUEST
+                )
+            row = data[row_idx]
+            current = ""
+            if isinstance(row, list) and len(row) > rcol:
+                current = str(row[rcol] or "")
+            text_for_merge = remark_text if remark_text else None
+            new_cell = set_remark_for_date(
+                current,
+                rd,
+                text_for_merge,
+                no_remarks_phrase=no_phrase,
+            )
+            content = table.content if isinstance(table.content, dict) else {}
+            set_cell_value(content, sheet_name, row_idx, rcol, new_cell)
+            table.content = content
+            table.needs_nextcloud_push = True
+            table.save(update_fields=["content", "needs_nextcloud_push", "updated_at"])
+        logger.info(
+            "Замечание по студенту: table=%s sheet=%s row=%s date=%s",
+            table_id,
+            sheet_name,
+            row_idx,
+            remark_date_raw,
+        )
+        return Response(
+            {
+                "status": "ok",
+                "table_id": table.id,
+                "row_index": row_idx,
+                "remark_col": rcol,
+            }
         )
 
     def _find_table(self, owner, section_type: str, title_contains: str):

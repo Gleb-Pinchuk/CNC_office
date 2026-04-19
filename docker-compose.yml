@@ -23,6 +23,18 @@ services:
         max-size: '10m'
         max-file: '3'
 
+  redis:
+    image: redis:7-alpine
+    container_name: cnc_redis
+    restart: unless-stopped
+    networks:
+      - app-network
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '2'
+
   web:
     build:
       context: .
@@ -44,9 +56,13 @@ services:
       - DB_PORT=5432
       - DEBUG=${DEBUG:-False}
       - ALLOWED_HOSTS=${ALLOWED_HOSTS:-localhost,127.0.0.1}
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_started
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8000/ > /dev/null"]
       interval: 20s
@@ -84,6 +100,68 @@ services:
         max-size: '10m'
         max-file: '3'
 
+  celery_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cnc_celery_worker
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+    command: celery -A config worker -l info --concurrency=2
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      web:
+        condition: service_started
+    volumes:
+      - .:/app
+    networks:
+      - app-network
+      - db-network
+    logging:
+      driver: json-file
+      options:
+        max-size: '20m'
+        max-file: '3'
+
+  celery_beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cnc_celery_beat
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+    command: celery -A config beat -l info
+    depends_on:
+      redis:
+        condition: service_started
+      web:
+        condition: service_started
+    volumes:
+      - .:/app
+    networks:
+      - app-network
+      - db-network
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '2'
+
   vk_bot:
     build:
       context: ./vk_student_bot
@@ -102,37 +180,6 @@ services:
     dns:
       - 8.8.8.8
       - 1.1.1.1
-    logging:
-      driver: json-file
-      options:
-        max-size: '5m'
-        max-file: '2'
-
-  nextcloud_sync:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: cnc_nextcloud_sync
-    restart: unless-stopped
-    env_file:
-      - .env
-    environment:
-      DB_HOST: db
-      DB_PORT: 5432
-    command:
-      - sh
-      - -c
-      - "python manage.py sync_nextcloud_sheet --loop --interval 300"
-    depends_on:
-      db:
-        condition: service_healthy
-      web:
-        condition: service_healthy
-    volumes:
-      - .:/app
-    networks:
-      - app-network
-      - db-network
     logging:
       driver: json-file
       options:
