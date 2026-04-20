@@ -13,7 +13,7 @@ from rest_framework.views import APIView
 
 from sections.models import SectionTable
 
-from .remark_utils import parse_input_date, set_remark_for_date
+from .remark_utils import parse_input_date
 from .sheet_utils import find_sheet_by_name, get_workbook_sheets, set_cell_value
 from .student_sheet import find_one_student_row, list_groups, search_students
 from .week_column import pick_week_col_by_date
@@ -425,16 +425,12 @@ class BotGatewayView(APIView):
                 )
             row = data[row_idx]
             rcol = pick_week_col_by_date(data, rd) or rcol_default
-            current = ""
-            if isinstance(row, list) and len(row) > rcol:
-                current = str(row[rcol] or "")
-            text_for_merge = remark_text if remark_text else None
-            new_cell = set_remark_for_date(
-                current,
-                rd,
-                text_for_merge,
-                no_remarks_phrase=no_phrase,
-            )
+            # В выбранной недельной колонке храним только итоговый текст замечания,
+            # без префикса даты (дата уже определяет саму колонку недели).
+            if remark_text and str(remark_text).strip():
+                new_cell = str(remark_text).strip()
+            else:
+                new_cell = no_phrase
             content = table.content if isinstance(table.content, dict) else {}
             set_cell_value(content, sheet_name, row_idx, rcol, new_cell)
             table.content = content

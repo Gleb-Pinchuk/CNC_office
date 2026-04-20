@@ -74,6 +74,37 @@ def content_to_excel_bytes(content: Dict[str, Any]) -> bytes:
     return bio.getvalue()
 
 
+def merge_content_into_excel_bytes(base_xlsx_bytes: bytes, content: Dict[str, Any]) -> bytes:
+    """
+    Обновляет значения ячеек в существующем .xlsx, сохраняя форматирование, ширины колонок,
+    формулы/стили и листы, которых нет в content.
+    """
+    if not openpyxl:
+        raise RuntimeError("openpyxl не установлен")
+
+    wb = openpyxl.load_workbook(BytesIO(base_xlsx_bytes))
+    sheets, _ = get_workbook_sheets(content if isinstance(content, dict) else {})
+
+    for sh in sheets:
+        name = str(sh.get("name") or "").strip()[:31] or "Лист"
+        data = sh.get("data") if isinstance(sh.get("data"), list) else []
+        if name in wb.sheetnames:
+            ws = wb[name]
+        else:
+            ws = wb.create_sheet(title=name)
+
+        for r_idx, row in enumerate(data, start=1):
+            if not isinstance(row, list):
+                row = list(row) if row else []
+            for c_idx, val in enumerate(row, start=1):
+                cell_val = None if val == "" or val is None else val
+                ws.cell(row=r_idx, column=c_idx, value=cell_val)
+
+    bio = BytesIO()
+    wb.save(bio)
+    return bio.getvalue()
+
+
 def build_custom_sheet_v2(sheets_payload: list) -> Dict[str, Any]:
     """Обёртка для листов в формате [{'name': ..., 'data': ...}, ...]."""
     return {

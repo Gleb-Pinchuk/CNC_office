@@ -288,8 +288,7 @@ class TestBotApiViews:
         assert rm.status_code == status.HTTP_200_OK
         table.refresh_from_db()
         row = table.content["custom_sheet"]["sheets"][0]["data"][1]
-        assert "18.04.2026" in row[3]
-        assert "опоздал" in row[3]
+        assert row[3] == "опоздал"
 
         st = client.post(
             "/api/bot/gateway/",
@@ -367,7 +366,7 @@ class TestBotApiViews:
         table.refresh_from_db()
         row = table.content["custom_sheet"]["sheets"][0]["data"][1]
         assert row[4] == ""
-        assert "замечание недели" in row[5]
+        assert row[5] == "замечание недели"
 
         prof = client.post(
             "/api/bot/gateway/",

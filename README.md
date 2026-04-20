@@ -92,6 +92,24 @@ docker compose logs -f nginx
 docker compose logs -f vk_bot
 ```
 
+## Nightly backup (DB + xlsx)
+
+Скрипт `ops/nightly_backup.sh` делает:
+
+1. `pg_dump` PostgreSQL в `*.sql.gz`
+2. экспорт текущей `SectionTable` в `.xlsx`
+3. опционально отправляет оба файла в S3
+4. удаляет старые backup-файлы по retention, чтобы диск не переполнялся
+
+Запуск вручную:
+
+```bash
+chmod +x ops/nightly_backup.sh
+./ops/nightly_backup.sh
+```
+
+Cron-пример: `ops/backup_crontab.example`
+
 ## Переменные окружения
 
 Основные переменные в `.env`:

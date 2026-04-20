@@ -11,7 +11,11 @@ from django.db import transaction
 from django.utils import timezone as dj_tz
 
 from bot_api.nextcloud_webdav import build_user_file_path, webdav_get, webdav_put
-from bot_api.xlsx_sync import content_to_excel_bytes, excel_bytes_to_content
+from bot_api.xlsx_sync import (
+    content_to_excel_bytes,
+    excel_bytes_to_content,
+    merge_content_into_excel_bytes,
+)
 from sections.models import SectionTable
 
 
@@ -91,8 +95,14 @@ def push_to_nextcloud(cfg: NextcloudSyncConfig, *, force: bool = False) -> Dict[
     if not force and not table.needs_nextcloud_push:
         return {"ok": True, "skipped": True, "reason": "no_pending_push"}
     table.refresh_from_db()
-    blob = content_to_excel_bytes(table.content or {})
     path = webdav_path_for_config(cfg)
+    # Важно: сначала читаем текущий файл с Nextcloud и накладываем изменения поверх.
+    # Это сохраняет форматирование, ширины колонок и листы вне зоны работы бота.
+    remote_blob, _etag = webdav_get(cfg.base_url, path, cfg.username, cfg.password)
+    if remote_blob:
+        blob = merge_content_into_excel_bytes(remote_blob, table.content or {})
+    else:
+        blob = content_to_excel_bytes(table.content or {})
     webdav_put(cfg.base_url, path, cfg.username, cfg.password, blob)
     now = dj_tz.now()
     SectionTable.objects.filter(pk=table.pk).update(
