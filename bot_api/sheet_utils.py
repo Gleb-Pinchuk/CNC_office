@@ -7,19 +7,41 @@ def get_workbook_sheets(content: dict) -> Tuple[list, int]:
     """
     Возвращает (sheets: list, active_index: int).
     content — обычно models.SectionTable.content или Document.content.
+
+    Поддерживает несколько форматов:
+      1) {"custom_sheet": {"version": 2, "sheets": [...], "activeSheetIndex": N}}
+      2) {"custom_sheet": {"data": [...]}}  (один лист, старый v1)
+      3) {"sheets": [...], "activeSheetIndex": N}  (без обёртки custom_sheet)
+      4) {"data": [...]}  (один лист без обёртки)
     """
     if not isinstance(content, dict):
         return [], 0
-    cs = content.get("custom_sheet")
-    if not isinstance(cs, dict):
+
+    def _from_wrapper(cs: dict) -> Tuple[list, int]:
+        sheets = cs.get("sheets")
+        if isinstance(sheets, list) and sheets:
+            ai = cs.get("activeSheetIndex") or 0
+            try:
+                ai = int(ai)
+            except Exception:
+                ai = 0
+            ai = max(0, min(ai, len(sheets) - 1))
+            return sheets, ai
+        if isinstance(cs.get("data"), list):
+            return [cs], 0
         return [], 0
-    sheets = cs.get("sheets")
-    if isinstance(sheets, list) and sheets:
-        ai = cs.get("activeSheetIndex") or 0
-        ai = max(0, min(int(ai), len(sheets) - 1))
+
+    cs = content.get("custom_sheet")
+    if isinstance(cs, dict):
+        sheets, ai = _from_wrapper(cs)
+        if sheets:
+            return sheets, ai
+
+    # Fallback: содержимое лежит прямо в корне
+    sheets, ai = _from_wrapper(content)
+    if sheets:
         return sheets, ai
-    if isinstance(cs.get("data"), list):
-        return [cs], 0
+
     return [], 0
 
 

@@ -16,7 +16,15 @@ logger = logging.getLogger(__name__)
 class Command(BaseCommand):
     help = "Импортирует .xlsx из Nextcloud (WebDAV) в SectionTable в формате custom_sheet v2"
 
+    def add_arguments(self, parser):
+        parser.add_argument(
+            "--force",
+            action="store_true",
+            help="Перезаписать существующую таблицу свежим содержимым из Nextcloud.",
+        )
+
     def handle(self, *args, **options):
+        force = bool(options.get("force"))
         nc_base = os.getenv("NEXTCLOUD_BASE_URL", "").rstrip("/")
         nc_user = os.getenv("NEXTCLOUD_USERNAME", "")
         nc_pass = os.getenv("NEXTCLOUD_PASSWORD", "") or os.getenv("NEXTCLOUD_APP_TOKEN", "")
@@ -57,11 +65,11 @@ class Command(BaseCommand):
             .order_by("-updated_at")
             .first()
         )
-        if existing_table:
+        if existing_table and not force:
             self.stdout.write(
                 self.style.WARNING(
                     f"Таблица уже есть: id={existing_table.id} «{existing_table.title}». "
-                    f"Удалите запись или смените CNC_TABLE_TITLE_FRAGMENT."
+                    f"Используйте --force, чтобы перезаписать, либо удалите запись/смените CNC_TABLE_TITLE_FRAGMENT."
                 )
             )
             return
@@ -93,7 +101,22 @@ class Command(BaseCommand):
             content = excel_bytes_to_content(file_content)
         except Exception as e:
             self.stdout.write(self.style.ERROR(f"Не удалось разобрать Excel: {e}"))
-            self._create_empty_table(owner, section_type, table_title)
+            if not existing_table:
+                self._create_empty_table(owner, section_type, table_title)
+            return
+
+        if existing_table and force:
+            existing_table.content = content
+            existing_table.title = table_title
+            existing_table.needs_nextcloud_push = False
+            existing_table.save(
+                update_fields=["content", "title", "needs_nextcloud_push", "updated_at"]
+            )
+            self.stdout.write(
+                self.style.SUCCESS(
+                    f"Таблица обновлена (force): id={existing_table.id}, листов={len(content.get('custom_sheet', {}).get('sheets', []))}"
+                )
+            )
             return
 
         table_obj = SectionTable(
@@ -105,7 +128,10 @@ class Command(BaseCommand):
         )
         table_obj.save()
         self.stdout.write(
-            self.style.SUCCESS(f"Импорт завершён: SectionTable id={table_obj.id}")
+            self.style.SUCCESS(
+                f"Импорт завершён: SectionTable id={table_obj.id}, "
+                f"листов={len(content.get('custom_sheet', {}).get('sheets', []))}"
+            )
         )
 
     def _create_empty_table(self, owner, section_type, title):
