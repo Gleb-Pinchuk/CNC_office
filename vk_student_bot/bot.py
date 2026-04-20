@@ -7,7 +7,7 @@ import logging
 import os
 import random
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
@@ -185,36 +185,33 @@ class UserCtx:
     student: Optional[str] = None
     selected_date: str = ""
     awaiting: Optional[str] = None  # "date_input" | "remark_input"
-    current_view: str = "main"  # main|directions|groups|students|student_actions|date
+    current_view: str = "main"
     groups_page: int = 0
     students_page: int = 0
-    groups_cache: Optional[List[str]] = None
-    students_cache: Optional[List[dict]] = None
+    directions_cache: List[str] = field(default_factory=list)
+    groups_cache: List[str] = field(default_factory=list)
+    students_cache: List[dict] = field(default_factory=list)
 
 
-def _payload(cmd: str, value: Optional[str] = None) -> str:
-    data = {"cmd": cmd}
-    if value is not None:
-        data["value"] = value
-    return json.dumps(data, ensure_ascii=False)
+def _pl(cmd: str, **kwargs) -> str:
+    """Компактный payload для кнопки. Короткие ключи, чтобы влезать в лимит VK."""
+    data = {"c": cmd}
+    data.update(kwargs)
+    return json.dumps(data, ensure_ascii=False, separators=(",", ":"))
 
 
-def _parse_payload(raw: Optional[str]) -> dict:
+def _parse_payload(raw: Optional[Any]) -> dict:
     if not raw:
         return {}
+    if isinstance(raw, dict):
+        return raw
     try:
         return json.loads(raw)
     except Exception:
         return {}
 
 
-def _pick_direction(directions: List[str], token: str) -> Optional[str]:
-    t = token.strip().lower()
-    for d in directions:
-        dl = d.lower()
-        if t == dl or t in dl or dl in t:
-            return d
-    return None
+PER_PAGE = 6  # максимум кнопок-элементов на странице (влезает в VK: 10 рядов)
 
 
 class StudentBot:
@@ -233,19 +230,41 @@ class StudentBot:
     def ensure_table(self):
         if self.table_info is None:
             self.table_info = self.api.lookup_table()
+            logger.info(
+                "Таблица id=%s, листов=%s",
+                self.table_info.get("id"),
+                len(self.table_info.get("sheet_names") or []),
+            )
 
     def table_id(self) -> int:
         self.ensure_table()
         return int(self.table_info["id"])
 
+    def _all_sheets(self) -> List[str]:
+        """Все листы таблицы — сперва из кеша lookup_table, иначе через list_sheets."""
+        self.ensure_table()
+        names = list(self.table_info.get("sheet_names") or [])
+        if not names:
+            try:
+                names = self.api.list_sheets(self.table_id())
+            except Exception:
+                logger.exception("list_sheets failed")
+                names = []
+        return names
+
     def directions(self) -> List[str]:
-        names = self.api.list_sheets(self.table_id())
-        ordered = []
-        for name in SPREADSHEETS:
+        """Упорядоченный список направлений: сперва по порядку из env, затем все остальные листы."""
+        names = self._all_sheets()
+        if not names:
+            return []
+        ordered: List[str] = []
+        for pref in SPREADSHEETS:
+            pl = pref.lower()
             for n in names:
-                if name.lower() == n.lower() or name.lower() in n.lower():
-                    if n not in ordered:
-                        ordered.append(n)
+                nl = n.lower()
+                if (pl == nl or pl in nl or nl in pl) and n not in ordered:
+                    ordered.append(n)
+                    break
         for n in names:
             if n not in ordered:
                 ordered.append(n)
@@ -260,6 +279,8 @@ class StudentBot:
                     self.handle(event.obj.message)
             except Exception:
                 logger.exception("Ошибка обработки сообщения")
+
+    # -------------------- маршрутизация сообщений --------------------
 
     def handle(self, msg: dict):
         peer_id = msg.get("peer_id")
@@ -280,197 +301,125 @@ class StudentBot:
                 return
 
             tl = text.lower()
-            if tl in ("начать", "старт", "меню", "помощь", "help", "?", "🔙 меню".lower()):
+            if tl in ("начать", "старт", "меню", "помощь", "help", "?", "/start"):
                 self.show_main(peer_id, "Выберите раздел:")
                 return
-            if "направлен" in tl or tl == "🎓 направления".lower():
-                self.show_directions(peer_id)
+
+            # Текстовые алиасы для базовых кнопок (на случай если пользователь печатает сам)
+            if "направлен" in tl:
+                self.show_directions(peer_id, ctx)
                 return
-            if "групп" in tl or tl == "📋 группы".lower():
+            if "групп" in tl:
                 self.show_groups(peer_id, ctx)
                 return
-            if "студент" in tl or tl == "👤 студент".lower():
+            if "студент" in tl:
                 self.show_students(peer_id, ctx)
                 return
-            if "дата" in tl or tl == "📅 выбор даты".lower():
+            if "дата" in tl:
                 self.show_date_picker(peer_id, ctx)
                 return
-            if tl in ("✅ замечаний нет".lower(),):
-                self.write_remark(peer_id, ctx, None)
-                return
-            if tl in ("✍️ замечание".lower(),):
-                ctx.awaiting = "remark_input"
-                self.send(peer_id, "Введите текст замечания одним сообщением.")
-                return
-            if tl in ("🎓 статус: учится".lower(),):
-                self.set_status(peer_id, ctx, "учится")
-                return
-            if tl in ("🚫 статус: отчислен".lower(),):
-                self.set_status(peer_id, ctx, "отчислен")
-                return
-            if tl in ("🗓 сегодня".lower(),):
-                ctx.selected_date = _tz_now().strftime("%d.%m.%Y")
-                self.send(peer_id, f"📅 Дата: {ctx.selected_date}")
-                self.show_student_actions(peer_id)
-                return
-            if tl in ("⬅️ -7 дней".lower(),):
-                d = datetime.strptime(ctx.selected_date, "%d.%m.%Y") - timedelta(days=7)
-                ctx.selected_date = d.strftime("%d.%m.%Y")
-                self.send(peer_id, f"📅 Дата: {ctx.selected_date}")
-                self.show_student_actions(peer_id)
-                return
-            if tl in ("➡️ +7 дней".lower(),):
-                d = datetime.strptime(ctx.selected_date, "%d.%m.%Y") + timedelta(days=7)
-                ctx.selected_date = d.strftime("%d.%m.%Y")
-                self.send(peer_id, f"📅 Дата: {ctx.selected_date}")
-                self.show_student_actions(peer_id)
-                return
-            if tl in ("⌨️ ввести дату".lower(),):
-                ctx.awaiting = "date_input"
-                self.send(peer_id, "Введите дату в формате ДД.ММ.ГГГГ")
-                return
-            if tl in ("➡️ вперед".lower(), "вперед"):
-                self.handle_next(peer_id, ctx)
-                return
-            if tl in ("⬅️ назад".lower(), "назад"):
-                self.handle_prev(peer_id, ctx)
-                return
 
-            # fallback: попытка выбрать направление/группу/студента текстом
-            if self.try_select_by_text(peer_id, ctx, text):
-                return
-            self.show_main(peer_id, "Не понял команду. Используйте кнопки.")
+            self.show_main(peer_id, "Не понял команду. Используйте кнопки ниже.")
         except CNCApiError as e:
             self.send(peer_id, f"❌ {e}")
         except Exception as e:
             logger.exception("handle")
             self.send(peer_id, f"❌ Ошибка: {e}")
 
-    def handle_payload(self, peer_id: int, ctx: UserCtx, payload: dict):
-        cmd = payload.get("cmd")
-        value = payload.get("value", "")
-        if cmd == "main":
-            self.show_main(peer_id, "Главное меню")
-        elif cmd == "directions":
-            self.show_directions(peer_id)
-        elif cmd == "groups":
-            self.show_groups(peer_id, ctx)
-        elif cmd == "students":
-            self.show_students(peer_id, ctx)
-        elif cmd == "pick_direction":
-            ctx.direction = value
-            ctx.group = None
-            ctx.student = None
-            self.send(peer_id, f"✅ Направление: {value}")
-            self.show_main(peer_id, "Теперь выберите группы или студентов.")
-        elif cmd == "pick_group":
-            ctx.group = value
-            ctx.student = None
-            self.send(peer_id, f"✅ Группа: {value}")
-            self.show_students(peer_id, ctx)
-        elif cmd == "pick_student":
-            ctx.student = value
-            self.show_student_profile(peer_id, ctx)
-        elif cmd == "date":
-            self.show_date_picker(peer_id, ctx)
-        elif cmd == "date_today":
-            ctx.selected_date = _tz_now().strftime("%d.%m.%Y")
-            self.send(peer_id, f"📅 Дата: {ctx.selected_date}")
-            self.show_student_actions(peer_id)
-        elif cmd == "date_minus7":
-            d = datetime.strptime(ctx.selected_date, "%d.%m.%Y") - timedelta(days=7)
-            ctx.selected_date = d.strftime("%d.%m.%Y")
-            self.send(peer_id, f"📅 Дата: {ctx.selected_date}")
-            self.show_student_actions(peer_id)
-        elif cmd == "date_plus7":
-            d = datetime.strptime(ctx.selected_date, "%d.%m.%Y") + timedelta(days=7)
-            ctx.selected_date = d.strftime("%d.%m.%Y")
-            self.send(peer_id, f"📅 Дата: {ctx.selected_date}")
-            self.show_student_actions(peer_id)
-        elif cmd == "date_manual":
-            ctx.awaiting = "date_input"
-            self.send(peer_id, "Введите дату в формате ДД.ММ.ГГГГ")
-        elif cmd == "remark_none":
-            self.write_remark(peer_id, ctx, None)
-        elif cmd == "remark_text":
-            ctx.awaiting = "remark_input"
-            self.send(peer_id, "Введите текст замечания одним сообщением.")
-        elif cmd == "status_study":
-            self.set_status(peer_id, ctx, "учится")
-        elif cmd == "status_dismissed":
-            self.set_status(peer_id, ctx, "отчислен")
-        else:
-            self.show_main(peer_id, "Неизвестная кнопка, откройте меню.")
-
-    def try_select_by_text(self, peer_id: int, ctx: UserCtx, text: str) -> bool:
-        if not text:
-            return False
-        direction = _pick_direction(self.directions(), text)
-        if direction:
-            ctx.direction = direction
-            ctx.group = None
-            ctx.student = None
-            ctx.groups_cache = None
-            ctx.students_cache = None
-            self.send(peer_id, f"✅ Направление: {direction}")
-            self.show_main(peer_id, "Выберите следующий шаг.")
-            return True
-        if ctx.direction:
-            groups = self.api.list_groups(self.table_id(), ctx.direction)
-            for g in groups:
-                if text.lower() == g.lower():
-                    ctx.group = g
-                    ctx.students_cache = None
-                    self.send(peer_id, f"✅ Группа: {g}")
+    def handle_payload(self, peer_id: int, ctx: UserCtx, p: dict):
+        cmd = p.get("c")
+        try:
+            if cmd == "main":
+                self.show_main(peer_id, "Главное меню")
+            elif cmd == "dirs":
+                self.show_directions(peer_id, ctx)
+            elif cmd == "dir":  # pick direction by index
+                idx = int(p.get("i", -1))
+                if 0 <= idx < len(ctx.directions_cache):
+                    ctx.direction = ctx.directions_cache[idx]
+                    ctx.group = None
+                    ctx.student = None
+                    ctx.groups_cache = []
+                    ctx.students_cache = []
+                    ctx.groups_page = 0
+                    ctx.students_page = 0
+                    self.send(peer_id, f"✅ Направление: {ctx.direction}")
+                    self.show_groups(peer_id, ctx)
+                else:
+                    self.show_directions(peer_id, ctx)
+            elif cmd == "grps":
+                self.show_groups(peer_id, ctx)
+            elif cmd == "grp":  # pick group by index
+                idx = int(p.get("i", -1))
+                if 0 <= idx < len(ctx.groups_cache):
+                    ctx.group = ctx.groups_cache[idx]
+                    ctx.student = None
+                    ctx.students_cache = []
+                    ctx.students_page = 0
+                    self.send(peer_id, f"✅ Группа: {ctx.group}")
                     self.show_students(peer_id, ctx)
-                    return True
-        if ctx.current_view == "students" and ctx.students_cache:
-            for st in ctx.students_cache:
-                fio = st.get("fio", "")
-                if fio and text.lower() == fio.lower():
-                    ctx.student = fio
+                else:
+                    self.show_groups(peer_id, ctx)
+            elif cmd == "sts":
+                self.show_students(peer_id, ctx)
+            elif cmd == "st":  # pick student by index
+                idx = int(p.get("i", -1))
+                if 0 <= idx < len(ctx.students_cache):
+                    ctx.student = ctx.students_cache[idx].get("fio", "")
                     self.show_student_profile(peer_id, ctx)
-                    return True
-        return False
+                else:
+                    self.show_students(peer_id, ctx)
+            elif cmd == "gpage":
+                ctx.groups_page = int(p.get("p", 0))
+                self.show_groups(peer_id, ctx)
+            elif cmd == "spage":
+                ctx.students_page = int(p.get("p", 0))
+                self.show_students(peer_id, ctx)
+            elif cmd == "date":
+                self.show_date_picker(peer_id, ctx)
+            elif cmd == "d_today":
+                ctx.selected_date = _tz_now().strftime("%d.%m.%Y")
+                self.send(peer_id, f"📅 Дата: {ctx.selected_date}")
+                self._return_after_date(peer_id, ctx)
+            elif cmd == "d_m7":
+                d = datetime.strptime(ctx.selected_date, "%d.%m.%Y") - timedelta(days=7)
+                ctx.selected_date = d.strftime("%d.%m.%Y")
+                self.send(peer_id, f"📅 Дата: {ctx.selected_date}")
+                self._return_after_date(peer_id, ctx)
+            elif cmd == "d_p7":
+                d = datetime.strptime(ctx.selected_date, "%d.%m.%Y") + timedelta(days=7)
+                ctx.selected_date = d.strftime("%d.%m.%Y")
+                self.send(peer_id, f"📅 Дата: {ctx.selected_date}")
+                self._return_after_date(peer_id, ctx)
+            elif cmd == "d_manual":
+                ctx.awaiting = "date_input"
+                self.send(peer_id, "Введите дату в формате ДД.ММ.ГГГГ")
+            elif cmd == "rem_no":
+                self.write_remark(peer_id, ctx, None)
+            elif cmd == "rem_txt":
+                ctx.awaiting = "remark_input"
+                self.send(peer_id, "Введите текст замечания одним сообщением.")
+            elif cmd == "stu_st":
+                self.set_status(peer_id, ctx, "учится")
+            elif cmd == "stu_ex":
+                self.set_status(peer_id, ctx, "отчислен")
+            elif cmd == "card":
+                self.show_student_profile(peer_id, ctx)
+            else:
+                self.show_main(peer_id, "Неизвестная кнопка. Открываю меню.")
+        except CNCApiError as e:
+            self.send(peer_id, f"❌ {e}")
+        except Exception as e:
+            logger.exception("handle_payload")
+            self.send(peer_id, f"❌ Ошибка: {e}")
 
-    def _paginate(self, items: list, page: int, per_page: int = 6):
-        total_pages = max(1, (len(items) + per_page - 1) // per_page)
-        page = max(0, min(page, total_pages - 1))
-        start = page * per_page
-        end = start + per_page
-        return items[start:end], page, total_pages
+    def _return_after_date(self, peer_id: int, ctx: UserCtx):
+        if ctx.direction and ctx.group and ctx.student:
+            self.show_student_profile(peer_id, ctx)
+        else:
+            self.show_main(peer_id, "Дата сохранена. Выберите раздел:")
 
-    @staticmethod
-    def _add_nav_row(kb: VkKeyboard, page: int, total_pages: int):
-        if total_pages <= 1:
-            return
-        if page > 0:
-            kb.add_button("⬅️ Назад", VkKeyboardColor.SECONDARY)
-        if page < total_pages - 1:
-            kb.add_button("➡️ Вперед", VkKeyboardColor.SECONDARY)
-        kb.add_line()
-
-    def handle_next(self, peer_id: int, ctx: UserCtx):
-        if ctx.current_view == "groups" and ctx.groups_cache:
-            ctx.groups_page += 1
-            self.show_groups(peer_id, ctx)
-            return
-        if ctx.current_view == "students" and ctx.students_cache:
-            ctx.students_page += 1
-            self.show_students(peer_id, ctx)
-            return
-        self.send(peer_id, "Нет следующей страницы.")
-
-    def handle_prev(self, peer_id: int, ctx: UserCtx):
-        if ctx.current_view == "groups" and ctx.groups_cache:
-            ctx.groups_page -= 1
-            self.show_groups(peer_id, ctx)
-            return
-        if ctx.current_view == "students" and ctx.students_cache:
-            ctx.students_page -= 1
-            self.show_students(peer_id, ctx)
-            return
-        self.send(peer_id, "Нет предыдущей страницы.")
+    # -------------------- ввод от пользователя --------------------
 
     def handle_date_input(self, peer_id: int, ctx: UserCtx, text: str):
         ctx.awaiting = None
@@ -482,93 +431,158 @@ class StudentBot:
             return
         ctx.selected_date = text.strip()
         self.send(peer_id, f"📅 Дата сохранена: {ctx.selected_date}")
-        self.show_student_actions(peer_id)
+        self._return_after_date(peer_id, ctx)
 
     def handle_remark_input(self, peer_id: int, ctx: UserCtx, text: str):
         ctx.awaiting = None
         if not text.strip():
             self.send(peer_id, "❌ Пустой текст замечания.")
-            self.show_student_actions(peer_id)
+            self.show_student_actions(peer_id, ctx)
             return
         self.write_remark(peer_id, ctx, text.strip())
+
+    # -------------------- экраны --------------------
 
     def show_main(self, peer_id: int, text: str):
         ctx = self._ctx(peer_id)
         ctx.current_view = "main"
         kb = VkKeyboard(one_time=False, inline=False)
-        kb.add_button("🎓 Направления", VkKeyboardColor.PRIMARY)
+        kb.add_button("🎓 Направления", VkKeyboardColor.PRIMARY, payload=_pl("dirs"))
         kb.add_line()
-        kb.add_button("📋 Группы", VkKeyboardColor.SECONDARY)
-        kb.add_button("👤 Студент", VkKeyboardColor.SECONDARY)
+        kb.add_button("📋 Группы", VkKeyboardColor.SECONDARY, payload=_pl("grps"))
+        kb.add_button("👤 Студент", VkKeyboardColor.SECONDARY, payload=_pl("sts"))
         kb.add_line()
-        kb.add_button("📅 Выбор даты", VkKeyboardColor.SECONDARY)
-        self.send(peer_id, text, keyboard=kb)
+        kb.add_button("📅 Выбор даты", VkKeyboardColor.SECONDARY, payload=_pl("date"))
+        suffix = []
+        if ctx.direction:
+            suffix.append(f"🎓 {ctx.direction}")
+        if ctx.group:
+            suffix.append(f"🏷 {ctx.group}")
+        if ctx.student:
+            suffix.append(f"👤 {ctx.student}")
+        suffix.append(f"📅 {ctx.selected_date}")
+        body = text + "\n\n" + " · ".join(suffix)
+        self.send(peer_id, body, keyboard=kb)
 
-    def show_directions(self, peer_id: int):
-        ctx = self._ctx(peer_id)
+    def show_directions(self, peer_id: int, ctx: UserCtx):
         ctx.current_view = "directions"
         dirs = self.directions()
+        ctx.directions_cache = dirs
         kb = VkKeyboard(one_time=False, inline=False)
-        for d in dirs[:8]:
-            kb.add_button(d, VkKeyboardColor.PRIMARY)
+        if not dirs:
+            kb.add_button("🔙 Меню", VkKeyboardColor.SECONDARY, payload=_pl("main"))
+            self.send(
+                peer_id,
+                "⚠️ Не удалось получить список направлений. Проверьте, что таблица импортирована.",
+                keyboard=kb,
+            )
+            return
+        # по 1 кнопке в ряд — всегда помещается и выглядит аккуратно
+        for i, name in enumerate(dirs[:8]):
+            kb.add_button(name[:40], VkKeyboardColor.PRIMARY, payload=_pl("dir", i=i))
             kb.add_line()
-        kb.add_button("🔙 Меню", VkKeyboardColor.SECONDARY)
+        kb.add_button("🔙 Меню", VkKeyboardColor.SECONDARY, payload=_pl("main"))
         self.send(peer_id, "Выберите направление:", keyboard=kb)
 
     def show_groups(self, peer_id: int, ctx: UserCtx):
         if not ctx.direction:
-            self.show_directions(peer_id)
+            self.show_directions(peer_id, ctx)
             return
-        if ctx.groups_cache is None:
+        if not ctx.groups_cache:
             ctx.groups_cache = self.api.list_groups(self.table_id(), ctx.direction)
             ctx.groups_page = 0
         groups = ctx.groups_cache
         if not groups:
-            self.send(peer_id, f"В направлении {ctx.direction} группы не найдены.")
-            self.show_main(peer_id, "Откройте меню.")
+            kb = VkKeyboard(one_time=False, inline=False)
+            kb.add_button("🎓 Направления", VkKeyboardColor.PRIMARY, payload=_pl("dirs"))
+            kb.add_line()
+            kb.add_button("🔙 Меню", VkKeyboardColor.SECONDARY, payload=_pl("main"))
+            self.send(peer_id, f"В направлении «{ctx.direction}» группы не найдены.", keyboard=kb)
             return
         ctx.current_view = "groups"
-        shown, page, pages = self._paginate(groups, ctx.groups_page, per_page=6)
+        total_pages = max(1, (len(groups) + PER_PAGE - 1) // PER_PAGE)
+        page = max(0, min(ctx.groups_page, total_pages - 1))
         ctx.groups_page = page
+        start = page * PER_PAGE
+        shown = groups[start : start + PER_PAGE]
+
         kb = VkKeyboard(one_time=False, inline=False)
-        for g in shown:
-            kb.add_button(g, VkKeyboardColor.PRIMARY)
+        for i, g in enumerate(shown):
+            kb.add_button(g[:40], VkKeyboardColor.PRIMARY, payload=_pl("grp", i=start + i))
             kb.add_line()
-        self._add_nav_row(kb, page, pages)
-        kb.add_button("🔙 Меню", VkKeyboardColor.SECONDARY)
+        if total_pages > 1:
+            if page > 0:
+                kb.add_button(
+                    "⬅️ Назад",
+                    VkKeyboardColor.SECONDARY,
+                    payload=_pl("gpage", p=page - 1),
+                )
+            if page < total_pages - 1:
+                kb.add_button(
+                    "➡️ Вперед",
+                    VkKeyboardColor.SECONDARY,
+                    payload=_pl("gpage", p=page + 1),
+                )
+            kb.add_line()
+        kb.add_button("🎓 Направления", VkKeyboardColor.SECONDARY, payload=_pl("dirs"))
+        kb.add_button("🔙 Меню", VkKeyboardColor.SECONDARY, payload=_pl("main"))
         self.send(
             peer_id,
-            f"Направление: {ctx.direction}\nВыберите группу ({page+1}/{pages}):",
+            f"Направление: {ctx.direction}\nВыберите группу ({page + 1}/{total_pages}):",
             keyboard=kb,
         )
 
     def show_students(self, peer_id: int, ctx: UserCtx):
         if not ctx.direction:
-            self.show_directions(peer_id)
+            self.show_directions(peer_id, ctx)
             return
         if not ctx.group:
             self.show_groups(peer_id, ctx)
             return
-        if ctx.students_cache is None:
-            ctx.students_cache = self.api.list_students(self.table_id(), ctx.direction, ctx.group)
+        if not ctx.students_cache:
+            ctx.students_cache = self.api.list_students(
+                self.table_id(), ctx.direction, ctx.group
+            )
             ctx.students_page = 0
         students = ctx.students_cache
         if not students:
-            self.send(peer_id, f"В группе {ctx.group} студенты не найдены.")
+            kb = VkKeyboard(one_time=False, inline=False)
+            kb.add_button("📋 Группы", VkKeyboardColor.PRIMARY, payload=_pl("grps"))
+            kb.add_line()
+            kb.add_button("🔙 Меню", VkKeyboardColor.SECONDARY, payload=_pl("main"))
+            self.send(peer_id, f"В группе «{ctx.group}» студенты не найдены.", keyboard=kb)
             return
         ctx.current_view = "students"
-        shown, page, pages = self._paginate(students, ctx.students_page, per_page=6)
+        total_pages = max(1, (len(students) + PER_PAGE - 1) // PER_PAGE)
+        page = max(0, min(ctx.students_page, total_pages - 1))
         ctx.students_page = page
+        start = page * PER_PAGE
+        shown = students[start : start + PER_PAGE]
+
         kb = VkKeyboard(one_time=False, inline=False)
-        for st in shown:
-            fio = st.get("fio", "")
-            kb.add_button(fio[:40], VkKeyboardColor.PRIMARY)
+        for i, stu in enumerate(shown):
+            fio = (stu.get("fio") or "").strip() or "—"
+            kb.add_button(fio[:40], VkKeyboardColor.PRIMARY, payload=_pl("st", i=start + i))
             kb.add_line()
-        self._add_nav_row(kb, page, pages)
-        kb.add_button("🔙 Меню", VkKeyboardColor.SECONDARY)
+        if total_pages > 1:
+            if page > 0:
+                kb.add_button(
+                    "⬅️ Назад",
+                    VkKeyboardColor.SECONDARY,
+                    payload=_pl("spage", p=page - 1),
+                )
+            if page < total_pages - 1:
+                kb.add_button(
+                    "➡️ Вперед",
+                    VkKeyboardColor.SECONDARY,
+                    payload=_pl("spage", p=page + 1),
+                )
+            kb.add_line()
+        kb.add_button("📋 Группы", VkKeyboardColor.SECONDARY, payload=_pl("grps"))
+        kb.add_button("🔙 Меню", VkKeyboardColor.SECONDARY, payload=_pl("main"))
         self.send(
             peer_id,
-            f"Группа: {ctx.group}\nВыберите студента ({page+1}/{pages}):",
+            f"Группа: {ctx.group}\nВыберите студента ({page + 1}/{total_pages}):",
             keyboard=kb,
         )
 
@@ -576,52 +590,81 @@ class StudentBot:
         if not (ctx.direction and ctx.group and ctx.student):
             self.show_main(peer_id, "Сначала выберите направление, группу и студента.")
             return
-        profile = self.api.get_student_profile(
-            self.table_id(), ctx.direction, ctx.student, ctx.group, ctx.selected_date
-        )
-        status_value = profile.get("status", "") or "-"
+        try:
+            profile = self.api.get_student_profile(
+                self.table_id(),
+                ctx.direction,
+                ctx.student,
+                ctx.group,
+                ctx.selected_date,
+            )
+        except CNCApiError as e:
+            self.send(peer_id, f"❌ Не удалось получить данные студента: {e}")
+            self.show_students(peer_id, ctx)
+            return
+
+        status_value = (profile.get("status") or "").strip() or "—"
+        remark_value = (profile.get("remark_value") or "").strip()
         links = profile.get("social_links") or []
         lines = [
             f"👤 {profile.get('fio', ctx.student)}",
             f"📚 Направление: {ctx.direction}",
             f"🏷 Группа: {profile.get('group', ctx.group)}",
             f"🎓 Статус учебы: {status_value}",
-            f"📅 Дата замечания: {ctx.selected_date}",
+            f"📅 Дата замечаний: {ctx.selected_date}",
         ]
         if links:
+            lines.append("")
             lines.append("🔗 Соцсети:")
-            for link in links:
-                lines.append(link)
+            for link in links[:10]:
+                lines.append(f"• {link}")
         else:
             lines.append("🔗 Соцсети: не указаны")
+        if remark_value:
+            lines.append("")
+            lines.append("📝 Текущие замечания в ячейке:")
+            lines.append(remark_value[:600])
         self.send(peer_id, "\n".join(lines))
-        self.show_student_actions(peer_id)
+        self.show_student_actions(peer_id, ctx)
 
-    def show_student_actions(self, peer_id: int):
-        ctx = self._ctx(peer_id)
+    def show_student_actions(self, peer_id: int, ctx: UserCtx):
         ctx.current_view = "student_actions"
         kb = VkKeyboard(one_time=False, inline=False)
-        kb.add_button("✅ Замечаний нет", VkKeyboardColor.POSITIVE)
-        kb.add_button("✍️ Замечание", VkKeyboardColor.NEGATIVE)
+        kb.add_button("✅ Замечаний нет", VkKeyboardColor.POSITIVE, payload=_pl("rem_no"))
         kb.add_line()
-        kb.add_button("🎓 Статус: Учится", VkKeyboardColor.PRIMARY)
-        kb.add_button("🚫 Статус: Отчислен", VkKeyboardColor.SECONDARY)
+        kb.add_button("✍️ Замечание", VkKeyboardColor.NEGATIVE, payload=_pl("rem_txt"))
         kb.add_line()
-        kb.add_button("📅 Выбор даты", VkKeyboardColor.SECONDARY)
-        kb.add_button("🔙 Меню", VkKeyboardColor.SECONDARY)
-        self.send(peer_id, "Действия по выбранному студенту:", keyboard=kb)
+        kb.add_button("🎓 Учится", VkKeyboardColor.PRIMARY, payload=_pl("stu_st"))
+        kb.add_button("🚫 Отчислен", VkKeyboardColor.SECONDARY, payload=_pl("stu_ex"))
+        kb.add_line()
+        kb.add_button("📅 Выбор даты", VkKeyboardColor.SECONDARY, payload=_pl("date"))
+        kb.add_line()
+        kb.add_button("👥 К студентам", VkKeyboardColor.SECONDARY, payload=_pl("sts"))
+        kb.add_button("🔙 Меню", VkKeyboardColor.SECONDARY, payload=_pl("main"))
+        self.send(
+            peer_id,
+            f"Действия по студенту «{ctx.student}» на {ctx.selected_date}:",
+            keyboard=kb,
+        )
 
     def show_date_picker(self, peer_id: int, ctx: UserCtx):
         ctx.current_view = "date"
         kb = VkKeyboard(one_time=False, inline=False)
-        kb.add_button("🗓 Сегодня", VkKeyboardColor.PRIMARY)
-        kb.add_button("⬅️ -7 дней", VkKeyboardColor.SECONDARY)
+        kb.add_button("🗓 Сегодня", VkKeyboardColor.PRIMARY, payload=_pl("d_today"))
         kb.add_line()
-        kb.add_button("➡️ +7 дней", VkKeyboardColor.SECONDARY)
-        kb.add_button("⌨️ Ввести дату", VkKeyboardColor.SECONDARY)
+        kb.add_button("⬅️ -7 дней", VkKeyboardColor.SECONDARY, payload=_pl("d_m7"))
+        kb.add_button("➡️ +7 дней", VkKeyboardColor.SECONDARY, payload=_pl("d_p7"))
         kb.add_line()
-        kb.add_button("🔙 Меню", VkKeyboardColor.SECONDARY)
+        kb.add_button("⌨️ Ввести дату", VkKeyboardColor.SECONDARY, payload=_pl("d_manual"))
+        kb.add_line()
+        if ctx.student:
+            kb.add_button(
+                "👤 К карточке", VkKeyboardColor.SECONDARY, payload=_pl("card")
+            )
+        kb.add_button("🔙 Меню", VkKeyboardColor.SECONDARY, payload=_pl("main"))
         self.send(peer_id, f"Текущая дата: {ctx.selected_date}", keyboard=kb)
+
+    # -------------------- действия --------------------
 
     def write_remark(self, peer_id: int, ctx: UserCtx, text: Optional[str]):
         if not (ctx.direction and ctx.student):
@@ -639,7 +682,7 @@ class StudentBot:
             self.send(peer_id, f"✅ Замечание записано на {ctx.selected_date}.")
         else:
             self.send(peer_id, f"✅ Записано «замечаний нет» на {ctx.selected_date}.")
-        ctx.students_cache = None
+        ctx.students_cache = []  # в данных строки могло поменяться
         self.show_student_profile(peer_id, ctx)
 
     def set_status(self, peer_id: int, ctx: UserCtx, status_value: str):
@@ -650,8 +693,10 @@ class StudentBot:
             self.table_id(), ctx.direction, ctx.student, status_value, ctx.group
         )
         self.send(peer_id, f"✅ Статус обновлён: {status_value}")
-        ctx.students_cache = None
+        ctx.students_cache = []
         self.show_student_profile(peer_id, ctx)
+
+    # -------------------- отправка --------------------
 
     def send(self, peer_id: int, text: str, keyboard: Optional[VkKeyboard] = None):
         payload: Dict[str, Any] = {
