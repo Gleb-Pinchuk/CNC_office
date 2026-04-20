@@ -382,3 +382,54 @@ class TestBotApiViews:
         )
         assert prof.status_code == status.HTTP_200_OK
         assert prof.data["student"]["remark_col"] == 5
+
+    @override_settings(
+        CNC_BOT_API_SECRET="secret-token",
+        CNC_BOT_TABLE_OWNER_USERNAME="bot_owner",
+        BOT_SHEET_FIO_COL=0,
+        BOT_SHEET_GROUP_COL=1,
+        BOT_SHEET_STATUS_COL=2,
+        BOT_SHEET_REMARK_COL=3,
+        BOT_SHEET_SOCIAL_COLS="4,5",
+    )
+    def test_get_student_profile_formats_tg_and_tiktok_links(self, client):
+        from django.contrib.auth import get_user_model
+
+        owner = get_user_model().objects.create_user(username="bot_owner", password="pass")
+        table = SectionTable.objects.create(
+            owner=owner,
+            title="Social test",
+            section_type="rangers",
+            content={
+                "custom_sheet": {
+                    "version": 2,
+                    "activeSheetIndex": 0,
+                    "sheets": [
+                        {
+                            "name": "Robo",
+                            "data": [
+                                ["ФИО", "Группа", "Статус", "Замечания", "ТГ", "ТикТок"],
+                                ["Иванов Иван", "Г1", "учится", "", "student_tg", "cool.tiktok.nick"],
+                            ],
+                        }
+                    ],
+                }
+            },
+        )
+
+        resp = client.post(
+            "/api/bot/gateway/",
+            {
+                "action": "get_student_profile",
+                "table_id": table.id,
+                "sheet_name": "Robo",
+                "student_fio": "Иванов",
+            },
+            format="json",
+            HTTP_X_CNC_BOT_TOKEN="secret-token",
+        )
+        assert resp.status_code == status.HTTP_200_OK
+        social = resp.data["student"]["social_profiles"]
+        by_label = {item["label"]: item["url"] for item in social}
+        assert by_label["TG"] == "https://t.me/student_tg"
+        assert by_label["TikTok"] == "https://www.tiktok.com/@cool.tiktok.nick"

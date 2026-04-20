@@ -137,6 +137,19 @@ class BotGatewayView(APIView):
         return "TG"
 
     @staticmethod
+    def _platform_from_header(header_value: str) -> str:
+        hv = (header_value or "").strip().lower()
+        if not hv:
+            return ""
+        if "tiktok" in hv or "тикток" in hv or "тик ток" in hv:
+            return "tiktok"
+        if "vk" in hv or "вк" in hv or "вконтакте" in hv:
+            return "vk"
+        if "tg" in hv or "тг" in hv or "telegram" in hv or "телеграм" in hv:
+            return "tg"
+        return ""
+
+    @staticmethod
     def _clean_token(token: str) -> str:
         t = (token or "").strip()
         t = t.strip("()[]{}<>\"'`")
@@ -191,11 +204,20 @@ class BotGatewayView(APIView):
             if platform == "tiktok":
                 return f"https://www.tiktok.com/@{nick}"
             return f"https://t.me/{nick}"
+        # Plain username without protocol/@
+        if platform == "tiktok":
+            nick = t.lstrip("@")
+            if re.match(r"^[A-Za-z0-9._]{2,64}$", nick):
+                return f"https://www.tiktok.com/@{nick}"
+        if platform == "tg" and re.match(r"^[A-Za-z0-9_]{3,64}$", t):
+            return f"https://t.me/{t}"
+        if platform == "vk" and re.match(r"^[A-Za-z0-9._]{2,64}$", t):
+            return f"https://vk.com/{t}"
         if platform == "vk" and re.match(r"^(id|club|public)\d+$", t, flags=re.IGNORECASE):
             return f"https://vk.com/{t}"
         return ""
 
-    def _extract_social_links(self, row):
+    def _extract_social_links(self, row, header_row=None):
         if not isinstance(row, list):
             return [], []
         links = []
@@ -208,7 +230,12 @@ class BotGatewayView(APIView):
             raw = "" if row[idx] is None else str(row[idx]).strip()
             if not raw:
                 continue
-            default_platform = preferred[pos] if pos < len(preferred) else "tg"
+            header_hint = ""
+            if isinstance(header_row, list) and idx < len(header_row):
+                header_hint = str(header_row[idx] or "")
+            default_platform = self._platform_from_header(header_hint) or (
+                preferred[pos] if pos < len(preferred) else "tg"
+            )
             parts = [p for p in re.split(r"[\s,;\n]+", raw) if p and p.strip()]
             if not parts:
                 parts = [raw]
@@ -341,7 +368,8 @@ class BotGatewayView(APIView):
         remark_value = ""
         if rcol < len(row):
             remark_value = "" if row[rcol] is None else str(row[rcol])
-        social_links, social_profiles = self._extract_social_links(row)
+        header_row = data[0] if data and isinstance(data[0], list) else None
+        social_links, social_profiles = self._extract_social_links(row, header_row=header_row)
         return Response(
             {
                 "student": {
