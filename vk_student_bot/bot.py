@@ -428,13 +428,16 @@ class StudentBot:
             self.send(peer_id, f"В направлении {ctx.direction} группы не найдены.")
             self.show_main(peer_id, "Откройте меню.")
             return
+        shown = groups[:16]  # 8 rows x 2 buttons, чтобы не превышать лимиты VK keyboard
         kb = VkKeyboard(one_time=False, inline=False)
         row_count = 0
-        for g in groups[:20]:
+        for g in shown:
             kb.add_button(g, VkKeyboardColor.PRIMARY, payload=_payload("pick_group", g))
             row_count += 1
             if row_count % 2 == 0:
                 kb.add_line()
+        if len(groups) > len(shown):
+            self.send(peer_id, f"Показываю первые {len(shown)} групп из {len(groups)}.")
         kb.add_button("Меню", VkKeyboardColor.SECONDARY, payload=_payload("main"))
         self.send(peer_id, f"Направление: {ctx.direction}\nВыберите группу:", keyboard=kb)
 
@@ -449,12 +452,17 @@ class StudentBot:
         if not students:
             self.send(peer_id, f"В группе {ctx.group} студенты не найдены.")
             return
+        shown = students[:14]  # 7 rows x 2 кнопки + 1 строка меню <= 10 строк VK
         kb = VkKeyboard(one_time=False, inline=False)
-        for i, st in enumerate(students[:20]):
+        row_count = 0
+        for st in shown:
             fio = st.get("fio", "")
             kb.add_button(fio[:40], VkKeyboardColor.PRIMARY, payload=_payload("pick_student", fio))
-            if i % 1 == 0:
+            row_count += 1
+            if row_count % 2 == 0:
                 kb.add_line()
+        if len(students) > len(shown):
+            self.send(peer_id, f"Показываю первых {len(shown)} студентов из {len(students)}.")
         kb.add_button("Меню", VkKeyboardColor.SECONDARY, payload=_payload("main"))
         self.send(peer_id, f"Группа: {ctx.group}\nВыберите студента:", keyboard=kb)
 
