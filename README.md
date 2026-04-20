@@ -202,6 +202,28 @@ docker compose exec web python manage.py sync_nextcloud_sheet --pull
 
 ---
 
+## 10.1) Как забрать `.xlsx` из БД, если Nextcloud недоступен
+
+Экспорт из БД в файл на сервере:
+
+```bash
+docker compose exec web python manage.py export_section_table_xlsx --output /app/backups/manual_export.xlsx
+```
+
+Файл появится на сервере в:
+
+```bash
+~/cnc_office_v2/backups/manual_export.xlsx
+```
+
+Скачать файл на свой компьютер (выполнять у себя локально):
+
+```bash
+scp utond1@<SERVER_IP>:/home/utond1/cnc_office_v2/backups/manual_export.xlsx .
+```
+
+---
+
 ## 11) Nightly backup (чтобы не потерять данные)
 
 Скрипт: `ops/nightly_backup.sh`
