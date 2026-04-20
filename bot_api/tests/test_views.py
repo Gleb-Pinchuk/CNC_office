@@ -188,6 +188,7 @@ class TestBotApiViews:
         BOT_SHEET_GROUP_COL=1,
         BOT_SHEET_STATUS_COL=2,
         BOT_SHEET_REMARK_COL=3,
+        BOT_SHEET_SOCIAL_COLS="4",
     )
     def test_list_groups_search_set_student_remark(self, client):
         from django.contrib.auth import get_user_model
@@ -207,8 +208,8 @@ class TestBotApiViews:
                         {
                             "name": "Robo",
                             "data": [
-                                ["ФИО", "Группа", "Статус", "Замечания"],
-                                ["Иванов Иван", "Г1", "учится", ""],
+                                ["ФИО", "Группа", "Статус", "Замечания", "Соцсети"],
+                                ["Иванов Иван", "Г1", "учится", "", "vk.com/id1"],
                             ],
                         }
                     ],
@@ -242,6 +243,35 @@ class TestBotApiViews:
         assert sr.status_code == status.HTTP_200_OK
         assert len(sr.data["students"]) == 1
 
+        lst = client.post(
+            "/api/bot/gateway/",
+            {
+                "action": "list_students",
+                "table_id": table.id,
+                "sheet_name": "Robo",
+                "group": "Г1",
+            },
+            format="json",
+            HTTP_X_CNC_BOT_TOKEN="secret-token",
+        )
+        assert lst.status_code == status.HTTP_200_OK
+        assert len(lst.data["students"]) == 1
+
+        profile = client.post(
+            "/api/bot/gateway/",
+            {
+                "action": "get_student_profile",
+                "table_id": table.id,
+                "sheet_name": "Robo",
+                "student_fio": "Иванов",
+            },
+            format="json",
+            HTTP_X_CNC_BOT_TOKEN="secret-token",
+        )
+        assert profile.status_code == status.HTTP_200_OK
+        assert profile.data["student"]["status"] == "учится"
+        assert profile.data["student"]["social_links"][0].startswith("https://")
+
         rm = client.post(
             "/api/bot/gateway/",
             {
@@ -260,3 +290,20 @@ class TestBotApiViews:
         row = table.content["custom_sheet"]["sheets"][0]["data"][1]
         assert "18.04.2026" in row[3]
         assert "опоздал" in row[3]
+
+        st = client.post(
+            "/api/bot/gateway/",
+            {
+                "action": "set_student_status",
+                "table_id": table.id,
+                "sheet_name": "Robo",
+                "student_fio": "Иванов",
+                "status_value": "отчислен",
+            },
+            format="json",
+            HTTP_X_CNC_BOT_TOKEN="secret-token",
+        )
+        assert st.status_code == status.HTTP_200_OK
+        table.refresh_from_db()
+        row = table.content["custom_sheet"]["sheets"][0]["data"][1]
+        assert row[2] == "отчислен"

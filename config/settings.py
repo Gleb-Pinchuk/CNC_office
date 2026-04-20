@@ -59,6 +59,7 @@ BOT_SHEET_FIO_COL = int(os.getenv("BOT_SHEET_FIO_COL", "2"))
 BOT_SHEET_GROUP_COL = int(os.getenv("BOT_SHEET_GROUP_COL", "1"))
 BOT_SHEET_STATUS_COL = int(os.getenv("BOT_SHEET_STATUS_COL", "11"))
 BOT_SHEET_REMARK_COL = int(os.getenv("BOT_SHEET_REMARK_COL", "12"))
+BOT_SHEET_SOCIAL_COLS = os.getenv("BOT_SHEET_SOCIAL_COLS", "13,14,15")
 
 # Celery / Redis
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://redis:6379/0")

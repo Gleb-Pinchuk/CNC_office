@@ -1,5 +1,6 @@
-import os
 import logging
+import os
+import re
 from hmac import compare_digest
 
 from django.conf import settings
@@ -83,6 +84,12 @@ class BotGatewayView(APIView):
             return self._search_students(request, owner)
         if action == "set_student_remark":
             return self._set_student_remark(request, owner)
+        if action == "list_students":
+            return self._list_students(request, owner)
+        if action == "get_student_profile":
+            return self._get_student_profile(request, owner)
+        if action == "set_student_status":
+            return self._set_student_status(request, owner)
         return Response(
             {"detail": f"Неизвестное action: {action}"},
             status=status.HTTP_400_BAD_REQUEST,
@@ -103,6 +110,53 @@ class BotGatewayView(APIView):
             int(getattr(settings, "BOT_SHEET_REMARK_COL", 12)),
         )
 
+    def _social_cols(self):
+        raw = (
+            getattr(settings, "BOT_SHEET_SOCIAL_COLS", "")
+            or os.getenv("BOT_SHEET_SOCIAL_COLS", "13,14,15")
+        )
+        out = []
+        for part in str(raw).split(","):
+            p = part.strip()
+            if not p:
+                continue
+            try:
+                out.append(int(p))
+            except ValueError:
+                continue
+        return out
+
+    @staticmethod
+    def _normalize_link(token: str) -> str:
+        t = (token or "").strip()
+        if not t:
+            return ""
+        if t.startswith(("http://", "https://")):
+            return t
+        if t.startswith("@"):
+            return f"https://t.me/{t[1:]}"
+        if "vk.com/" in t and not t.startswith(("http://", "https://")):
+            return f"https://{t}"
+        if "t.me/" in t and not t.startswith(("http://", "https://")):
+            return f"https://{t}"
+        return ""
+
+    def _extract_social_links(self, row):
+        if not isinstance(row, list):
+            return []
+        links = []
+        seen = set()
+        for idx in self._social_cols():
+            if idx < 0 or idx >= len(row):
+                continue
+            raw = "" if row[idx] is None else str(row[idx])
+            for part in re.split(r"[\s,;]+", raw):
+                link = self._normalize_link(part)
+                if link and link not in seen:
+                    links.append(link)
+                    seen.add(link)
+        return links
+
     def _list_groups(self, request, owner):
         table_id = request.data.get("table_id")
         sheet_name = request.data.get("sheet_name")
@@ -111,7 +165,7 @@ class BotGatewayView(APIView):
             return Response(
                 {"detail": "Таблица не найдена"}, status=status.HTTP_404_NOT_FOUND
             )
-        _, _, _, gcol = self._bot_cols()
+        _, gcol, _, _ = self._bot_cols()
         _, data = self._sheet_data_for_table(table, sheet_name)
         if data is None:
             return Response(
@@ -119,6 +173,32 @@ class BotGatewayView(APIView):
             )
         groups = list_groups(data, gcol)
         return Response({"groups": groups, "sheet_name": sheet_name})
+
+    def _list_students(self, request, owner):
+        table_id = request.data.get("table_id")
+        sheet_name = request.data.get("sheet_name")
+        group_filter = request.data.get("group") or request.data.get("group_name")
+        table = SectionTable.objects.filter(owner=owner, id=table_id).first()
+        if not table:
+            return Response(
+                {"detail": "Таблица не найдена"}, status=status.HTTP_404_NOT_FOUND
+            )
+        fio_c, gcol, st_c, _ = self._bot_cols()
+        _, data = self._sheet_data_for_table(table, sheet_name)
+        if data is None:
+            return Response(
+                {"detail": "Лист не найден"}, status=status.HTTP_404_NOT_FOUND
+            )
+        students = search_students(
+            data,
+            fio_col=fio_c,
+            group_col=gcol,
+            status_col=st_c,
+            group_filter=group_filter,
+            query=None,
+            skip_dismissed=False,
+        )
+        return Response({"students": students, "sheet_name": sheet_name})
 
     def _search_students(self, request, owner):
         table_id = request.data.get("table_id")
@@ -143,8 +223,63 @@ class BotGatewayView(APIView):
             status_col=st_c,
             group_filter=group_filter,
             query=query,
+            skip_dismissed=False,
         )
         return Response({"students": students, "sheet_name": sheet_name})
+
+    def _get_student_profile(self, request, owner):
+        table_id = request.data.get("table_id")
+        sheet_name = request.data.get("sheet_name")
+        student_fio = (request.data.get("student_fio") or "").strip()
+        group_filter = request.data.get("group") or request.data.get("group_name")
+        if not student_fio:
+            return Response(
+                {"detail": "Нужен student_fio"}, status=status.HTTP_400_BAD_REQUEST
+            )
+        table = SectionTable.objects.filter(owner=owner, id=table_id).first()
+        if not table:
+            return Response(
+                {"detail": "Таблица не найдена"}, status=status.HTTP_404_NOT_FOUND
+            )
+        fio_c, gcol, st_c, rcol = self._bot_cols()
+        _, data = self._sheet_data_for_table(table, sheet_name)
+        if data is None:
+            return Response(
+                {"detail": "Лист не найден"}, status=status.HTTP_404_NOT_FOUND
+            )
+        one, allm = find_one_student_row(
+            data,
+            student_fio,
+            fio_col=fio_c,
+            group_col=gcol,
+            status_col=st_c,
+            group_filter=group_filter,
+            skip_dismissed=False,
+        )
+        if not one:
+            return Response({"detail": "Студент не найден"}, status=status.HTTP_404_NOT_FOUND)
+        if len(allm) > 1 and not (group_filter or "").strip():
+            return Response(
+                {"detail": "Несколько совпадений, укажите group", "candidates": allm[:15]},
+                status=status.HTTP_409_CONFLICT,
+            )
+        row_idx = one["row_index"]
+        row = data[row_idx] if row_idx < len(data) and isinstance(data[row_idx], list) else []
+        remark_value = ""
+        if rcol < len(row):
+            remark_value = "" if row[rcol] is None else str(row[rcol])
+        return Response(
+            {
+                "student": {
+                    "row_index": row_idx,
+                    "fio": one.get("fio", ""),
+                    "group": one.get("group", ""),
+                    "status": one.get("status", ""),
+                    "remark_value": remark_value,
+                    "social_links": self._extract_social_links(row),
+                }
+            }
+        )
 
     def _set_student_remark(self, request, owner):
         table_id = request.data.get("table_id")
@@ -239,6 +374,70 @@ class BotGatewayView(APIView):
                 "table_id": table.id,
                 "row_index": row_idx,
                 "remark_col": rcol,
+            }
+        )
+
+    def _set_student_status(self, request, owner):
+        table_id = request.data.get("table_id")
+        sheet_name = request.data.get("sheet_name")
+        student_fio = (request.data.get("student_fio") or "").strip()
+        new_status = (request.data.get("status_value") or "").strip()
+        group_filter = request.data.get("group") or request.data.get("group_name")
+        if not student_fio or not new_status:
+            return Response(
+                {"detail": "Нужны student_fio и status_value"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        fio_c, gcol, st_c, _ = self._bot_cols()
+        with transaction.atomic():
+            table = (
+                SectionTable.objects.select_for_update()
+                .filter(owner=owner, id=table_id)
+                .first()
+            )
+            if not table:
+                return Response(
+                    {"detail": "Таблица не найдена"}, status=status.HTTP_404_NOT_FOUND
+                )
+            _, data = self._sheet_data_for_table(table, sheet_name)
+            if data is None:
+                return Response(
+                    {"detail": "Лист не найден"}, status=status.HTTP_404_NOT_FOUND
+                )
+            one, allm = find_one_student_row(
+                data,
+                student_fio,
+                fio_col=fio_c,
+                group_col=gcol,
+                status_col=st_c,
+                group_filter=group_filter,
+                skip_dismissed=False,
+            )
+            if not one:
+                return Response(
+                    {"detail": "Студент не найден"},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            if len(allm) > 1 and not (group_filter or "").strip():
+                return Response(
+                    {
+                        "detail": "Несколько совпадений, укажите group",
+                        "candidates": allm[:15],
+                    },
+                    status=status.HTTP_409_CONFLICT,
+                )
+            row_idx = one["row_index"]
+            content = table.content if isinstance(table.content, dict) else {}
+            set_cell_value(content, sheet_name, row_idx, st_c, new_status)
+            table.content = content
+            table.needs_nextcloud_push = True
+            table.save(update_fields=["content", "needs_nextcloud_push", "updated_at"])
+        return Response(
+            {
+                "status": "ok",
+                "table_id": table.id,
+                "row_index": row_idx,
+                "status_col": st_c,
             }
         )
 
