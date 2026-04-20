@@ -17,6 +17,13 @@ S3_PREFIX="${S3_PREFIX:-cnc-office/nightly}"
 cd "$PROJECT_DIR"
 mkdir -p "$BACKUP_DIR"
 
+if [[ -f "$PROJECT_DIR/.env" ]]; then
+  # shellcheck disable=SC1091
+  set -a
+  source "$PROJECT_DIR/.env"
+  set +a
+fi
+
 ts="$(date +%F_%H-%M-%S)"
 db_file="$BACKUP_DIR/db_${ts}.sql.gz"
 xlsx_file="$BACKUP_DIR/${TABLE_EXPORT_PREFIX}_${ts}.xlsx"
@@ -24,11 +31,8 @@ xlsx_file="$BACKUP_DIR/${TABLE_EXPORT_PREFIX}_${ts}.xlsx"
 echo "[backup] start: $ts"
 echo "[backup] directory: $BACKUP_DIR"
 
-db_name="${POSTGRES_DB:-cnc_office}"
-db_user="${POSTGRES_USER:-cnc_user}"
-
 docker compose exec -T db sh -lc \
-  "PGPASSWORD='${POSTGRES_PASSWORD:-}' pg_dump -U '${db_user}' '${db_name}'" \
+  'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' \
   | gzip -9 > "$db_file"
 echo "[backup] db dump saved: $db_file"
 
