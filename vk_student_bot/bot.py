@@ -120,7 +120,12 @@ class CNCApi:
         return self.post("list_students", body).get("students", [])
 
     def get_student_profile(
-        self, table_id: int, sheet_name: str, student_fio: str, group: Optional[str]
+        self,
+        table_id: int,
+        sheet_name: str,
+        student_fio: str,
+        group: Optional[str],
+        remark_date: Optional[str] = None,
     ) -> dict:
         body: Dict[str, Any] = {
             "table_id": table_id,
@@ -129,6 +134,8 @@ class CNCApi:
         }
         if group:
             body["group"] = group
+        if remark_date:
+            body["remark_date"] = remark_date
         return self.post("get_student_profile", body).get("student", {})
 
     def set_student_remark(
@@ -456,7 +463,7 @@ class StudentBot:
             self.show_main(peer_id, "Сначала выберите направление, группу и студента.")
             return
         profile = self.api.get_student_profile(
-            self.table_id(), ctx.direction, ctx.student, ctx.group
+            self.table_id(), ctx.direction, ctx.student, ctx.group, ctx.selected_date
         )
         status_value = profile.get("status", "") or "-"
         links = profile.get("social_links") or []

@@ -16,6 +16,7 @@ from sections.models import SectionTable
 from .remark_utils import parse_input_date, set_remark_for_date
 from .sheet_utils import find_sheet_by_name, get_workbook_sheets, set_cell_value
 from .student_sheet import find_one_student_row, list_groups, search_students
+from .week_column import pick_week_col_by_date
 
 logger = logging.getLogger(__name__)
 
@@ -241,7 +242,9 @@ class BotGatewayView(APIView):
             return Response(
                 {"detail": "Таблица не найдена"}, status=status.HTTP_404_NOT_FOUND
             )
-        fio_c, gcol, st_c, rcol = self._bot_cols()
+        fio_c, gcol, st_c, rcol_default = self._bot_cols()
+        remark_date_raw = (request.data.get("remark_date") or "").strip()
+        remark_date = parse_input_date(remark_date_raw) if remark_date_raw else None
         _, data = self._sheet_data_for_table(table, sheet_name)
         if data is None:
             return Response(
@@ -265,6 +268,9 @@ class BotGatewayView(APIView):
             )
         row_idx = one["row_index"]
         row = data[row_idx] if row_idx < len(data) and isinstance(data[row_idx], list) else []
+        rcol = pick_week_col_by_date(data, remark_date) if remark_date else None
+        if rcol is None:
+            rcol = rcol_default
         remark_value = ""
         if rcol < len(row):
             remark_value = "" if row[rcol] is None else str(row[rcol])
@@ -276,6 +282,7 @@ class BotGatewayView(APIView):
                     "group": one.get("group", ""),
                     "status": one.get("status", ""),
                     "remark_value": remark_value,
+                    "remark_col": rcol,
                     "social_links": self._extract_social_links(row),
                 }
             }
@@ -303,7 +310,7 @@ class BotGatewayView(APIView):
                 {"detail": "Неверный формат даты remark_date"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        fio_c, gcol, st_c, rcol = self._bot_cols()
+        fio_c, gcol, st_c, rcol_default = self._bot_cols()
         with transaction.atomic():
             table = (
                 SectionTable.objects.select_for_update()
@@ -346,6 +353,7 @@ class BotGatewayView(APIView):
                     {"detail": "Некорректная строка"}, status=status.HTTP_400_BAD_REQUEST
                 )
             row = data[row_idx]
+            rcol = pick_week_col_by_date(data, rd) or rcol_default
             current = ""
             if isinstance(row, list) and len(row) > rcol:
                 current = str(row[rcol] or "")

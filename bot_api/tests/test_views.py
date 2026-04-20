@@ -307,3 +307,79 @@ class TestBotApiViews:
         table.refresh_from_db()
         row = table.content["custom_sheet"]["sheets"][0]["data"][1]
         assert row[2] == "отчислен"
+
+    @override_settings(
+        CNC_BOT_API_SECRET="secret-token",
+        CNC_BOT_TABLE_OWNER_USERNAME="bot_owner",
+        BOT_SHEET_FIO_COL=0,
+        BOT_SHEET_GROUP_COL=1,
+        BOT_SHEET_STATUS_COL=2,
+        BOT_SHEET_REMARK_COL=3,
+    )
+    def test_set_student_remark_uses_week_column_from_header_date(self, client):
+        from django.contrib.auth import get_user_model
+
+        owner = get_user_model().objects.create_user(username="bot_owner", password="pass")
+        table = SectionTable.objects.create(
+            owner=owner,
+            title="Weeks",
+            section_type="rangers",
+            content={
+                "custom_sheet": {
+                    "version": 2,
+                    "activeSheetIndex": 0,
+                    "sheets": [
+                        {
+                            "name": "Robo",
+                            "data": [
+                                [
+                                    "ФИО",
+                                    "Группа",
+                                    "Статус",
+                                    "Резерв",
+                                    "15.04.2026",
+                                    "22.04.2026",
+                                ],
+                                ["Иванов Иван", "Г1", "учится", "", "", ""],
+                            ],
+                        }
+                    ],
+                }
+            },
+        )
+
+        rm = client.post(
+            "/api/bot/gateway/",
+            {
+                "action": "set_student_remark",
+                "table_id": table.id,
+                "sheet_name": "Robo",
+                "student_fio": "Иванов",
+                "remark_date": "21.04.2026",
+                "remark_text": "замечание недели",
+            },
+            format="json",
+            HTTP_X_CNC_BOT_TOKEN="secret-token",
+        )
+        assert rm.status_code == status.HTTP_200_OK
+        assert rm.data["remark_col"] == 5
+
+        table.refresh_from_db()
+        row = table.content["custom_sheet"]["sheets"][0]["data"][1]
+        assert row[4] == ""
+        assert "замечание недели" in row[5]
+
+        prof = client.post(
+            "/api/bot/gateway/",
+            {
+                "action": "get_student_profile",
+                "table_id": table.id,
+                "sheet_name": "Robo",
+                "student_fio": "Иванов",
+                "remark_date": "21.04.2026",
+            },
+            format="json",
+            HTTP_X_CNC_BOT_TOKEN="secret-token",
+        )
+        assert prof.status_code == status.HTTP_200_OK
+        assert prof.data["student"]["remark_col"] == 5
