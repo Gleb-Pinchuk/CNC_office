@@ -128,35 +128,102 @@ class BotGatewayView(APIView):
         return out
 
     @staticmethod
-    def _normalize_link(token: str) -> str:
+    def _platform_label(platform: str) -> str:
+        p = (platform or "").strip().lower()
+        if p == "vk":
+            return "VK"
+        if p == "tiktok":
+            return "TikTok"
+        return "TG"
+
+    @staticmethod
+    def _clean_token(token: str) -> str:
+        t = (token or "").strip()
+        t = t.strip("()[]{}<>\"'`")
+        t = t.rstrip(".,:;!?")
+        # Часто в таблице пишут префиксы вроде "тг:@name", "vk: id123"
+        t = re.sub(
+            r"^(tg|тг|telegram|телеграм|vk|вк|tiktok|тикток)\s*[:\-]\s*",
+            "",
+            t,
+            flags=re.IGNORECASE,
+        )
+        return t.strip()
+
+    @staticmethod
+    def _guess_platform(token: str, raw_cell: str, default_platform: str) -> str:
+        t = (token or "").lower()
+        cell = (raw_cell or "").lower()
+        if "tiktok" in t or "tiktok" in cell or "тикток" in t or "тикток" in cell:
+            return "tiktok"
+        if "vk.com" in t or t.startswith("id") or t.startswith("club") or t.startswith("public"):
+            return "vk"
+        if "t.me" in t or "telegram" in t or "телеграм" in t:
+            return "tg"
+        if t.startswith("@"):
+            # Если в ячейке было явно "vk"/"tiktok", @ считаем для этой сети.
+            if "vk" in cell or "вк" in cell:
+                return "vk"
+            if "tiktok" in cell or "тикток" in cell:
+                return "tiktok"
+            return default_platform or "tg"
+        return default_platform or "tg"
+
+    @staticmethod
+    def _normalize_social_url(token: str, platform: str) -> str:
         t = (token or "").strip()
         if not t:
             return ""
         if t.startswith(("http://", "https://")):
             return t
-        if t.startswith("@"):
-            return f"https://t.me/{t[1:]}"
         if "vk.com/" in t and not t.startswith(("http://", "https://")):
             return f"https://{t}"
         if "t.me/" in t and not t.startswith(("http://", "https://")):
             return f"https://{t}"
+        if "tiktok.com/" in t and not t.startswith(("http://", "https://")):
+            return f"https://{t}"
+        if t.startswith("@"):
+            nick = t[1:]
+            if not nick:
+                return ""
+            if platform == "vk":
+                return f"https://vk.com/{nick}"
+            if platform == "tiktok":
+                return f"https://www.tiktok.com/@{nick}"
+            return f"https://t.me/{nick}"
+        if platform == "vk" and re.match(r"^(id|club|public)\d+$", t, flags=re.IGNORECASE):
+            return f"https://vk.com/{t}"
         return ""
 
     def _extract_social_links(self, row):
         if not isinstance(row, list):
-            return []
+            return [], []
         links = []
+        profiles = []
         seen = set()
-        for idx in self._social_cols():
+        preferred = ["tg", "vk", "tiktok"]
+        for pos, idx in enumerate(self._social_cols()):
             if idx < 0 or idx >= len(row):
                 continue
-            raw = "" if row[idx] is None else str(row[idx])
-            for part in re.split(r"[\s,;]+", raw):
-                link = self._normalize_link(part)
-                if link and link not in seen:
-                    links.append(link)
-                    seen.add(link)
-        return links
+            raw = "" if row[idx] is None else str(row[idx]).strip()
+            if not raw:
+                continue
+            default_platform = preferred[pos] if pos < len(preferred) else "tg"
+            parts = [p for p in re.split(r"[\s,;\n]+", raw) if p and p.strip()]
+            if not parts:
+                parts = [raw]
+            for part in parts:
+                cleaned = self._clean_token(part)
+                if not cleaned:
+                    continue
+                platform = self._guess_platform(cleaned, raw, default_platform)
+                link = self._normalize_social_url(cleaned, platform)
+                if not link or link in seen:
+                    continue
+                seen.add(link)
+                links.append(link)
+                profiles.append({"label": self._platform_label(platform), "url": link})
+        return links, profiles
 
     def _list_groups(self, request, owner):
         table_id = request.data.get("table_id")
@@ -274,6 +341,7 @@ class BotGatewayView(APIView):
         remark_value = ""
         if rcol < len(row):
             remark_value = "" if row[rcol] is None else str(row[rcol])
+        social_links, social_profiles = self._extract_social_links(row)
         return Response(
             {
                 "student": {
@@ -283,7 +351,10 @@ class BotGatewayView(APIView):
                     "status": one.get("status", ""),
                     "remark_value": remark_value,
                     "remark_col": rcol,
-                    "social_links": self._extract_social_links(row),
+                    # Backward-compat для старых клиентов бота
+                    "social_links": social_links,
+                    # Новый формат для красивого отображения с подписью сети
+                    "social_profiles": social_profiles,
                 }
             }
         )

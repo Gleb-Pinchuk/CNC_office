@@ -605,6 +605,7 @@ class StudentBot:
 
         status_value = (profile.get("status") or "").strip() or "—"
         remark_value = (profile.get("remark_value") or "").strip()
+        social_profiles = profile.get("social_profiles") or []
         links = profile.get("social_links") or []
         lines = [
             f"👤 {profile.get('fio', ctx.student)}",
@@ -613,7 +614,16 @@ class StudentBot:
             f"🎓 Статус учебы: {status_value}",
             f"📅 Дата замечаний: {ctx.selected_date}",
         ]
-        if links:
+        if social_profiles:
+            lines.append("")
+            lines.append("🔗 Соцсети:")
+            for item in social_profiles[:10]:
+                label = (item.get("label") or "Ссылка").strip()
+                url = (item.get("url") or "").strip()
+                if url:
+                    lines.append(f"• {label}: {url}")
+        elif links:
+            # Fallback для совместимости со старым ответом API.
             lines.append("")
             lines.append("🔗 Соцсети:")
             for link in links[:10]:
