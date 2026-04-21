@@ -10,6 +10,7 @@ from django.contrib.auth import get_user_model
 from django.db import transaction
 
 from bot_api.sheet_utils import set_cell_value
+from bot_api.sheet_utils import get_workbook_sheets
 from bot_api.student_sheet import search_students
 from bot_api.week_column import pick_week_col_by_date
 from sections.models import SectionTable
@@ -128,11 +129,8 @@ def _find_table(owner, section_type: str, title_fragment: str) -> Optional[Secti
 
 
 def _build_remark(match: MatchResult, link: str, scan_date: date) -> str:
-    day = scan_date.strftime("%d.%m.%Y")
-    return (
-        f"[AI-MOD {day}] Найден потенциально запрещенный контент: "
-        f"{match.reason}. Источник: {link}. Пост: {match.post_url}"
-    )
+    # В таблицу пишем краткий итог, как просил заказчик.
+    return (match.remark_text or "выявлен запрещенный контент").strip()
 
 
 def run_social_moderation_scan(
@@ -162,10 +160,14 @@ def run_social_moderation_scan(
         raise RuntimeError("Таблица для модерации не найдена")
 
     content = table.content if isinstance(table.content, dict) else {}
-    sheets = content.get("sheets") or []
+    sheets, _ = get_workbook_sheets(content)
     stats = ScanStats()
     today = scan_date or datetime.now().date()
     stop = False
+
+    if not sheets:
+        logger.warning("Social moderation: no sheets found in table content")
+        return stats
 
     for sheet in sheets:
         sheet_name = str(sheet.get("name") or "")
@@ -181,6 +183,9 @@ def run_social_moderation_scan(
             status_col=cfg.status_col,
             skip_dismissed=True,
         )
+        if not students:
+            logger.info("Social moderation: no students in sheet '%s'", sheet_name)
+            continue
         for student in students:
             if max_students and stats.checked_students >= max_students:
                 stop = True

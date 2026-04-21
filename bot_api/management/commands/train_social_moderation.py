@@ -28,6 +28,11 @@ class Command(BaseCommand):
             default="",
             help="Куда записать hash изображения (blocked|allowed).",
         )
+        parser.add_argument(
+            "--category",
+            default="",
+            help="Категория нарушения для blocked hash (например cigarettes|alcohol|car_driving|motorcycle_driving).",
+        )
         parser.add_argument("--image", default="", help="Путь к изображению для hash.")
         parser.add_argument("--image-url", default="", help="URL изображения для hash.")
 
@@ -59,21 +64,27 @@ class Command(BaseCommand):
             rules.keywords = [kw for kw in rules.keywords if kw != remove_kw]
 
         label = options["label"].strip()
+        category = options["category"].strip().lower()
         if label:
             payload = self._read_image_bytes(options["image"].strip(), options["image_url"].strip())
             image = Image.open(io.BytesIO(payload)).convert("RGB")
             ph = str(imagehash.phash(image)).lower()
             if label == "blocked":
-                rules.blocked_hashes.append(ph)
+                if category:
+                    rules.blocked_hashes_by_category.setdefault(category, []).append(ph)
+                else:
+                    rules.blocked_hashes.append(ph)
             else:
                 rules.allowed_hashes.append(ph)
-            self.stdout.write(self.style.SUCCESS(f"Добавлен hash={ph} в {label}"))
+            suffix = f" (category={category})" if category else ""
+            self.stdout.write(self.style.SUCCESS(f"Добавлен hash={ph} в {label}{suffix}"))
 
         save_rules(cfg.rules_path, rules)
         self.stdout.write(
             self.style.SUCCESS(
                 f"Сохранено: keywords={len(set(rules.keywords))}, "
                 f"blocked={len(set(rules.blocked_hashes))}, "
+                f"blocked_by_category={sum(len(set(v)) for v in rules.blocked_hashes_by_category.values())}, "
                 f"allowed={len(set(rules.allowed_hashes))}"
             )
         )

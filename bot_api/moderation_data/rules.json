@@ -1,4 +1,57 @@
 {
+  "category_rules": [
+    {
+      "category": "cigarettes",
+      "remark": "курит сигареты",
+      "keywords": [
+        "сигарет",
+        "курит",
+        "курение",
+        "вейп",
+        "vape",
+        "smoking",
+        "cigarette"
+      ]
+    },
+    {
+      "category": "alcohol",
+      "remark": "употребляет алкоголь",
+      "keywords": [
+        "алкогол",
+        "пьет",
+        "пиво",
+        "вино",
+        "водка",
+        "drunk",
+        "alcohol",
+        "beer"
+      ]
+    },
+    {
+      "category": "car_driving",
+      "remark": "вождение автомобиля без прав",
+      "keywords": [
+        "за рулем",
+        "машин",
+        "автомобил",
+        "car",
+        "driving car",
+        "drive car"
+      ]
+    },
+    {
+      "category": "motorcycle_driving",
+      "remark": "вождение мотоцикла без прав",
+      "keywords": [
+        "мотоцикл",
+        "мото",
+        "байк",
+        "motorcycle",
+        "bike",
+        "riding moto"
+      ]
+    }
+  ],
   "keywords": [
     "наркотик",
     "закладк",
@@ -8,6 +61,12 @@
     "экстремизм"
   ],
   "blocked_hashes": [],
+  "blocked_hashes_by_category": {
+    "cigarettes": [],
+    "alcohol": [],
+    "car_driving": [],
+    "motorcycle_driving": []
+  },
   "allowed_hashes": []
 }
 
