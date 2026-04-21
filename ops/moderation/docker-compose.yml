@@ -16,6 +16,9 @@ services:
     command: celery -A config worker -l info --concurrency=1 --queues=celery
     volumes:
       - ../..:/app
+    networks:
+      - app-network
+      - db-network
 
   moderation_beat:
     build:
@@ -34,4 +37,15 @@ services:
     command: celery -A config beat -l info
     volumes:
       - ../..:/app
+    networks:
+      - app-network
+      - db-network
+
+networks:
+  app-network:
+    external: true
+    name: cnc_office_app
+  db-network:
+    external: true
+    name: cnc_office_db_internal
 

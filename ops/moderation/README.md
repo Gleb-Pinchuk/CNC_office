@@ -7,6 +7,11 @@
 - `moderation_worker` — исполняет Celery-задачи модерации.
 - `moderation_beat` — планировщик периодических запусков.
 
+Контейнеры подключаются к внешним Docker-сетям основного проекта:
+
+- `cnc_office_app` (для `redis`)
+- `cnc_office_db_internal` (для `db`)
+
 ## Запуск
 
 1. Скопируйте корневой `.env` и заполните настройки БД/Redis.
@@ -23,13 +28,13 @@ docker compose -f ops/moderation/docker-compose.yml up -d --build
 ## Ручной запуск dry-run
 
 ```bash
-docker compose -f docker-compose.yml exec web python manage.py run_social_moderation --max-students 20
+docker compose -f ops/moderation/docker-compose.yml exec moderation_worker python manage.py run_social_moderation --max-students 20
 ```
 
 ## Ручной запуск с записью в таблицу
 
 ```bash
-docker compose -f docker-compose.yml exec web python manage.py run_social_moderation --apply --max-students 20
+docker compose -f ops/moderation/docker-compose.yml exec moderation_worker python manage.py run_social_moderation --apply --max-students 20
 ```
 
 ## Обучение правил
@@ -37,12 +42,12 @@ docker compose -f docker-compose.yml exec web python manage.py run_social_modera
 Добавить keyword:
 
 ```bash
-docker compose -f docker-compose.yml exec web python manage.py train_social_moderation --add-keyword "новое_слово"
+docker compose -f ops/moderation/docker-compose.yml exec moderation_worker python manage.py train_social_moderation --add-keyword "новое_слово"
 ```
 
 Добавить hash запрещенного изображения:
 
 ```bash
-docker compose -f docker-compose.yml exec web python manage.py train_social_moderation --label blocked --image /app/path/to/file.jpg
+docker compose -f ops/moderation/docker-compose.yml exec moderation_worker python manage.py train_social_moderation --label blocked --image /app/path/to/file.jpg
 ```
 
