@@ -6,11 +6,13 @@ from hmac import compare_digest
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import transaction
+from django.http import HttpResponse
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from api.xlsx_export import export_custom_sheet_to_xlsx_bytes
 from sections.models import SectionTable
 
 from .remark_utils import parse_input_date
@@ -91,6 +93,8 @@ class BotGatewayView(APIView):
             return self._get_student_profile(request, owner)
         if action == "set_student_status":
             return self._set_student_status(request, owner)
+        if action == "export_table_xlsx":
+            return self._export_table_xlsx(request, owner)
         return Response(
             {"detail": f"Неизвестное action: {action}"},
             status=status.HTTP_400_BAD_REQUEST,
@@ -677,6 +681,31 @@ class BotGatewayView(APIView):
             table.save(update_fields=["content", "needs_nextcloud_push", "updated_at"])
         logger.info(f"Ячейка обновлена: table_id={table_id}, sheet={sheet_name}, row={row}, col={col}, value={value}")
         return Response({"status": "ok", "table_id": table.id, "row": row, "col": col})
+
+    def _export_table_xlsx(self, request, owner):
+        table_id = request.data.get("table_id")
+        section_type = request.data.get("section_type") or "rangers"
+        title_contains = (
+            request.data.get("title_contains") or request.data.get("table_title") or ""
+        )
+        if table_id:
+            table = SectionTable.objects.filter(owner=owner, id=table_id).first()
+        else:
+            table = self._find_table(owner, section_type, title_contains)
+        if not table:
+            return Response(
+                {"detail": "Таблица не найдена"}, status=status.HTTP_404_NOT_FOUND
+            )
+        xlsx = export_custom_sheet_to_xlsx_bytes(
+            table.title, table.content if isinstance(table.content, dict) else {}
+        )
+        resp = HttpResponse(
+            xlsx,
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        filename = (table.title or "table").replace("/", "_").replace("\\", "_")
+        resp["Content-Disposition"] = f'attachment; filename="{filename}.xlsx"'
+        return resp
 
 
 class BotHealthView(APIView):

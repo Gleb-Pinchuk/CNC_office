@@ -167,6 +167,37 @@ class TestBotApiViews:
     @override_settings(
         CNC_BOT_API_SECRET="secret-token", CNC_BOT_TABLE_OWNER_USERNAME="bot_owner"
     )
+    def test_export_table_xlsx_returns_attachment(self, client):
+        from django.contrib.auth import get_user_model
+
+        owner = get_user_model().objects.create_user(
+            username="bot_owner", password="pass"
+        )
+        table = SectionTable.objects.create(
+            owner=owner,
+            title="Rangers main",
+            section_type="rangers",
+            content={"custom_sheet": {"data": [["A1"]], "name": "Sheet1"}},
+        )
+
+        response = client.post(
+            "/api/bot/gateway/",
+            {"action": "export_table_xlsx", "table_id": table.id},
+            format="json",
+            HTTP_X_CNC_BOT_TOKEN="secret-token",
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        assert (
+            response["Content-Type"]
+            == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+        assert "attachment; filename=" in response["Content-Disposition"]
+        assert len(response.content) > 100
+
+    @override_settings(
+        CNC_BOT_API_SECRET="secret-token", CNC_BOT_TABLE_OWNER_USERNAME="bot_owner"
+    )
     def test_gateway_rejects_unknown_action(self, client):
         from django.contrib.auth import get_user_model
 

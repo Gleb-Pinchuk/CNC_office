@@ -177,6 +177,30 @@ class CNCApi:
             body["group"] = group
         return self.post("set_student_status", body)
 
+    def export_table_xlsx(self, table_id: int) -> tuple[bytes, str]:
+        r = requests.post(
+            f"{self.base}/bot/gateway/",
+            json={"action": "export_table_xlsx", "table_id": table_id},
+            headers=_headers(),
+            timeout=90,
+        )
+        if r.status_code >= 400:
+            text = r.text or str(r.status_code)
+            try:
+                detail = r.json().get("detail", text)
+            except Exception:
+                detail = text
+            raise CNCApiError(f"Ошибка API ({r.status_code}): {detail}")
+        cd = r.headers.get("Content-Disposition", "")
+        filename = "table.xlsx"
+        marker = 'filename="'
+        if marker in cd:
+            tail = cd.split(marker, 1)[1]
+            filename = tail.split('"', 1)[0] or filename
+        if not filename.lower().endswith(".xlsx"):
+            filename = f"{filename}.xlsx"
+        return r.content, filename
+
 
 @dataclass
 class UserCtx:
@@ -318,6 +342,9 @@ class StudentBot:
             if "дата" in tl:
                 self.show_date_picker(peer_id, ctx)
                 return
+            if "выгруз" in tl or "excel" in tl or "xlsx" in tl:
+                self.export_table_to_vk(peer_id)
+                return
 
             self.show_main(peer_id, "Не понял команду. Используйте кнопки ниже.")
         except CNCApiError as e:
@@ -377,6 +404,8 @@ class StudentBot:
                 self.show_students(peer_id, ctx)
             elif cmd == "date":
                 self.show_date_picker(peer_id, ctx)
+            elif cmd == "exp_xlsx":
+                self.export_table_to_vk(peer_id)
             elif cmd == "d_today":
                 ctx.selected_date = _tz_now().strftime("%d.%m.%Y")
                 self.send(peer_id, f"📅 Дата: {ctx.selected_date}")
@@ -453,6 +482,8 @@ class StudentBot:
         kb.add_button("👤 Студент", VkKeyboardColor.SECONDARY, payload=_pl("sts"))
         kb.add_line()
         kb.add_button("📅 Выбор даты", VkKeyboardColor.SECONDARY, payload=_pl("date"))
+        kb.add_line()
+        kb.add_button("📥 Выгрузить Excel", VkKeyboardColor.POSITIVE, payload=_pl("exp_xlsx"))
         suffix = []
         if ctx.direction:
             suffix.append(f"🎓 {ctx.direction}")
@@ -706,6 +737,12 @@ class StudentBot:
         ctx.students_cache = []
         self.show_student_profile(peer_id, ctx)
 
+    def export_table_to_vk(self, peer_id: int):
+        self.send(peer_id, "⏳ Готовлю актуальную таблицу к выгрузке...")
+        table_id = self.table_id()
+        blob, filename = self.api.export_table_xlsx(table_id)
+        self.send_document(peer_id, filename, blob, "✅ Актуальная таблица из БД:")
+
     # -------------------- отправка --------------------
 
     def send(self, peer_id: int, text: str, keyboard: Optional[VkKeyboard] = None):
@@ -717,6 +754,52 @@ class StudentBot:
         if keyboard is not None:
             payload["keyboard"] = keyboard.get_keyboard()
         self.vk_session.method("messages.send", payload)
+
+    def send_document(
+        self, peer_id: int, filename: str, body: bytes, caption: Optional[str] = None
+    ):
+        vk = self.vk_session.get_api()
+        upload = vk.docs.getMessagesUploadServer(type="doc", peer_id=peer_id)
+        upload_url = upload.get("upload_url")
+        if not upload_url:
+            raise RuntimeError("VK не вернул upload_url для документа")
+        files = {
+            "file": (
+                filename,
+                body,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        }
+        up_resp = requests.post(upload_url, files=files, timeout=120)
+        up_resp.raise_for_status()
+        payload = up_resp.json()
+        file_token = payload.get("file")
+        if not file_token:
+            raise RuntimeError(f"VK upload error: {payload}")
+        saved = vk.docs.save(file=file_token, title=filename)
+        item = None
+        if isinstance(saved, dict):
+            docs = saved.get("doc") or saved.get("docs")
+            if isinstance(docs, list) and docs:
+                item = docs[0]
+            elif isinstance(docs, dict):
+                item = docs
+        if not item and isinstance(saved, list) and saved:
+            item = saved[0]
+        if not item:
+            raise RuntimeError(f"VK save error: {saved}")
+        owner_id = item.get("owner_id")
+        doc_id = item.get("id")
+        if owner_id is None or doc_id is None:
+            raise RuntimeError(f"VK save returned malformed doc: {item}")
+        msg_payload: Dict[str, Any] = {
+            "peer_id": peer_id,
+            "random_id": random.randint(0, 2**31),
+            "attachment": f"doc{owner_id}_{doc_id}",
+        }
+        if caption:
+            msg_payload["message"] = caption[:3900]
+        self.vk_session.method("messages.send", msg_payload)
 
 
 if __name__ == "__main__":
