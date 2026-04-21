@@ -3,6 +3,7 @@ name: Deploy to Production
 on:
   push:
     branches:
+      - AI
       - develop
       - fix/bot-and-table-editor
       - feature/student-monitoring-vk-celery
@@ -30,7 +31,21 @@ jobs:
             set -e
             
             echo "🚀 Начало деплоя: $(date)"
-            cd ~/cnc_office_v2
+            if [ "${{ github.ref_name }}" = "AI" ]; then
+              DEPLOY_DIR=~/AI
+              echo "🧪 Ветка AI: деплой в изолированную директорию $DEPLOY_DIR"
+            else
+              DEPLOY_DIR=~/cnc_office_v2
+              echo "🏭 Основная ветка: деплой в $DEPLOY_DIR"
+            fi
+            
+            mkdir -p "$DEPLOY_DIR"
+            cd "$DEPLOY_DIR"
+            
+            if [ ! -d .git ]; then
+              echo "📦 Репозиторий не найден, выполняю clone..."
+              git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/Gleb-Pinchuk/CNC_office.git .
+            fi
             
             # ============================================
             # 1. Настройка авторизации и Pull изменений
@@ -39,6 +54,18 @@ jobs:
             git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/Gleb-Pinchuk/CNC_office.git
             git fetch origin ${{ github.ref_name }}
             git reset --hard origin/${{ github.ref_name }}
+            
+            if [ "${{ github.ref_name }}" = "AI" ]; then
+              echo "🧪 Изолированный деплой AI-проекта (ops/moderation/docker-compose.yml)"
+              docker compose -f ops/moderation/docker-compose.yml down --remove-orphans || true
+              docker image prune -f --filter="until=24h" || true
+              docker builder prune -f || true
+              docker compose -f ops/moderation/docker-compose.yml build --no-cache --force-rm
+              docker compose -f ops/moderation/docker-compose.yml up -d --force-recreate
+              docker compose -f ops/moderation/docker-compose.yml ps
+              echo "✅ AI-деплой завершён: $(date)"
+              exit 0
+            fi
             
             # ============================================
             # 2. Полная остановка контейнеров
