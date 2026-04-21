@@ -121,6 +121,17 @@ def _extract_social_links(row: list, header_row: Optional[list], social_cols: li
     return out
 
 
+def _platform_from_url(url: str) -> str:
+    u = (url or "").lower()
+    if "t.me/" in u or "telegram." in u:
+        return "tg"
+    if "tiktok.com/" in u:
+        return "tiktok"
+    if "vk.com/" in u:
+        return "vk"
+    return ""
+
+
 def _find_table(owner, section_type: str, title_fragment: str) -> Optional[SectionTable]:
     qs = SectionTable.objects.filter(owner=owner, section_type=section_type)
     if title_fragment:
@@ -196,7 +207,17 @@ def run_social_moderation_scan(
             stats.checked_students += 1
             violation: Optional[tuple[str, MatchResult]] = None
             for link in links:
-                entries = fetch_social_entries(link, cfg.max_entries_per_link, cfg.ytdlp_timeout_sec)
+                platform = _platform_from_url(link)
+                if cfg.skip_tg and platform == "tg":
+                    continue
+                if cfg.skip_tiktok and platform == "tiktok":
+                    continue
+                entries = fetch_social_entries(
+                    link,
+                    cfg.max_entries_per_link,
+                    cfg.ytdlp_timeout_sec,
+                    proxy_url=cfg.proxy_url,
+                )
                 for entry in entries:
                     result = classifier.classify(entry)
                     if result.is_violation:

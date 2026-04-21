@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import yt_dlp
+from yt_dlp.utils import DownloadError
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,12 @@ def _as_entries(source_url: str, payload: dict[str, Any]) -> list[dict[str, Any]
     return []
 
 
-def fetch_social_entries(source_url: str, max_entries: int, timeout_sec: int) -> list[SocialEntry]:
+def fetch_social_entries(
+    source_url: str,
+    max_entries: int,
+    timeout_sec: int,
+    proxy_url: str = "",
+) -> list[SocialEntry]:
     options = {
         "quiet": True,
         "skip_download": True,
@@ -39,10 +45,21 @@ def fetch_social_entries(source_url: str, max_entries: int, timeout_sec: int) ->
         "playlistend": max_entries,
         "socket_timeout": timeout_sec,
         "noplaylist": False,
+        "retries": 0,
+        "extractor_retries": 0,
     }
+    if proxy_url:
+        options["proxy"] = proxy_url
     try:
         with yt_dlp.YoutubeDL(options) as ydl:
             info = ydl.extract_info(source_url, download=False)
+    except DownloadError as exc:
+        msg = str(exc)
+        if "Unsupported URL" in msg:
+            logger.warning("yt-dlp unsupported url: %s", source_url)
+        else:
+            logger.warning("yt-dlp download error for %s: %s", source_url, msg[:240])
+        return []
     except Exception:
         logger.exception("yt-dlp failed for %s", source_url)
         return []

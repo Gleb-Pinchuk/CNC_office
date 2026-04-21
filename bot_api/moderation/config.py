@@ -24,6 +24,9 @@ class ModerationConfig:
     allow_hash_distance: int
     request_timeout_sec: int
     ytdlp_timeout_sec: int
+    proxy_url: str
+    skip_tg: bool
+    skip_tiktok: bool
 
 
 def _parse_int_list(raw: str, fallback: str) -> list[int]:
@@ -72,5 +75,9 @@ def load_moderation_config() -> ModerationConfig:
         allow_hash_distance=int(os.getenv("SOCIAL_MOD_ALLOW_HASH_DISTANCE", "4")),
         request_timeout_sec=int(os.getenv("SOCIAL_MOD_REQUEST_TIMEOUT_SEC", "10")),
         ytdlp_timeout_sec=int(os.getenv("SOCIAL_MOD_YTDLP_TIMEOUT_SEC", "20")),
+        proxy_url=os.getenv("SOCIAL_MOD_PROXY_URL", "").strip(),
+        skip_tg=os.getenv("SOCIAL_MOD_SKIP_TG", "False").lower() in ("true", "1", "yes"),
+        skip_tiktok=os.getenv("SOCIAL_MOD_SKIP_TIKTOK", "False").lower()
+        in ("true", "1", "yes"),
     )
 
