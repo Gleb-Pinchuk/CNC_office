@@ -153,10 +153,10 @@ jobs:
             docker compose exec -T web python manage.py collectstatic --noinput --clear
             
             # ============================================
-            # 10. Перезапуск сервисов
+            # 10. Перезапуск web
             # ============================================
-            echo "🔄 Перезапуск caddy и web..."
-            docker compose restart caddy web
+            echo "🔄 Перезапуск web..."
+            docker compose restart web
             
             # ============================================
             # 11. Ожидание после перезапуска
@@ -185,26 +185,9 @@ jobs:
             fi
             
             # ============================================
-            # 13. Проверка через Caddy (внешний доступ)
+            # 13. Внешний прокси отключен
             # ============================================
-            echo "🌐 Проверка через Caddy (внешний доступ)..."
-            sleep 3
-            
-            EXTERNAL_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/api/ 2>/dev/null || echo "000")
-            echo "📊 HTTP код от Caddy (external): $EXTERNAL_CODE"
-            
-            if [ "$EXTERNAL_CODE" = "200" ] || [ "$EXTERNAL_CODE" = "401" ] || [ "$EXTERNAL_CODE" = "403" ]; then
-              echo "✅ Caddy проксирует корректно!"
-            elif [ "$EXTERNAL_CODE" = "502" ] || [ "$EXTERNAL_CODE" = "503" ]; then
-              echo "❌ ОШИБКА 502/503 от Caddy — backend не отвечает!"
-              echo "=== Логи Caddy ==="
-              docker compose logs caddy --tail=30
-              echo "=== Логи Web ==="
-              docker compose logs web --tail=30
-              exit 1
-            else
-              echo "⚠️ Неожиданный код от Caddy: $EXTERNAL_CODE"
-            fi
+            echo "🔒 Внешний reverse-proxy отключен в базовом compose (caddy удален)."
             
             # ============================================
             # 14. Финальная очистка
@@ -219,13 +202,13 @@ jobs:
             echo "✅ ============================================"
             echo "✅ Деплой завершён успешно: $(date)"
             echo "✅ ============================================"
-            echo "🔗 Приложение доступно: http://${{ secrets.DEPLOY_HOST }}/"
+            echo "🔗 Backend доступен только внутри Docker сети (web:8000)."
             echo ""
             echo "📋 Чеклист:"
             echo "  ✅ Контейнеры запущены"
             echo "  ✅ Миграции применены"
             echo "  ✅ Статика собрана"
             echo "  ✅ Backend отвечает"
-            echo "  ✅ Caddy проксирует"
+            echo "  ✅ Внешний reverse-proxy отключен"
             echo ""
             echo "🔄 В браузере: нажмите Ctrl+Shift+R для очистки кэша"

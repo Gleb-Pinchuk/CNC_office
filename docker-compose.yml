@@ -78,28 +78,6 @@ services:
         max-size: '20m'
         max-file: '5'
 
-  caddy:
-    image: caddy:2.9-alpine
-    container_name: cnc_office_caddy
-    restart: unless-stopped
-    ports:
-      - '80:80'
-    volumes:
-      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - static_volume:/srv/static:ro
-      - media_volume:/srv/media:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      - web
-    networks:
-      - app-network
-    logging:
-      driver: json-file
-      options:
-        max-size: '10m'
-        max-file: '3'
-
   celery_worker:
     build:
       context: .
@@ -191,8 +169,6 @@ volumes:
   static_volume:
   media_volume:
   logs_volume:
-  caddy_data:
-  caddy_config:
 
 networks:
   app-network:

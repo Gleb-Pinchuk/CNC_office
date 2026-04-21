@@ -76,7 +76,7 @@ nano .env
 - Django/security:
   - `DEBUG=False`
   - `SECRET_KEY=<длинный-случайный>`
-  - `ALLOWED_HOSTS=<IP или домен>,localhost,127.0.0.1,web,caddy`
+  - `ALLOWED_HOSTS=<IP или домен>,localhost,127.0.0.1,web`
 - DB:
   - `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`
 - VK:
@@ -129,7 +129,6 @@ docker compose ps
 - `celery_worker`
 - `celery_beat`
 - `vk_bot`
-- `caddy`
 
 Прогнать миграции:
 
@@ -368,7 +367,7 @@ docker compose exec web python manage.py inspect_section_table
 
 ---
 Итог по безопасности
-Вход снаружи: по сути только через caddy.
+Вход снаружи в базовом compose отключен: порты не публикуются.
 Прямой доступ к БД/Redis/Web из интернета: нет.
 Исходящий интернет: есть у сервисов в app-network (включая vk_bot, web, celery).
 Проект ориентирован на надежную работу даже при проблемах Nextcloud: данные продолжают жить в PostgreSQL, а синхронизация догоняет после восстановления облака.
