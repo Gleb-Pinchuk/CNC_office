@@ -14,3 +14,5 @@ pytest-django>=4.0
 pytest-cov>=4.1
 requests>=2.31.0
 mozilla-django-oidc>=4.0.0
+ImageHash>=4.3.1
+yt-dlp>=2026.3.31

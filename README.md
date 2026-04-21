@@ -371,3 +371,49 @@ docker compose exec web python manage.py inspect_section_table
 Прямой доступ к БД/Redis/Web из интернета: нет.
 Исходящий интернет: есть у сервисов в app-network (включая vk_bot, web, celery).
 Проект ориентирован на надежную работу даже при проблемах Nextcloud: данные продолжают жить в PostgreSQL, а синхронизация догоняет после восстановления облака.
+
+---
+
+## 17) AI-модерация соцсетей (бесплатно, обучаемо)
+
+Что делает:
+
+- обходит ссылки студентов из `BOT_SHEET_SOCIAL_COLS` (TG/VK/TikTok),
+- тянет метаданные и превью постов через `yt-dlp`,
+- помечает риск по ключевым словам и похожести изображений (pHash),
+- записывает замечание в нужную недельную колонку с префиксом `[AI-MOD ...]`.
+
+### Быстрый запуск (без записи)
+
+```bash
+docker compose exec web python manage.py run_social_moderation --max-students 20
+```
+
+### Запуск с записью в таблицу
+
+```bash
+docker compose exec web python manage.py run_social_moderation --apply --max-students 20
+```
+
+### Обучение без платных сервисов
+
+- Правила лежат в `bot_api/moderation_data/rules.json`.
+- Добавить слово в blacklist:
+
+```bash
+docker compose exec web python manage.py train_social_moderation --add-keyword "новое слово"
+```
+
+- Добавить образец запрещенного изображения:
+
+```bash
+docker compose exec web python manage.py train_social_moderation --label blocked --image /app/path/to/image.jpg
+```
+
+### Вынос в отдельную VM (чтобы не грузить основной проект)
+
+Отдельный compose-проект: `ops/moderation/docker-compose.yml`.
+
+```bash
+docker compose -f ops/moderation/docker-compose.yml up -d --build
+```

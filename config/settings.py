@@ -68,12 +68,26 @@ CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = os.getenv("TIMEZONE", "Europe/Moscow")
+SOCIAL_MODERATION_ENABLED = os.getenv("SOCIAL_MODERATION_ENABLED", "False").lower() in (
+    "true",
+    "1",
+    "yes",
+)
+SOCIAL_MODERATION_SCHEDULE_MINUTES = int(
+    os.getenv("SOCIAL_MODERATION_SCHEDULE_MINUTES", "180")
+)
+SOCIAL_MOD_MAX_STUDENTS_PER_RUN = int(os.getenv("SOCIAL_MOD_MAX_STUDENTS_PER_RUN", "0"))
 CELERY_BEAT_SCHEDULE = {
     "push-pending-nextcloud": {
         "task": "bot_api.tasks.push_pending_nextcloud",
         "schedule": timedelta(minutes=5),
     },
 }
+if SOCIAL_MODERATION_ENABLED:
+    CELERY_BEAT_SCHEDULE["run-social-moderation-scan"] = {
+        "task": "bot_api.tasks.run_social_moderation_scan_task",
+        "schedule": timedelta(minutes=SOCIAL_MODERATION_SCHEDULE_MINUTES),
+    }
 
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",

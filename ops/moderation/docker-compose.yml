@@ -1,0 +1,37 @@
+services:
+  moderation_worker:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    container_name: cnc_moderation_worker
+    restart: unless-stopped
+    env_file:
+      - ../../.env
+    environment:
+      DB_HOST: ${DB_HOST:-db}
+      DB_PORT: ${DB_PORT:-5432}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
+      SOCIAL_MODERATION_ENABLED: "True"
+    command: celery -A config worker -l info --concurrency=1 --queues=celery
+    volumes:
+      - ../..:/app
+
+  moderation_beat:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    container_name: cnc_moderation_beat
+    restart: unless-stopped
+    env_file:
+      - ../../.env
+    environment:
+      DB_HOST: ${DB_HOST:-db}
+      DB_PORT: ${DB_PORT:-5432}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
+      SOCIAL_MODERATION_ENABLED: "True"
+    command: celery -A config beat -l info
+    volumes:
+      - ../..:/app
+
