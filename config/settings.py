@@ -4,6 +4,7 @@ Django settings for config project.
 
 import os
 from datetime import timedelta
+from importlib.util import find_spec
 from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured
@@ -41,10 +42,12 @@ INSTALLED_APPS = [
     # Local apps
     "files",
     "users",
-    "documents",
     "sections",
     "bot_api",
 ]
+
+if find_spec("documents"):
+    INSTALLED_APPS.append("documents")
 
 ENABLE_OIDC = os.getenv("ENABLE_OIDC", "False").lower() in ("true", "1", "yes")
 if ENABLE_OIDC:
@@ -62,7 +65,7 @@ BOT_SHEET_REMARK_COL = int(os.getenv("BOT_SHEET_REMARK_COL", "12"))
 BOT_SHEET_SOCIAL_COLS = os.getenv("BOT_SHEET_SOCIAL_COLS", "13,14,15")
 
 # Celery / Redis
-CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://redis:6379/0")
+CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://127.0.0.1:6379/0")
 CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", CELERY_BROKER_URL)
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
@@ -120,7 +123,7 @@ DATABASES = {
         "NAME": os.getenv("POSTGRES_DB", "cnc_office"),
         "USER": os.getenv("POSTGRES_USER", "cnc_user"),
         "PASSWORD": os.getenv("POSTGRES_PASSWORD", "cnc_password"),
-        "HOST": os.getenv("DB_HOST", "db"),
+        "HOST": os.getenv("DB_HOST", "127.0.0.1"),
         "PORT": os.getenv("DB_PORT", "5432"),
     }
 }

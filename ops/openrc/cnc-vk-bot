@@ -1,0 +1,22 @@
+#!/sbin/openrc-run
+
+description="CNC Office VK student bot"
+command="/bin/bash"
+command_background="yes"
+pidfile="/run/${RC_SVCNAME}.pid"
+output_log="/var/log/cnc-office/${RC_SVCNAME}.log"
+error_log="/var/log/cnc-office/${RC_SVCNAME}.log"
+
+depend() {
+    need net cnc-office-web
+}
+
+start_pre() {
+    checkpath -d -m 0755 -o cnc:cnc /var/log/cnc-office
+    checkpath -d -m 0755 /run
+    set -a
+    . /etc/cnc-office/app.env
+    set +a
+    command_user="cnc:cnc"
+    command_args="-lc 'cd ${PROJECT_DIR:-/opt/cnc_office}/vk_student_bot && exec ../.venv/bin/python -u bot.py'"
+}

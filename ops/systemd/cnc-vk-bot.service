@@ -1,0 +1,17 @@
+[Unit]
+Description=CNC Office VK student bot
+After=network-online.target cnc-office-web.service
+Wants=network-online.target cnc-office-web.service
+
+[Service]
+Type=simple
+User=cnc
+Group=cnc
+WorkingDirectory=/opt/cnc_office/vk_student_bot
+EnvironmentFile=/etc/cnc-office/app.env
+ExecStart=/opt/cnc_office/.venv/bin/python -u bot.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

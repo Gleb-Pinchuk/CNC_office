@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 VK_TOKEN = os.getenv("VK_TOKEN", "").strip()
 VK_GROUP_ID = int(os.getenv("VK_GROUP_ID", "0"))
-CNC_API_BASE = os.getenv("CNC_API_BASE", "http://web:8000/api").rstrip("/")
+CNC_API_BASE = os.getenv("CNC_API_BASE", "http://127.0.0.1:8000/api").rstrip("/")
 CNC_BOT_SECRET = os.getenv("CNC_BOT_SECRET", os.getenv("CNC_BOT_API_SECRET", "")).strip()
 CNC_SECTION_TYPE = os.getenv("CNC_SECTION_TYPE", "rangers").strip()
 CNC_TABLE_TITLE_FRAGMENT = os.getenv("CNC_TABLE_TITLE_FRAGMENT", "киберрейнджеры").strip()

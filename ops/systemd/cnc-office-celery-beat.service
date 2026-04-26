@@ -1,0 +1,17 @@
+[Unit]
+Description=CNC Office Celery beat scheduler
+After=network-online.target redis-server.service cnc-db-tunnel.service cnc-office-web.service
+Wants=network-online.target redis-server.service cnc-db-tunnel.service
+
+[Service]
+Type=simple
+User=cnc
+Group=cnc
+WorkingDirectory=/opt/cnc_office
+EnvironmentFile=/etc/cnc-office/app.env
+ExecStart=/opt/cnc_office/.venv/bin/celery -A config beat -l info --schedule /opt/cnc_office/celerybeat-schedule
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

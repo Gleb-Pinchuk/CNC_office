@@ -419,6 +419,68 @@ class TestBotApiViews:
         CNC_BOT_TABLE_OWNER_USERNAME="bot_owner",
         BOT_SHEET_FIO_COL=0,
         BOT_SHEET_GROUP_COL=1,
+        BOT_SHEET_STATUS_COL=5,
+        BOT_SHEET_REMARK_COL=5,
+    )
+    def test_set_student_remark_after_last_week_uses_last_date_column(self, client):
+        from django.contrib.auth import get_user_model
+
+        owner = get_user_model().objects.create_user(username="bot_owner", password="pass")
+        table = SectionTable.objects.create(
+            owner=owner,
+            title="Weeks",
+            section_type="rangers",
+            content={
+                "custom_sheet": {
+                    "version": 2,
+                    "activeSheetIndex": 0,
+                    "sheets": [
+                        {
+                            "name": "Robo",
+                            "data": [
+                                [
+                                    "ФИО",
+                                    "Группа",
+                                    "13.04-19.04",
+                                    "20.04-26.04",
+                                    "Соцсети",
+                                    "Статус учебы",
+                                ],
+                                ["Иванов Иван", "Г1", "", "", "", "учится"],
+                            ],
+                        }
+                    ],
+                }
+            },
+        )
+
+        rm = client.post(
+            "/api/bot/gateway/",
+            {
+                "action": "set_student_remark",
+                "table_id": table.id,
+                "sheet_name": "Robo",
+                "student_fio": "Иванов",
+                "remark_date": "27.04.2026",
+                "remark_text": "после доступной недели",
+            },
+            format="json",
+            HTTP_X_CNC_BOT_TOKEN="secret-token",
+        )
+
+        assert rm.status_code == status.HTTP_200_OK
+        assert rm.data["remark_col"] == 3
+
+        table.refresh_from_db()
+        row = table.content["custom_sheet"]["sheets"][0]["data"][1]
+        assert row[3] == "после доступной недели"
+        assert row[5] == "учится"
+
+    @override_settings(
+        CNC_BOT_API_SECRET="secret-token",
+        CNC_BOT_TABLE_OWNER_USERNAME="bot_owner",
+        BOT_SHEET_FIO_COL=0,
+        BOT_SHEET_GROUP_COL=1,
         BOT_SHEET_STATUS_COL=2,
         BOT_SHEET_REMARK_COL=3,
         BOT_SHEET_SOCIAL_COLS="4,5",
