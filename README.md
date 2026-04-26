@@ -35,7 +35,6 @@ ops/deploy_systemd_ssh_tunnel.md
 GitHub Actions деплоит эту схему через `.github/workflows/deploy.yml`. В `production` secrets должны быть заданы:
 
 - `DEPLOY_HOST=92.255.253.148`
-- `DEPLOY_PORT=2222`
 - `DEPLOY_USERNAME=root`
 - `DEPLOY_SSH_KEY` - приватный SSH-ключ для входа на app-сервер
 
