@@ -23,6 +23,7 @@ jobs:
       - name: Build release archive
         run: |
           set -euo pipefail
+          RELEASE="$RUNNER_TEMP/cnc_office_release.tar.gz"
           tar \
             --exclude='.git' \
             --exclude='.venv' \
@@ -32,7 +33,8 @@ jobs:
             --exclude='media' \
             --exclude='logs' \
             --exclude='staticfiles' \
-            -czf cnc_office_release.tar.gz .
+            -czf "$RELEASE" .
+          cp "$RELEASE" ./cnc_office_release.tar.gz
 
       - name: Upload release archive
         uses: appleboy/scp-action@v0.1.7
