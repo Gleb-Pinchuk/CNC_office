@@ -82,8 +82,9 @@ jobs:
             rm -f "$RELEASE"
 
             chown -R cnc:cnc "$PROJECT_DIR"
-            find "$PROJECT_DIR" -type d -exec chmod 755 {} +
-            find "$PROJECT_DIR" -type f -exec chmod 644 {} +
+            find "$PROJECT_DIR" -path "$PROJECT_DIR/.venv" -prune -o -type d -exec chmod 755 {} +
+            find "$PROJECT_DIR" -path "$PROJECT_DIR/.venv" -prune -o -type f -exec chmod 644 {} +
+            [ ! -d "$PROJECT_DIR/.venv/bin" ] || chmod 755 "$PROJECT_DIR"/.venv/bin/*
             chmod +x "$PROJECT_DIR"/ops/start_gunicorn_systemd.sh
             chmod +x "$PROJECT_DIR"/ops/start_web_openrc.sh
             chmod +x "$PROJECT_DIR"/ops/openrc/*
