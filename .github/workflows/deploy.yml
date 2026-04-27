@@ -67,7 +67,7 @@ jobs:
             rc-service cnc-office-celery-beat stop || true
             rc-service cnc-office-celery-worker stop || true
             rc-service cnc-office-web stop || true
-            pkill -f 'gunicorn config.wsgi:application' || true
+            pkill -f '[g]unicorn config.wsgi:application' || true
 
             mkdir -p "$PROJECT_DIR"
             for item in "$PROJECT_DIR"/* "$PROJECT_DIR"/.[!.]* "$PROJECT_DIR"/..?*; do
