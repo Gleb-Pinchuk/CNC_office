@@ -1,4 +1,3 @@
----
 services:
   db:
     image: postgres:15-alpine
@@ -9,7 +8,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-cnc_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cnc_password}
     volumes:
-      - postgres_data:/var/lib/postgresql/data  # ✅ ИСПРАВЛЕНО
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-cnc_user}']
       interval: 10s
@@ -17,12 +16,24 @@ services:
       retries: 10
       start_period: 30s
     networks:
-      - app-network
+      - db-network
     logging:
       driver: json-file
       options:
         max-size: '10m'
         max-file: '3'
+
+  redis:
+    image: redis:7-alpine
+    container_name: cnc_redis
+    restart: unless-stopped
+    networks:
+      - app-network
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '2'
 
   web:
     build:
@@ -44,10 +55,14 @@ services:
       - DB_HOST=db
       - DB_PORT=5432
       - DEBUG=${DEBUG:-False}
-      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-*}
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-localhost,127.0.0.1}
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_started
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8000/ > /dev/null"]
       interval: 20s
@@ -56,32 +71,74 @@ services:
       start_period: 120s
     networks:
       - app-network
+      - db-network
     logging:
       driver: json-file
       options:
         max-size: '20m'
         max-file: '5'
 
-  nginx:
+  celery_worker:
     build:
-      context: ./nginx
+      context: .
       dockerfile: Dockerfile
-    container_name: cnc_office_nginx
+    container_name: cnc_celery_worker
     restart: unless-stopped
-    ports:
-      - '8002:80'
-    volumes:
-      - static_volume:/app/staticfiles:ro
-      - media_volume:/app/media:ro
+    env_file:
+      - .env
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+    command: celery -A config worker -l info --concurrency=2
     depends_on:
-      - web
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      web:
+        condition: service_started
+    volumes:
+      - .:/app
     networks:
       - app-network
+      - db-network
+    logging:
+      driver: json-file
+      options:
+        max-size: '20m'
+        max-file: '3'
+
+  celery_beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cnc_celery_beat
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+    command: celery -A config beat -l info
+    depends_on:
+      redis:
+        condition: service_started
+      web:
+        condition: service_started
+    volumes:
+      - .:/app
+    networks:
+      - app-network
+      - db-network
     logging:
       driver: json-file
       options:
         max-size: '10m'
-        max-file: '3'
+        max-file: '2'
 
   vk_bot:
     build:
@@ -98,6 +155,9 @@ services:
         condition: service_started
     networks:
       - app-network
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     logging:
       driver: json-file
       options:
@@ -105,7 +165,7 @@ services:
         max-file: '2'
 
 volumes:
-  postgres_data:  # ✅ ИСПРАВЛЕНО (было postgres_)
+  postgres_data:
   static_volume:
   media_volume:
   logs_volume:
@@ -113,4 +173,8 @@ volumes:
 networks:
   app-network:
     driver: bridge
-    name: cnc_office_network
+    name: cnc_office_app
+  db-network:
+    driver: bridge
+    internal: true
+    name: cnc_office_db_internal

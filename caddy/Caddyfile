@@ -1,0 +1,22 @@
+{
+    email glebpincuk@gmail.com
+    admin off
+}
+
+# Слушаем только порт 80 (HTTP)
+:80 {
+    reverse_proxy web:8000
+
+    header {
+        -Server
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        X-XSS-Protection "1; mode=block"
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+
+    log {
+        output stdout
+        format json
+    }
+}

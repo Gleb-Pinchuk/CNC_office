@@ -66,3 +66,7 @@ docker-compose.override.yml
 htmlcov/
 .pytest_cache/
 .tox/
+
+# ==================== Backup artifacts ====================
+backups/
+*.sql.gz

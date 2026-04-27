@@ -1,0 +1,5 @@
+# Every day at 02:30
+30 2 * * * cd /home/utond1/cnc_office_v2 && /bin/bash ./ops/nightly_backup.sh >> /home/utond1/cnc_office_v2/logs/nightly_backup.log 2>&1
+
+# no-Docker deploy example
+30 2 * * * cd /opt/cnc_office && BACKUP_MODE=systemd PROJECT_DIR=/opt/cnc_office /bin/bash ./ops/nightly_backup.sh >> /opt/cnc_office/logs/nightly_backup.log 2>&1

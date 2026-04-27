@@ -1,0 +1,20 @@
+[Unit]
+Description=CNC Office Django web service
+After=network-online.target redis-server.service cnc-db-tunnel.service
+Wants=network-online.target redis-server.service cnc-db-tunnel.service
+
+[Service]
+Type=simple
+User=cnc
+Group=cnc
+WorkingDirectory=/opt/cnc_office
+EnvironmentFile=/etc/cnc-office/app.env
+ExecStartPre=/opt/cnc_office/.venv/bin/python manage.py migrate --noinput
+ExecStartPre=/opt/cnc_office/.venv/bin/python manage.py collectstatic --noinput --clear
+ExecStart=/bin/bash /opt/cnc_office/ops/start_gunicorn_systemd.sh
+Restart=always
+RestartSec=5
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

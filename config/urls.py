@@ -1,4 +1,6 @@
 # config/urls.py
+from importlib.util import find_spec
+
 from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
@@ -8,7 +10,6 @@ from django.views.static import serve
 from rest_framework.authtoken.views import obtain_auth_token
 from rest_framework.routers import DefaultRouter
 
-from documents.views import DocumentViewSet
 from files.views import (
     AuditLogViewSet,
     FilePermissionViewSet,
@@ -20,13 +21,23 @@ from sections.views import SectionTableViewSet
 router = DefaultRouter()
 router.register(r"files", StorageFileViewSet, basename="file")
 router.register(r"folders", StorageFolderViewSet, basename="folder")
-router.register(r"documents", DocumentViewSet, basename="document")
 router.register(r"section-tables", SectionTableViewSet, basename="section-table")
 router.register(r"permissions", FilePermissionViewSet, basename="permission")
 router.register(r"audit-logs", AuditLogViewSet, basename="audit-log")
 
+if find_spec("documents"):
+    from documents.views import DocumentViewSet
+
+    router.register(r"documents", DocumentViewSet, basename="document")
+
 urlpatterns = [
     path("admin/", admin.site.urls),
+]
+
+if getattr(settings, "ENABLE_OIDC", False):
+    urlpatterns.append(path("oidc/", include("mozilla_django_oidc.urls")))
+
+urlpatterns += [
     path("api/", include(router.urls)),
     path("api/bot/", include("bot_api.urls")),
     path("api/users/", include("users.urls")),
@@ -41,7 +52,7 @@ if settings.DEBUG:
 
 urlpatterns += [
     re_path(
-        r"^(?!api/|static/|media/|admin/|favicon\.ico).*$",
+        r"^(?!api/|static/|media/|admin/|oidc/|favicon\.ico).*$",
         TemplateView.as_view(template_name="index.html"),
     ),
 ]

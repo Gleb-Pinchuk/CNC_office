@@ -1,127 +1,392 @@
-# CNC_office
+﻿# CNC Office v2 (VK bot + Nextcloud + DB Sync)
 
-CNC_office - это Django-проект для хранения файлов и документов с REST API, веб-интерфейсом, PostgreSQL, Nginx и VK-ботом.
+Этот проект — система учёта студентов с VK-ботом, где:
 
-## Стек
+- бот работает по кнопкам (направления -> группы -> студенты -> действия),
+- данные читаются/пишутся в PostgreSQL,
+- таблица `.xlsx` синхронизируется с Nextcloud по WebDAV,
+- изменения из БД отправляются обратно в Nextcloud через Celery (раз в 5 минут),
+- есть nightly backup (БД + экспорт `.xlsx`) с ротацией, чтобы не забивать диск.
 
-- Django + DRF
-- PostgreSQL
-- Docker Compose
-- Nginx
-- VK bot
-- pytest, flake8, black
+---
 
-## Быстрый старт
+## 1) Архитектура простыми словами
+
+1. Пользователь нажимает кнопки в VK-боте.
+2. Бот обращается к Django API (`/api/bot/gateway/`) с секретом.
+3. API меняет данные в `SectionTable.content` в PostgreSQL.
+4. При изменении ставится флаг `needs_nextcloud_push=True`.
+5. `celery_beat` раз в 5 минут запускает `push_pending_nextcloud`.
+6. `celery_worker` пушит изменения в Nextcloud `.xlsx` через WebDAV.
+7. Пуш идёт в режиме merge: сохраняются формат, ширины столбцов и «чужие» листы.
+
+---
+
+## 1.1) Перенос без Docker на два сервера
+
+Для схемы `ssh -p 2222 root@92.255.253.148` (Django/Celery/Redis/VK-бот) + `ssh -p 2223 root@92.255.253.148` (PostgreSQL) используйте инструкцию:
 
 ```bash
-git clone https://github.com/Gleb-Pinchuk/CNC_office.git
-cd CNC_office
-cp .env.example .env
-docker compose up -d --build
-docker compose exec web python manage.py migrate
-docker compose exec web python manage.py collectstatic --noinput
-docker compose exec web python manage.py createsuperuser
+ops/deploy_systemd_ssh_tunnel.md
 ```
 
-После запуска:
+В этой схеме для Alpine Linux сервисы запускаются через OpenRC, Django слушает только `127.0.0.1:8000`, а подключение к PostgreSQL идёт через постоянный SSH-туннель `127.0.0.1:15432 -> 127.0.0.1:5432`.
 
-- Админка: `http://localhost:8002/admin/`
-- API: `http://localhost:8002/api/`
-- Веб-интерфейс: `http://localhost:8002/`
+GitHub Actions деплоит эту схему через `.github/workflows/deploy.yml`. В `production` secrets должны быть заданы:
 
-## Развертывание на сервере
+- `DEPLOY_HOST=92.255.253.148`
+- `DEPLOY_USERNAME=root`
+- `DEPLOY_SSH_KEY` - приватный SSH-ключ для входа на app-сервер
 
-Установка Docker:
+---
+
+## 2) Что нужно на новом сервере
+
+- Alpine Linux, Ubuntu/Debian или другой Linux-сервер
+- доступ по SSH
+- Docker + Docker Compose plugin, если используете Docker-сценарий ниже
+- Python venv + OpenRC/systemd + Redis + PostgreSQL client, если используете перенос без Docker
+- домен или IP
+- рабочий Nextcloud WebDAV доступ к `.xlsx`
+- VK group token + group id
+
+---
+
+## 3) Установка Docker (один раз)
 
 ```bash
 sudo apt update && sudo apt upgrade -y
 curl -fsSL https://get.docker.com | sh
 sudo usermod -aG docker $USER
 newgrp docker
+docker --version
+docker compose version
 ```
 
-Первый запуск:
+---
+
+## 4) Клонирование проекта
 
 ```bash
-git clone https://github.com/Gleb-Pinchuk/CNC_office.git
-cd CNC_office
-cp .env.example .env
-docker compose up -d --build
-docker compose exec web python manage.py migrate
-docker compose exec web python manage.py collectstatic --noinput
-docker compose exec web python manage.py createsuperuser
+cd ~
+git clone https://github.com/Gleb-Pinchuk/CNC_office.git cnc_office_v2
+cd ~/cnc_office_v2
 ```
 
-Обновление проекта:
+Если деплоите не `main`, а рабочую ветку:
+
+```bash
+git fetch --all
+git checkout feature/student-monitoring-vk-celery
+git pull
+```
+
+---
+
+## 5) Настройка `.env`
+
+```bash
+cp .env.example .env
+nano .env
+```
+
+Минимально важные переменные:
+
+- Django/security:
+  - `DEBUG=False`
+  - `SECRET_KEY=<длинный-случайный>`
+  - `ALLOWED_HOSTS=<IP или домен>,localhost,127.0.0.1,web`
+- DB:
+  - `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`
+- VK:
+  - `VK_TOKEN`, `VK_GROUP_ID`
+  - `CNC_BOT_API_SECRET`
+  - `CNC_BOT_TABLE_OWNER_USERNAME`
+  - `CNC_SECTION_TYPE=rangers`
+  - `CNC_TABLE_TITLE_FRAGMENT=киберрейнджеры`
+  - `CNC_DIRECTION_SHEETS=ЧПУ,РОБО,Аэро,микро`
+- Таблица/колонки:
+  - `BOT_SHEET_FIO_COL`
+  - `BOT_SHEET_GROUP_COL`
+  - `BOT_SHEET_STATUS_COL`
+  - `BOT_SHEET_REMARK_COL`
+  - `BOT_SHEET_SOCIAL_COLS`
+- Nextcloud WebDAV:
+  - `NEXTCLOUD_BASE_URL=https://...`
+  - `NEXTCLOUD_USERNAME=...`
+  - `NEXTCLOUD_PASSWORD=...`
+  - `NEXTCLOUD_FILE_PATH=Киберрейнджеры_Производственная_группа.xlsx`
+- Celery/Redis:
+  - `CELERY_BROKER_URL=redis://redis:6379/0`
+  - `CELERY_RESULT_BACKEND=redis://redis:6379/0`
+
+### Проверка WebDAV перед запуском
+
+```bash
+curl -i --user 'LOGIN:PASSWORD' \
+  -X PROPFIND -H 'Depth: 1' \
+  'https://YOUR_CLOUD/remote.php/dav/files/LOGIN/'
+```
+
+Успех = `HTTP/2 207`.
+
+---
+
+## 6) Первый запуск проекта
 
 ```bash
 cd ~/cnc_office_v2
-git pull origin develop
 docker compose up -d --build
+docker compose ps
+```
+
+Проверить, что сервисы `Up`:
+
+- `db`
+- `redis`
+- `web`
+- `celery_worker`
+- `celery_beat`
+- `vk_bot`
+
+Прогнать миграции:
+
+```bash
 docker compose exec web python manage.py migrate
-docker compose exec web python manage.py collectstatic --noinput
 ```
 
-Если настроен GitHub Actions, деплой может выполняться автоматически после пуша в `develop`.
+---
 
-## Полезные команды
+## 7) Импорт таблицы из Nextcloud в БД
 
-Проверка flake8:
+Первичная загрузка `.xlsx` в `SectionTable`:
 
 ```bash
-docker compose exec web sh -lc "flake8 api bot_api config documents files sections users vk_student_bot manage.py conftest.py --jobs 1"
+docker compose exec web python manage.py import_nextcloud_table --force
 ```
 
-Форматирование black:
+Проверка, что листы распознаны:
 
 ```bash
-docker compose exec web sh -lc "black manage.py vk_student_bot/bot.py"
+docker compose exec web python manage.py inspect_section_table
 ```
 
-Тесты:
+Ожидаемо: 4 листа (направления) и реальные `rows/cols` (не заглушка 11x4).
+
+---
+
+## 8) Перезапуск бота после настройки
 
 ```bash
-docker compose exec web pytest
-```
-
-Логи:
-
-```bash
-docker compose logs -f web
-docker compose logs -f nginx
+docker compose restart vk_bot
 docker compose logs -f vk_bot
 ```
 
-## Переменные окружения
+Быстрый UX-тест в VK:
 
-Основные переменные в `.env`:
+1. `🎓 Направления`
+2. выбрать направление
+3. `📋 Группы`
+4. выбрать группу
+5. `👤 Студент`
+6. открыть карточку студента
+7. действия: замечание / замечаний нет / статус / выбор даты
 
-- `SECRET_KEY`
-- `POSTGRES_DB`
-- `POSTGRES_USER`
-- `POSTGRES_PASSWORD`
-- `ALLOWED_HOSTS`
-- `CORS_ALLOWED_ORIGINS`
-- `CSRF_TRUSTED_ORIGINS`
-- `VK_TOKEN`
-- `VK_GROUP_ID`
-- `CNC_BOT_API_SECRET`
+---
 
-## Доступ на сервере
+## 9) Как работает запись замечаний
 
-- Админка: `http://<IP_СЕРВЕРА>:8002/admin/`
-- API: `http://<IP_СЕРВЕРА>:8002/api/`
-- Веб-интерфейс: `http://<IP_СЕРВЕРА>:8002/`
+- Замечание пишется в колонку недели, определяемую по дате (автовыбор).
+- В ячейке хранится **только текст замечания** или `замечаний нет`.
+- Дата не добавляется в текст ячейки (дата определяется самой недельной колонкой).
 
+---
 
-Пример рабочего адреса:
+## 10) Синхронизация с Nextcloud
 
-- `http://83.166.236.188:8081/admin/login/?next=/admin/`
+### Автоматически
 
- ## Для пользователя
- рабочий адрес:
- - http://213.165.214.241:8002/
+- `celery_beat` каждые 5 минут запускает push pending изменений.
 
-## Лицензия
+### Вручную
 
-Проект создан в учебных целях. 
+```bash
+# Принудительно отправить изменения из БД в Nextcloud
+docker compose exec web python manage.py sync_nextcloud_sheet --push --force-push
+
+# Принудительно подтянуть актуальный файл из Nextcloud в БД
+docker compose exec web python manage.py sync_nextcloud_sheet --pull
+```
+
+---
+
+## 10.1) Как забрать `.xlsx` из БД, если Nextcloud недоступен
+
+Экспорт из БД в файл на сервере:
+
+```bash
+docker compose exec web python manage.py export_section_table_xlsx --output /app/backups/manual_export.xlsx
+```
+
+Файл появится на сервере в:
+
+```bash
+~/cnc_office_v2/backups/manual_export.xlsx
+```
+
+Скачать файл на свой компьютер (выполнять у себя локально):
+
+```bash
+scp utond1@<SERVER_IP>:/home/utond1/cnc_office_v2/backups/manual_export.xlsx .
+```
+
+---
+
+## 11) Nightly backup (чтобы не потерять данные)
+
+Скрипт: `ops/nightly_backup.sh`
+
+Что делает:
+
+1. Дамп PostgreSQL в `db_YYYY-MM-DD_HH-MM-SS.sql.gz`
+2. Экспорт `SectionTable` в `section_table_YYYY-MM-DD_HH-MM-SS.xlsx`
+3. Опциональный upload в S3
+4. Удаление старых backup-файлов (`RETENTION_DAYS`, по умолчанию 14)
+
+### Ручной запуск
+
+```bash
+cd ~/cnc_office_v2
+chmod +x ops/nightly_backup.sh
+./ops/nightly_backup.sh
+```
+
+### Автозапуск по cron (каждую ночь в 02:30)
+
+```bash
+crontab -e
+```
+
+Добавьте строку:
+
+```cron
+30 2 * * * cd /home/utond1/cnc_office_v2 && /bin/bash ./ops/nightly_backup.sh >> /home/utond1/cnc_office_v2/logs/nightly_backup.log 2>&1
+```
+
+### Параметры скрипта (опционально)
+
+- `RETENTION_DAYS=14`
+- `S3_BUCKET=your-bucket`
+- `S3_PREFIX=cnc-office/nightly`
+
+Если `S3_BUCKET` не задан или нет `aws` cli, upload пропускается.
+
+---
+
+## 12) OIDC (простыми словами)
+
+OIDC = вход через внешний провайдер (единая авторизация), вместо локальных паролей в проекте.
+
+Включить:
+
+1. В `.env` поставить `ENABLE_OIDC=true`
+2. Заполнить:
+   - `OIDC_RP_CLIENT_ID`
+   - `OIDC_RP_CLIENT_SECRET`
+   - `OIDC_OP_AUTHORIZATION_ENDPOINT`
+   - `OIDC_OP_TOKEN_ENDPOINT`
+   - `OIDC_OP_USER_ENDPOINT`
+3. Перезапустить `web`:
+
+```bash
+docker compose up -d --force-recreate web
+```
+
+---
+
+## 13) Обновление проекта на сервере
+
+```bash
+cd ~/cnc_office_v2
+git pull
+docker compose up -d --build
+docker compose exec web python manage.py migrate
+```
+
+После изменений в bot/web/sync обычно достаточно:
+
+```bash
+docker compose up -d --force-recreate web celery_worker celery_beat vk_bot
+```
+
+---
+
+## 14) Диагностика проблем
+
+### Бот не видит направления
+
+```bash
+docker compose exec web python manage.py inspect_section_table
+```
+
+Если листов 0 — проблема с импортом/структурой таблицы.
+
+### WebDAV ошибка 401
+
+Проверить логин/пароль curl-командой (`PROPFIND`). Должно быть `207`.
+
+### Изменения не доходят в Nextcloud
+
+```bash
+docker compose logs --tail=120 celery_worker
+docker compose logs --tail=80 celery_beat
+docker compose exec web python manage.py sync_nextcloud_sheet --push --force-push
+```
+
+### Формат таблицы «ломается»
+
+Используйте актуальную версию кода: push теперь делает merge в существующий workbook (с сохранением формата).
+
+---
+
+## 15) Безопасность (обязательно)
+
+- `DEBUG=False`
+- сильный `SECRET_KEY`
+- не хранить секреты в git
+- ограничить `ALLOWED_HOSTS`, `CORS_ALLOWED_ORIGINS`, `CSRF_TRUSTED_ORIGINS`
+- включить secure cookies + HSTS в production
+- использовать отдельного сервисного пользователя Nextcloud
+- регулярно ротировать:
+  - `VK_TOKEN`
+  - `CNC_BOT_API_SECRET`
+  - `NEXTCLOUD_PASSWORD`
+- хранить nightly backups + желательно копию в S3
+
+---
+
+## 16) Полезные команды
+
+```bash
+# Статус контейнеров
+docker compose ps
+
+# Логи
+docker compose logs -f web
+docker compose logs -f vk_bot
+docker compose logs -f celery_worker
+docker compose logs -f celery_beat
+
+# Поиск файла в Nextcloud
+docker compose exec web python manage.py list_nextcloud_files --depth 4
+
+# Инспекция таблицы в БД
+docker compose exec web python manage.py inspect_section_table
+```
+
+---
+Итог по безопасности
+Вход снаружи в базовом compose отключен: порты не публикуются.
+Прямой доступ к БД/Redis/Web из интернета: нет.
+Исходящий интернет: есть у сервисов в app-network (включая vk_bot, web, celery).
+Проект ориентирован на надежную работу даже при проблемах Nextcloud: данные продолжают жить в PostgreSQL, а синхронизация догоняет после восстановления облака.

@@ -3,9 +3,11 @@ from django.contrib.auth import get_user_model
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework import generics, permissions, status
+from rest_framework.authentication import SessionAuthentication
 from rest_framework.authtoken.models import Token
 from rest_framework.authtoken.serializers import AuthTokenSerializer  # ✅ ИМПОРТ
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from .serializers import RegisterSerializer, UserListSerializer
 
@@ -69,3 +71,19 @@ class UserListView(generics.ListAPIView):
     queryset = User.objects.all()
     serializer_class = UserListSerializer
     permission_classes = [permissions.IsAuthenticated]
+
+
+class SessionToTokenView(APIView):
+    """
+    После входа через OIDC (сессия) выдать DRF Token для API.
+    POST с cookie сессии и заголовком X-CSRFToken (стандарт Django + DRF SessionAuthentication).
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+    authentication_classes = [SessionAuthentication]
+
+    def post(self, request, *args, **kwargs):
+        token, _ = Token.objects.get_or_create(user=request.user)
+        return Response(
+            {"token": token.key, "user": UserListSerializer(request.user).data}
+        )

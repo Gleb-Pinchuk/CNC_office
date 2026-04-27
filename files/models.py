@@ -223,6 +223,45 @@ class FilePermission(models.Model):
         return None
 
 
+class LiveCellPresence(models.Model):
+    """
+    Эфемерное онлайн-присутствие пользователя в ячейке таблицы/документа.
+    """
+
+    FILE_TYPE_CHOICES = [
+        ("section_table", "Таблица раздела"),
+        ("document", "Документ"),
+    ]
+
+    file_type = models.CharField(
+        max_length=20, choices=FILE_TYPE_CHOICES, verbose_name="Тип объекта"
+    )
+    file_id = models.IntegerField(verbose_name="ID объекта")
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="live_cell_presence",
+        verbose_name="Пользователь",
+    )
+    sheet_name = models.CharField(max_length=120, default="", blank=True)
+    row = models.IntegerField(default=0)
+    col = models.IntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Онлайн-ячейка"
+        verbose_name_plural = "Онлайн-ячейки"
+        unique_together = ["file_type", "file_id", "user"]
+        indexes = [
+            models.Index(fields=["file_type", "file_id", "-updated_at"]),
+            models.Index(fields=["user", "-updated_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.user.username}: {self.file_type}#{self.file_id} [{self.sheet_name} {self.row}:{self.col}]"
+
+
 class AuditLog(models.Model):
     """
     Лог аудита действий пользователя

@@ -1,0 +1,24 @@
+[Unit]
+Description=CNC Office PostgreSQL SSH tunnel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cnc
+Group=cnc
+EnvironmentFile=/etc/cnc-office/app.env
+ExecStart=/usr/bin/ssh -NT \
+  -o ExitOnForwardFailure=yes \
+  -o ServerAliveInterval=30 \
+  -o ServerAliveCountMax=3 \
+  -o StrictHostKeyChecking=accept-new \
+  -i ${DB_TUNNEL_IDENTITY_FILE} \
+  -p ${DB_TUNNEL_SSH_PORT} \
+  -L ${DB_TUNNEL_LOCAL_HOST}:${DB_TUNNEL_LOCAL_PORT}:${DB_TUNNEL_REMOTE_HOST}:${DB_TUNNEL_REMOTE_PORT} \
+  ${DB_TUNNEL_USER}@${DB_TUNNEL_HOST}
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

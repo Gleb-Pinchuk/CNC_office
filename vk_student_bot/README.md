@@ -8,7 +8,7 @@
 |------------|----------|
 | `VK_TOKEN` | Ключ сообщества VK (сохраняйте только в `.env`, не коммитьте). |
 | `VK_GROUP_ID` | ID группы VK для long poll. |
-| `CNC_API_BASE` | Базовый URL API: на той же ВМ в Compose — `http://web:8000/api`. С хоста/отладки — `http://127.0.0.1:8000/api`. |
+| `CNC_API_BASE` | Базовый URL API: без Docker/systemd — `http://127.0.0.1:8000/api`; в Compose — `http://web:8000/api`. |
 | `CNC_BOT_SECRET` | Тот же секрет, что `CNC_BOT_API_SECRET` в `.env` Django. |
 | `CNC_SECTION_TYPE` | Код раздела: `rangers` (кибер-рейнджеры), `attendance`, `statements`. |
 | `CNC_TABLE_TITLE_FRAGMENT` | Уникальный фрагмент названия таблицы (поиск `icontains`). |
@@ -32,6 +32,14 @@ CNC_BOT_TABLE_OWNER_USERNAME=логин_пользователя_владель�
 
 1. Убедитесь, что в общем `.env` заданы `CNC_BOT_API_SECRET`, `CNC_BOT_TABLE_OWNER_USERNAME`, а также переменные `vk_student_bot` (или продублируйте их в `environment` сервиса).
 2. Бот обращается к `http://web:8000/api/bot/gateway/` внутри сети Compose.
+
+## Запуск через systemd без Docker
+
+Для переноса на два сервера используйте инструкцию `ops/deploy_systemd_ssh_tunnel.md`. В этом режиме бот запускается сервисом `cnc-vk-bot.service` и обращается к локальному API:
+
+```bash
+CNC_API_BASE=http://127.0.0.1:8000/api
+```
 
 Проверка:
 
