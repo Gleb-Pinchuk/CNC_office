@@ -479,6 +479,106 @@ class TestBotApiViews:
     @override_settings(
         CNC_BOT_API_SECRET="secret-token",
         CNC_BOT_TABLE_OWNER_USERNAME="bot_owner",
+        BOT_SHEET_FIO_COL=2,
+        BOT_SHEET_GROUP_COL=1,
+        BOT_SHEET_STATUS_COL=11,
+        BOT_SHEET_REMARK_COL=12,
+        BOT_SHEET_SOCIAL_COLS="4,5,6",
+    )
+    def test_student_status_uses_state_header_not_week_column(self, client):
+        from django.contrib.auth import get_user_model
+
+        owner = get_user_model().objects.create_user(username="bot_owner", password="pass")
+        table = SectionTable.objects.create(
+            owner=owner,
+            title="Real table",
+            section_type="rangers",
+            content={
+                "custom_sheet": {
+                    "version": 2,
+                    "activeSheetIndex": 0,
+                    "sheets": [
+                        {
+                            "name": "Robo",
+                            "data": [
+                                [
+                                    "",
+                                    "Группа",
+                                    "ФИО",
+                                    "Номер телефона",
+                                    "Телеграм",
+                                    "Вконтакте",
+                                    "ТикТок",
+                                    "Ответственный",
+                                    "01.04-05.04",
+                                    "06.04-12.04",
+                                    "13.04-19.04",
+                                    "20.04-24.04",
+                                    "Состояние",
+                                ],
+                                [
+                                    "",
+                                    "ЧПУ 1",
+                                    "Иванов Иван",
+                                    "",
+                                    "@student_tg",
+                                    "vk.com/id1",
+                                    "cool.tiktok.nick",
+                                    "",
+                                    "",
+                                    "",
+                                    "",
+                                    "",
+                                    "учится",
+                                ],
+                            ],
+                        }
+                    ],
+                }
+            },
+        )
+
+        rm = client.post(
+            "/api/bot/gateway/",
+            {
+                "action": "set_student_remark",
+                "table_id": table.id,
+                "sheet_name": "Robo",
+                "student_fio": "Иванов",
+                "remark_date": "28.04.2026",
+                "remark_text": "после последней недели",
+            },
+            format="json",
+            HTTP_X_CNC_BOT_TOKEN="secret-token",
+        )
+
+        assert rm.status_code == status.HTTP_200_OK
+        assert rm.data["remark_col"] == 11
+
+        st = client.post(
+            "/api/bot/gateway/",
+            {
+                "action": "set_student_status",
+                "table_id": table.id,
+                "sheet_name": "Robo",
+                "student_fio": "Иванов",
+                "status_value": "отчислен",
+            },
+            format="json",
+            HTTP_X_CNC_BOT_TOKEN="secret-token",
+        )
+
+        assert st.status_code == status.HTTP_200_OK
+        assert st.data["status_col"] == 12
+
+        table.refresh_from_db()
+        row = table.content["custom_sheet"]["sheets"][0]["data"][1]
+        assert row[11] == "после последней недели"
+        assert row[12] == "отчислен"
+
+    @override_settings(
+        CNC_BOT_API_SECRET="secret-token",
+        CNC_BOT_TABLE_OWNER_USERNAME="bot_owner",
         BOT_SHEET_FIO_COL=0,
         BOT_SHEET_GROUP_COL=1,
         BOT_SHEET_STATUS_COL=2,

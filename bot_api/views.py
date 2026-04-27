@@ -111,14 +111,24 @@ class BotGatewayView(APIView):
         return (
             int(getattr(settings, "BOT_SHEET_FIO_COL", 2)),
             int(getattr(settings, "BOT_SHEET_GROUP_COL", 1)),
-            int(getattr(settings, "BOT_SHEET_STATUS_COL", 11)),
-            int(getattr(settings, "BOT_SHEET_REMARK_COL", 12)),
+            int(getattr(settings, "BOT_SHEET_STATUS_COL", 12)),
+            int(getattr(settings, "BOT_SHEET_REMARK_COL", 11)),
         )
+
+    @staticmethod
+    def _status_col_from_header(sheet_data, fallback_col: int) -> int:
+        if not sheet_data or not isinstance(sheet_data[0], list):
+            return fallback_col
+        for idx, value in enumerate(sheet_data[0]):
+            header = str(value or "").strip().lower()
+            if header in {"состояние", "статус", "статус учебы", "статус обучения"}:
+                return idx
+        return fallback_col
 
     def _social_cols(self):
         raw = (
             getattr(settings, "BOT_SHEET_SOCIAL_COLS", "")
-            or os.getenv("BOT_SHEET_SOCIAL_COLS", "13,14,15")
+            or os.getenv("BOT_SHEET_SOCIAL_COLS", "4,5,6")
         )
         out = []
         for part in str(raw).split(","):
@@ -304,6 +314,7 @@ class BotGatewayView(APIView):
             return Response(
                 {"detail": "Лист не найден"}, status=status.HTTP_404_NOT_FOUND
             )
+        st_c = self._status_col_from_header(data, st_c)
         students = search_students(
             data,
             fio_col=fio_c,
@@ -331,6 +342,7 @@ class BotGatewayView(APIView):
             return Response(
                 {"detail": "Лист не найден"}, status=status.HTTP_404_NOT_FOUND
             )
+        st_c = self._status_col_from_header(data, st_c)
         students = search_students(
             data,
             fio_col=fio_c,
@@ -364,6 +376,7 @@ class BotGatewayView(APIView):
             return Response(
                 {"detail": "Лист не найден"}, status=status.HTTP_404_NOT_FOUND
             )
+        st_c = self._status_col_from_header(data, st_c)
         one, allm = find_one_student_row(
             data,
             student_fio,
@@ -445,6 +458,7 @@ class BotGatewayView(APIView):
                 return Response(
                     {"detail": "Лист не найден"}, status=status.HTTP_404_NOT_FOUND
                 )
+            st_c = self._status_col_from_header(data, st_c)
             one, allm = find_one_student_row(
                 data,
                 student_fio,
@@ -527,6 +541,7 @@ class BotGatewayView(APIView):
                 return Response(
                     {"detail": "Лист не найден"}, status=status.HTTP_404_NOT_FOUND
                 )
+            st_c = self._status_col_from_header(data, st_c)
             one, allm = find_one_student_row(
                 data,
                 student_fio,
