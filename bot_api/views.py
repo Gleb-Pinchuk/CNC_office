@@ -227,8 +227,20 @@ class BotGatewayView(APIView):
         links = []
         profiles = []
         seen = set()
+        seen_cols = set()
         preferred = ["tg", "vk", "tiktok"]
+        candidates = []
         for pos, idx in enumerate(self._social_cols()):
+            candidates.append((idx, pos))
+            seen_cols.add(idx)
+        if isinstance(header_row, list):
+            for idx, header_value in enumerate(header_row):
+                if idx in seen_cols:
+                    continue
+                if self._platform_from_header(str(header_value or "")):
+                    candidates.append((idx, None))
+                    seen_cols.add(idx)
+        for pos, (idx, configured_pos) in enumerate(candidates):
             if idx < 0 or idx >= len(row):
                 continue
             raw = "" if row[idx] is None else str(row[idx]).strip()
@@ -238,7 +250,11 @@ class BotGatewayView(APIView):
             if isinstance(header_row, list) and idx < len(header_row):
                 header_hint = str(header_row[idx] or "")
             default_platform = self._platform_from_header(header_hint) or (
-                preferred[pos] if pos < len(preferred) else "tg"
+                preferred[configured_pos]
+                if configured_pos is not None and configured_pos < len(preferred)
+                else preferred[pos]
+                if pos < len(preferred)
+                else "tg"
             )
             parts = [p for p in re.split(r"[\s,;\n]+", raw) if p and p.strip()]
             if not parts:
