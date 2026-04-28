@@ -13,9 +13,10 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from api.xlsx_export import export_custom_sheet_to_xlsx_bytes
-from sections.models import SectionTable
+from sections.models import SectionTable, SectionTableMonthlyArchive
 
 from .remark_utils import parse_input_date
+from .reports import generate_monitoring_report_docx, report_filename
 from .sheet_utils import find_sheet_by_name, get_workbook_sheets, set_cell_value
 from .student_sheet import find_one_student_row, list_groups, search_students
 from .week_column import pick_week_col_by_date
@@ -95,6 +96,10 @@ class BotGatewayView(APIView):
             return self._set_student_status(request, owner)
         if action == "export_table_xlsx":
             return self._export_table_xlsx(request, owner)
+        if action == "list_report_archives":
+            return self._list_report_archives(request, owner)
+        if action == "export_monitoring_report_docx":
+            return self._export_monitoring_report_docx(request, owner)
         return Response(
             {"detail": f"Неизвестное action: {action}"},
             status=status.HTTP_400_BAD_REQUEST,
@@ -736,6 +741,78 @@ class BotGatewayView(APIView):
         )
         filename = (table.title or "table").replace("/", "_").replace("\\", "_")
         resp["Content-Disposition"] = f'attachment; filename="{filename}.xlsx"'
+        return resp
+
+    def _list_report_archives(self, request, owner):
+        table_id = request.data.get("table_id")
+        table = SectionTable.objects.filter(owner=owner, id=table_id).first()
+        if not table:
+            return Response(
+                {"detail": "Таблица не найдена"}, status=status.HTTP_404_NOT_FOUND
+            )
+        archives = [
+            {
+                "year": archive.year,
+                "month": archive.month,
+                "label": f"{archive.month:02d}.{archive.year}",
+            }
+            for archive in table.monthly_archives.order_by("-year", "-month")[:3]
+        ]
+        return Response({"archives": archives})
+
+    def _export_monitoring_report_docx(self, request, owner):
+        table_id = request.data.get("table_id")
+        sheet_name = (request.data.get("sheet_name") or "").strip()
+        if not sheet_name:
+            return Response(
+                {"detail": "Нужен sheet_name"}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        table = SectionTable.objects.filter(owner=owner, id=table_id).first()
+        if not table:
+            return Response(
+                {"detail": "Таблица не найдена"}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        year = request.data.get("year")
+        month = request.data.get("month")
+        content = table.content if isinstance(table.content, dict) else {}
+        filename_year = filename_month = None
+        if year and month:
+            try:
+                year_i = int(year)
+                month_i = int(month)
+            except (TypeError, ValueError):
+                return Response(
+                    {"detail": "year и month должны быть числами"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            archive = SectionTableMonthlyArchive.objects.filter(
+                table=table, year=year_i, month=month_i
+            ).first()
+            if not archive:
+                return Response(
+                    {"detail": "Архив за указанный месяц не найден"},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            content = archive.content if isinstance(archive.content, dict) else {}
+            filename_year, filename_month = year_i, month_i
+
+        try:
+            docx = generate_monitoring_report_docx(
+                table_title=table.title,
+                content=content,
+                sheet_name=sheet_name,
+            )
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_404_NOT_FOUND)
+
+        resp = HttpResponse(
+            docx,
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+        filename = report_filename(sheet_name, filename_year, filename_month)
+        resp["Content-Disposition"] = f'attachment; filename="{filename}"'
         return resp
 
 

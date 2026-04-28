@@ -7,6 +7,7 @@ from datetime import timedelta
 from importlib.util import find_spec
 from pathlib import Path
 
+from celery.schedules import crontab
 from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -63,6 +64,8 @@ BOT_SHEET_GROUP_COL = int(os.getenv("BOT_SHEET_GROUP_COL", "1"))
 BOT_SHEET_STATUS_COL = int(os.getenv("BOT_SHEET_STATUS_COL", "12"))
 BOT_SHEET_REMARK_COL = int(os.getenv("BOT_SHEET_REMARK_COL", "11"))
 BOT_SHEET_SOCIAL_COLS = os.getenv("BOT_SHEET_SOCIAL_COLS", "4,5,6")
+MONITORING_REPORT_DEVELOPER = os.getenv("MONITORING_REPORT_DEVELOPER", "Тагирова А.Р.")
+MONITORING_REPORT_APPROVER = os.getenv("MONITORING_REPORT_APPROVER", "Яшев Э.А.")
 
 # Celery / Redis
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://127.0.0.1:6379/0")
@@ -75,6 +78,10 @@ CELERY_BEAT_SCHEDULE = {
     "push-pending-nextcloud": {
         "task": "bot_api.tasks.push_pending_nextcloud",
         "schedule": timedelta(minutes=5),
+    },
+    "rollover-monthly-tables": {
+        "task": "bot_api.tasks.rollover_monthly_tables",
+        "schedule": crontab(hour=3, minute=10),
     },
 }
 

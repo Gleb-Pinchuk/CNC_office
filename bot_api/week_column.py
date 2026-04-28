@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import re
-from datetime import date, datetime
+from calendar import monthrange
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 DATE_TOKEN = re.compile(r"(\d{1,2}[.\-]\d{1,2}[.\-]\d{2,4}|\d{4}-\d{1,2}-\d{1,2})")
@@ -11,6 +12,38 @@ SHORT_DATE_RANGE = re.compile(
     r"(?<!\d)(\d{1,2})[.](\d{1,2})\s*[-–—]\s*(\d{1,2})[.](\d{1,2})(?![.\d])"
 )
 SHORT_DATE_TOKEN = re.compile(r"(?<!\d)(\d{1,2})[.](\d{1,2})(?![.\d])")
+
+
+def build_month_week_ranges(year: int, month: int) -> list[tuple[date, date]]:
+    """
+    Возвращает 4 диапазона мониторинга для месяца.
+
+    Полные недели считаются с понедельника по воскресенье. Короткая первая
+    неделя включается только если без нее в месяце меньше четырех полных недель.
+    Дни после последнего диапазона дальше мапятся в последнюю колонку.
+    """
+    first = date(year, month, 1)
+    last = date(year, month, monthrange(year, month)[1])
+    first_monday = first + timedelta(days=(7 - first.weekday()) % 7)
+
+    full_weeks: list[tuple[date, date]] = []
+    cursor = first_monday
+    while cursor + timedelta(days=6) <= last:
+        full_weeks.append((cursor, cursor + timedelta(days=6)))
+        cursor += timedelta(days=7)
+
+    if len(full_weeks) >= 4:
+        return full_weeks[:4]
+
+    ranges: list[tuple[date, date]] = []
+    if first < first_monday and full_weeks:
+        ranges.append((first, first_monday - timedelta(days=1)))
+    ranges.extend(full_weeks)
+    return ranges[:4]
+
+
+def format_week_range_header(start: date, end: date) -> str:
+    return f"{start:%d.%m}-{end:%d.%m}"
 
 
 def _parse_date_token(token: str) -> Optional[date]:

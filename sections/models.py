@@ -54,3 +54,37 @@ class SectionTable(models.Model):
     @property
     def owner_username(self):
         return self.owner.username
+
+
+class SectionTableMonthlyArchive(models.Model):
+    """
+    Снимок таблицы мониторинга за закрытый месяц.
+    """
+
+    table = models.ForeignKey(
+        SectionTable,
+        on_delete=models.CASCADE,
+        related_name="monthly_archives",
+        verbose_name="Исходная таблица",
+    )
+    year = models.PositiveSmallIntegerField(verbose_name="Год")
+    month = models.PositiveSmallIntegerField(verbose_name="Месяц")
+    content = models.JSONField(default=dict, blank=True, verbose_name="Снимок таблицы")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Дата создания")
+
+    class Meta:
+        verbose_name = "Месячный архив таблицы"
+        verbose_name_plural = "Месячные архивы таблиц"
+        ordering = ["-year", "-month", "-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["table", "year", "month"],
+                name="unique_section_table_monthly_archive",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["table", "-year", "-month"]),
+        ]
+
+    def __str__(self):
+        return f"{self.table_id}: {self.month:02d}.{self.year}"

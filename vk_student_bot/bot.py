@@ -201,6 +201,47 @@ class CNCApi:
             filename = f"{filename}.xlsx"
         return r.content, filename
 
+    def list_report_archives(self, table_id: int) -> List[dict]:
+        return self.post("list_report_archives", {"table_id": table_id}).get("archives", [])
+
+    def export_monitoring_report_docx(
+        self,
+        table_id: int,
+        sheet_name: str,
+        year: Optional[int] = None,
+        month: Optional[int] = None,
+    ) -> tuple[bytes, str]:
+        payload: Dict[str, Any] = {
+            "action": "export_monitoring_report_docx",
+            "table_id": table_id,
+            "sheet_name": sheet_name,
+        }
+        if year and month:
+            payload["year"] = year
+            payload["month"] = month
+        r = requests.post(
+            f"{self.base}/bot/gateway/",
+            json=payload,
+            headers=_headers(),
+            timeout=120,
+        )
+        if r.status_code >= 400:
+            text = r.text or str(r.status_code)
+            try:
+                detail = r.json().get("detail", text)
+            except Exception:
+                detail = text
+            raise CNCApiError(f"Ошибка API ({r.status_code}): {detail}")
+        cd = r.headers.get("Content-Disposition", "")
+        filename = "monitoring_report.docx"
+        marker = 'filename="'
+        if marker in cd:
+            tail = cd.split(marker, 1)[1]
+            filename = tail.split('"', 1)[0] or filename
+        if not filename.lower().endswith(".docx"):
+            filename = f"{filename}.docx"
+        return r.content, filename
+
 
 @dataclass
 class UserCtx:
@@ -215,6 +256,7 @@ class UserCtx:
     directions_cache: List[str] = field(default_factory=list)
     groups_cache: List[str] = field(default_factory=list)
     students_cache: List[dict] = field(default_factory=list)
+    report_archives_cache: List[dict] = field(default_factory=list)
 
 
 def _pl(cmd: str, **kwargs) -> str:
@@ -345,6 +387,9 @@ class StudentBot:
             if "выгруз" in tl or "excel" in tl or "xlsx" in tl:
                 self.export_table_to_vk(peer_id)
                 return
+            if "отчет" in tl or "отчёт" in tl or "word" in tl or "docx" in tl:
+                self.export_report_to_vk(peer_id, ctx)
+                return
 
             self.show_main(peer_id, "Не понял команду. Используйте кнопки ниже.")
         except CNCApiError as e:
@@ -406,6 +451,22 @@ class StudentBot:
                 self.show_date_picker(peer_id, ctx)
             elif cmd == "exp_xlsx":
                 self.export_table_to_vk(peer_id)
+            elif cmd == "rep_cur":
+                self.export_report_to_vk(peer_id, ctx)
+            elif cmd == "rep_arc":
+                self.show_report_archives(peer_id, ctx)
+            elif cmd == "rep_m":
+                idx = int(p.get("i", -1))
+                if 0 <= idx < len(ctx.report_archives_cache):
+                    archive = ctx.report_archives_cache[idx]
+                    self.export_report_to_vk(
+                        peer_id,
+                        ctx,
+                        year=int(archive.get("year")),
+                        month=int(archive.get("month")),
+                    )
+                else:
+                    self.show_report_archives(peer_id, ctx)
             elif cmd == "d_today":
                 ctx.selected_date = _tz_now().strftime("%d.%m.%Y")
                 self.send(peer_id, f"📅 Дата: {ctx.selected_date}")
@@ -527,6 +588,8 @@ class StudentBot:
             kb = VkKeyboard(one_time=False, inline=False)
             kb.add_button("🎓 Направления", VkKeyboardColor.PRIMARY, payload=_pl("dirs"))
             kb.add_line()
+            kb.add_button("📄 Отчет Word", VkKeyboardColor.POSITIVE, payload=_pl("rep_cur"))
+            kb.add_line()
             kb.add_button("🔙 Меню", VkKeyboardColor.SECONDARY, payload=_pl("main"))
             self.send(peer_id, f"В направлении «{ctx.direction}» группы не найдены.", keyboard=kb)
             return
@@ -556,6 +619,10 @@ class StudentBot:
                 )
             kb.add_line()
         kb.add_button("🎓 Направления", VkKeyboardColor.SECONDARY, payload=_pl("dirs"))
+        kb.add_line()
+        kb.add_button("📄 Отчет Word", VkKeyboardColor.POSITIVE, payload=_pl("rep_cur"))
+        kb.add_button("🗂 Архив отчетов", VkKeyboardColor.SECONDARY, payload=_pl("rep_arc"))
+        kb.add_line()
         kb.add_button("🔙 Меню", VkKeyboardColor.SECONDARY, payload=_pl("main"))
         self.send(
             peer_id,
@@ -737,11 +804,66 @@ class StudentBot:
         ctx.students_cache = []
         self.show_student_profile(peer_id, ctx)
 
+    def show_report_archives(self, peer_id: int, ctx: UserCtx):
+        if not ctx.direction:
+            self.show_directions(peer_id, ctx)
+            return
+        archives = self.api.list_report_archives(self.table_id())
+        ctx.report_archives_cache = archives
+        kb = VkKeyboard(one_time=False, inline=False)
+        if archives:
+            for i, archive in enumerate(archives[:3]):
+                kb.add_button(
+                    str(archive.get("label") or f"{archive.get('month'):02d}.{archive.get('year')}")[:40],
+                    VkKeyboardColor.PRIMARY,
+                    payload=_pl("rep_m", i=i),
+                )
+                kb.add_line()
+        kb.add_button("📄 Текущий отчет", VkKeyboardColor.POSITIVE, payload=_pl("rep_cur"))
+        kb.add_line()
+        kb.add_button("📋 Группы", VkKeyboardColor.SECONDARY, payload=_pl("grps"))
+        kb.add_button("🔙 Меню", VkKeyboardColor.SECONDARY, payload=_pl("main"))
+        text = (
+            f"Архивы отчетов для направления «{ctx.direction}»:"
+            if archives
+            else "Архивов за прошлые месяцы пока нет."
+        )
+        self.send(peer_id, text, keyboard=kb)
+
+    def export_report_to_vk(
+        self,
+        peer_id: int,
+        ctx: UserCtx,
+        year: Optional[int] = None,
+        month: Optional[int] = None,
+    ):
+        if not ctx.direction:
+            self.show_directions(peer_id, ctx)
+            return
+        period = f" за {month:02d}.{year}" if year and month else ""
+        self.send(peer_id, f"⏳ Готовлю Word-отчет{period} по направлению «{ctx.direction}»...")
+        blob, filename = self.api.export_monitoring_report_docx(
+            self.table_id(), ctx.direction, year=year, month=month
+        )
+        self.send_document(
+            peer_id,
+            filename,
+            blob,
+            f"✅ Word-отчет{period}:",
+            mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+
     def export_table_to_vk(self, peer_id: int):
         self.send(peer_id, "⏳ Готовлю актуальную таблицу к выгрузке...")
         table_id = self.table_id()
         blob, filename = self.api.export_table_xlsx(table_id)
-        self.send_document(peer_id, filename, blob, "✅ Актуальная таблица из БД:")
+        self.send_document(
+            peer_id,
+            filename,
+            blob,
+            "✅ Актуальная таблица из БД:",
+            mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
 
     # -------------------- отправка --------------------
 
@@ -756,7 +878,12 @@ class StudentBot:
         self.vk_session.method("messages.send", payload)
 
     def send_document(
-        self, peer_id: int, filename: str, body: bytes, caption: Optional[str] = None
+        self,
+        peer_id: int,
+        filename: str,
+        body: bytes,
+        caption: Optional[str] = None,
+        mime_type: str = "application/octet-stream",
     ):
         vk = self.vk_session.get_api()
         upload = vk.docs.getMessagesUploadServer(type="doc", peer_id=peer_id)
@@ -767,7 +894,7 @@ class StudentBot:
             "file": (
                 filename,
                 body,
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                mime_type,
             )
         }
         up_resp = requests.post(upload_url, files=files, timeout=120)

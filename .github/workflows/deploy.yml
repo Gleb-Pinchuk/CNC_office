@@ -6,6 +6,7 @@ on:
       - develop
       - fix/bot-and-table-editor
       - feature/student-monitoring-vk-celery
+      - feature/monthly-monitoring-reports
       - "codex-*"
       - "codex/**"
   workflow_dispatch:
@@ -62,6 +63,9 @@ jobs:
             echo "Deploy start: $(date)"
             test -f "$RELEASE"
             test -f /etc/cnc-office/app.env
+            set -a
+            . /etc/cnc-office/app.env
+            set +a
 
             rc-service cnc-vk-bot stop || true
             rc-service cnc-office-celery-beat stop || true
@@ -116,6 +120,7 @@ jobs:
             rc-service cnc-db-tunnel restart || rc-service cnc-db-tunnel start
             sleep 2
             pg_isready -h 127.0.0.1 -p 15432 -U cnc_user -d cnc_office
+            su cnc -c "cd '$PROJECT_DIR' && .venv/bin/python manage.py migrate --noinput"
 
             : > /var/log/cnc-office/cnc-office-web.log || true
             rc-service cnc-office-web start
