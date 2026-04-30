@@ -37,6 +37,77 @@ CNC_TABLE_TITLE_FRAGMENT = os.getenv("CNC_TABLE_TITLE_FRAGMENT", "киберре
 DIRS_RAW = os.getenv("CNC_DIRECTION_SHEETS", "ЧПУ,РОБО,Аэро,микро")
 SPREADSHEETS = [x.strip() for x in DIRS_RAW.split(",") if x.strip()]
 TZ_NAME = os.getenv("TIMEZONE", "Europe/Moscow")
+GROUPS_JSON = os.getenv("CNC_TABLE_GROUPS_JSON", "").strip()
+
+
+def _default_table_groups() -> List[dict]:
+    return [
+        {
+            "key": "production",
+            "title": "Производственная",
+            "table_title": "Рейнджеры_производственная_группа",
+            "section_type": "rangers",
+            "directions": ["ЧПУ", "МИКРО", "АЭРО", "РОБО"],
+        },
+        {
+            "key": "operations",
+            "title": "Эксплуатация",
+            "table_title": "Рейнджеры_группа_эксплуатации",
+            "section_type": "rangers",
+            "directions": ["ХимБио", "ЭлМонтаж", "БИМ", "ПромБез", "КиПиА", "Автоматика"],
+        },
+        {
+            "key": "integration",
+            "title": "Интеграционная",
+            "table_title": "Рейнджеры_интеграционная_группа",
+            "section_type": "rangers",
+            "directions": ["Юриспруденция", "Медицина", "Преподавание", "Экономика", "Алабуга Старт"],
+        },
+        {
+            "key": "programming",
+            "title": "Программирование",
+            "table_title": "Рейнджеры_группа_программирования",
+            "section_type": "rangers",
+            "directions": ["Python", "Бизнес-информатика"],
+        },
+    ]
+
+
+def _load_table_groups() -> List[dict]:
+    if not GROUPS_JSON:
+        return _default_table_groups()
+    try:
+        raw = json.loads(GROUPS_JSON)
+        if not isinstance(raw, list):
+            raise ValueError("CNC_TABLE_GROUPS_JSON должен быть массивом")
+        out = []
+        for idx, item in enumerate(raw):
+            if not isinstance(item, dict):
+                continue
+            key = str(item.get("key") or f"group_{idx+1}").strip()
+            title = str(item.get("title") or key).strip()
+            table_title = str(item.get("table_title") or item.get("title_fragment") or "").strip()
+            section_type = str(item.get("section_type") or CNC_SECTION_TYPE).strip()
+            directions = [str(x).strip() for x in (item.get("directions") or []) if str(x).strip()]
+            if not table_title:
+                continue
+            out.append(
+                {
+                    "key": key,
+                    "title": title,
+                    "table_title": table_title,
+                    "section_type": section_type,
+                    "directions": directions,
+                }
+            )
+        return out or _default_table_groups()
+    except Exception:
+        logger.exception("Не удалось прочитать CNC_TABLE_GROUPS_JSON, используем defaults")
+        return _default_table_groups()
+
+
+TABLE_GROUPS = _load_table_groups()
+TABLE_GROUPS_BY_KEY = {str(x["key"]): x for x in TABLE_GROUPS}
 
 for name, value in {
     "VK_TOKEN": VK_TOKEN,
@@ -64,7 +135,7 @@ class CNCApiError(Exception):
 class CNCApi:
     def __init__(self, base: str):
         self.base = base.rstrip("/")
-        self._table_cache: Optional[dict] = None
+        self._table_cache: Dict[str, dict] = {}
 
     def post(self, action: str, payload: dict, retries: int = 3) -> dict:
         body = {"action": action, **payload}
@@ -95,14 +166,21 @@ class CNCApi:
                 raise CNCApiError(str(last_error)) from last_error
         raise CNCApiError(str(last_error))
 
-    def lookup_table(self, force_refresh: bool = False) -> dict:
-        if self._table_cache and not force_refresh:
-            return self._table_cache
+    def lookup_table(
+        self,
+        *,
+        section_type: str = CNC_SECTION_TYPE,
+        title_contains: str = CNC_TABLE_TITLE_FRAGMENT,
+        cache_key: str = "default",
+        force_refresh: bool = False,
+    ) -> dict:
+        if cache_key in self._table_cache and not force_refresh:
+            return self._table_cache[cache_key]
         result = self.post(
             "lookup_table",
-            {"section_type": CNC_SECTION_TYPE, "title_contains": CNC_TABLE_TITLE_FRAGMENT},
+            {"section_type": section_type, "title_contains": title_contains},
         )
-        self._table_cache = result
+        self._table_cache[cache_key] = result
         return result
 
     def list_sheets(self, table_id: int) -> List[str]:
@@ -245,6 +323,7 @@ class CNCApi:
 
 @dataclass
 class UserCtx:
+    table_group_key: Optional[str] = None
     direction: Optional[str] = None
     group: Optional[str] = None
     student: Optional[str] = None
@@ -285,7 +364,7 @@ class StudentBot:
         self.vk_session = vk_api.VkApi(token=VK_TOKEN)
         self.long_poll = VkBotLongPoll(self.vk_session, VK_GROUP_ID)
         self.api = CNCApi(CNC_API_BASE)
-        self.table_info: Optional[dict] = None
+        self.table_info: Dict[str, dict] = {}
         self.ctx: Dict[int, UserCtx] = {}
 
     def _ctx(self, peer_id: int) -> UserCtx:
@@ -293,38 +372,47 @@ class StudentBot:
             self.ctx[peer_id] = UserCtx(selected_date=_tz_now().strftime("%d.%m.%Y"))
         return self.ctx[peer_id]
 
-    def ensure_table(self):
-        if self.table_info is None:
-            self.table_info = self.api.lookup_table()
+    def ensure_table(self, group_key: str):
+        if group_key not in TABLE_GROUPS_BY_KEY:
+            raise CNCApiError(f"Неизвестная группа таблицы: {group_key}")
+        if group_key not in self.table_info:
+            cfg = TABLE_GROUPS_BY_KEY[group_key]
+            self.table_info[group_key] = self.api.lookup_table(
+                section_type=cfg["section_type"],
+                title_contains=cfg["table_title"],
+                cache_key=group_key,
+            )
             logger.info(
-                "Таблица id=%s, листов=%s",
-                self.table_info.get("id"),
-                len(self.table_info.get("sheet_names") or []),
+                "Таблица key=%s id=%s, листов=%s",
+                group_key,
+                self.table_info[group_key].get("id"),
+                len(self.table_info[group_key].get("sheet_names") or []),
             )
 
-    def table_id(self) -> int:
-        self.ensure_table()
-        return int(self.table_info["id"])
+    def table_id(self, group_key: str) -> int:
+        self.ensure_table(group_key)
+        return int(self.table_info[group_key]["id"])
 
-    def _all_sheets(self) -> List[str]:
+    def _all_sheets(self, group_key: str) -> List[str]:
         """Все листы таблицы — сперва из кеша lookup_table, иначе через list_sheets."""
-        self.ensure_table()
-        names = list(self.table_info.get("sheet_names") or [])
+        self.ensure_table(group_key)
+        names = list(self.table_info[group_key].get("sheet_names") or [])
         if not names:
             try:
-                names = self.api.list_sheets(self.table_id())
+                names = self.api.list_sheets(self.table_id(group_key))
             except Exception:
                 logger.exception("list_sheets failed")
                 names = []
         return names
 
-    def directions(self) -> List[str]:
+    def directions(self, group_key: str) -> List[str]:
         """Упорядоченный список направлений: сперва по порядку из env, затем все остальные листы."""
-        names = self._all_sheets()
+        names = self._all_sheets(group_key)
         if not names:
             return []
+        configured = TABLE_GROUPS_BY_KEY.get(group_key, {}).get("directions") or SPREADSHEETS
         ordered: List[str] = []
-        for pref in SPREADSHEETS:
+        for pref in configured:
             pl = pref.lower()
             for n in names:
                 nl = n.lower()
@@ -338,7 +426,6 @@ class StudentBot:
 
     def run(self):
         logger.info("Запуск VK-бота мониторинга…")
-        self.ensure_table()
         for event in self.long_poll.listen():
             try:
                 if event.type == VkBotEventType.MESSAGE_NEW:
@@ -403,6 +490,24 @@ class StudentBot:
         try:
             if cmd == "main":
                 self.show_main(peer_id, "Главное меню")
+            elif cmd == "tbls":
+                self.show_table_groups(peer_id, ctx)
+            elif cmd == "tbl":
+                key = str(p.get("k") or "").strip()
+                if key in TABLE_GROUPS_BY_KEY:
+                    ctx.table_group_key = key
+                    ctx.direction = None
+                    ctx.group = None
+                    ctx.student = None
+                    ctx.directions_cache = []
+                    ctx.groups_cache = []
+                    ctx.students_cache = []
+                    ctx.groups_page = 0
+                    ctx.students_page = 0
+                    self.send(peer_id, f"Выбрана группа: {TABLE_GROUPS_BY_KEY[key]['title']}")
+                    self.show_directions(peer_id, ctx)
+                else:
+                    self.show_table_groups(peer_id, ctx)
             elif cmd == "dirs":
                 self.show_directions(peer_id, ctx)
             elif cmd == "dir":  # pick direction by index
@@ -509,6 +614,11 @@ class StudentBot:
         else:
             self.show_main(peer_id, "Дата сохранена. Выберите раздел:")
 
+    def _selected_group_cfg(self, ctx: UserCtx) -> Optional[dict]:
+        if not ctx.table_group_key:
+            return None
+        return TABLE_GROUPS_BY_KEY.get(ctx.table_group_key)
+
     # -------------------- ввод от пользователя --------------------
 
     def handle_date_input(self, peer_id: int, ctx: UserCtx, text: str):
@@ -537,32 +647,48 @@ class StudentBot:
         ctx = self._ctx(peer_id)
         ctx.current_view = "main"
         kb = VkKeyboard(one_time=False, inline=False)
-        kb.add_button("🎓 Направления", VkKeyboardColor.PRIMARY, payload=_pl("dirs"))
+        kb.add_button("Группа таблицы", VkKeyboardColor.PRIMARY, payload=_pl("tbls"))
         kb.add_line()
-        kb.add_button("📋 Группы", VkKeyboardColor.SECONDARY, payload=_pl("grps"))
-        kb.add_button("👤 Студент", VkKeyboardColor.SECONDARY, payload=_pl("sts"))
+        kb.add_button("Направления", VkKeyboardColor.PRIMARY, payload=_pl("dirs"))
         kb.add_line()
-        kb.add_button("📅 Выбор даты", VkKeyboardColor.SECONDARY, payload=_pl("date"))
+        kb.add_button("Группы", VkKeyboardColor.SECONDARY, payload=_pl("grps"))
+        kb.add_button("Студенты", VkKeyboardColor.SECONDARY, payload=_pl("sts"))
         kb.add_line()
-        kb.add_button("📥 Выгрузить Excel", VkKeyboardColor.POSITIVE, payload=_pl("exp_xlsx"))
+        kb.add_button("Выбор даты", VkKeyboardColor.SECONDARY, payload=_pl("date"))
+        kb.add_line()
+        kb.add_button("Отчет Excel", VkKeyboardColor.POSITIVE, payload=_pl("exp_xlsx"))
         suffix = []
+        if ctx.table_group_key and ctx.table_group_key in TABLE_GROUPS_BY_KEY:
+            suffix.append(f"Группа таблицы: {TABLE_GROUPS_BY_KEY[ctx.table_group_key]['title']}")
         if ctx.direction:
-            suffix.append(f"🎓 {ctx.direction}")
+            suffix.append(f"Направление: {ctx.direction}")
         if ctx.group:
-            suffix.append(f"🏷 {ctx.group}")
+            suffix.append(f"Группа: {ctx.group}")
         if ctx.student:
-            suffix.append(f"👤 {ctx.student}")
-        suffix.append(f"📅 {ctx.selected_date}")
+            suffix.append(f"Студент: {ctx.student}")
+        suffix.append(f"Дата: {ctx.selected_date}")
         body = text + "\n\n" + " · ".join(suffix)
         self.send(peer_id, body, keyboard=kb)
 
+    def show_table_groups(self, peer_id: int, ctx: UserCtx):
+        ctx.current_view = "table_groups"
+        kb = VkKeyboard(one_time=False, inline=False)
+        for group in TABLE_GROUPS:
+            kb.add_button(group["title"][:40], VkKeyboardColor.PRIMARY, payload=_pl("tbl", k=group["key"]))
+            kb.add_line()
+        kb.add_button("В меню", VkKeyboardColor.SECONDARY, payload=_pl("main"))
+        self.send(peer_id, "Выберите Группу:", keyboard=kb)
+
     def show_directions(self, peer_id: int, ctx: UserCtx):
+        if not ctx.table_group_key:
+            self.show_table_groups(peer_id, ctx)
+            return
         ctx.current_view = "directions"
-        dirs = self.directions()
+        dirs = self.directions(ctx.table_group_key)
         ctx.directions_cache = dirs
         kb = VkKeyboard(one_time=False, inline=False)
         if not dirs:
-            kb.add_button("🔙 Меню", VkKeyboardColor.SECONDARY, payload=_pl("main"))
+            kb.add_button("В меню", VkKeyboardColor.SECONDARY, payload=_pl("main"))
             self.send(
                 peer_id,
                 "⚠️ Не удалось получить список направлений. Проверьте, что таблица импортирована.",
@@ -573,15 +699,20 @@ class StudentBot:
         for i, name in enumerate(dirs[:8]):
             kb.add_button(name[:40], VkKeyboardColor.PRIMARY, payload=_pl("dir", i=i))
             kb.add_line()
-        kb.add_button("🔙 Меню", VkKeyboardColor.SECONDARY, payload=_pl("main"))
+        kb.add_button("Сменить группу таблиц", VkKeyboardColor.SECONDARY, payload=_pl("tbls"))
+        kb.add_line()
+        kb.add_button("В меню", VkKeyboardColor.SECONDARY, payload=_pl("main"))
         self.send(peer_id, "Выберите направление:", keyboard=kb)
 
     def show_groups(self, peer_id: int, ctx: UserCtx):
+        if not ctx.table_group_key:
+            self.show_table_groups(peer_id, ctx)
+            return
         if not ctx.direction:
             self.show_directions(peer_id, ctx)
             return
         if not ctx.groups_cache:
-            ctx.groups_cache = self.api.list_groups(self.table_id(), ctx.direction)
+            ctx.groups_cache = self.api.list_groups(self.table_id(ctx.table_group_key), ctx.direction)
             ctx.groups_page = 0
         groups = ctx.groups_cache
         if not groups:
@@ -631,6 +762,9 @@ class StudentBot:
         )
 
     def show_students(self, peer_id: int, ctx: UserCtx):
+        if not ctx.table_group_key:
+            self.show_table_groups(peer_id, ctx)
+            return
         if not ctx.direction:
             self.show_directions(peer_id, ctx)
             return
@@ -639,7 +773,7 @@ class StudentBot:
             return
         if not ctx.students_cache:
             ctx.students_cache = self.api.list_students(
-                self.table_id(), ctx.direction, ctx.group
+                self.table_id(ctx.table_group_key), ctx.direction, ctx.group
             )
             ctx.students_page = 0
         students = ctx.students_cache
@@ -685,12 +819,12 @@ class StudentBot:
         )
 
     def show_student_profile(self, peer_id: int, ctx: UserCtx):
-        if not (ctx.direction and ctx.group and ctx.student):
+        if not (ctx.table_group_key and ctx.direction and ctx.group and ctx.student):
             self.show_main(peer_id, "Сначала выберите направление, группу и студента.")
             return
         try:
             profile = self.api.get_student_profile(
-                self.table_id(),
+                self.table_id(ctx.table_group_key),
                 ctx.direction,
                 ctx.student,
                 ctx.group,
@@ -775,11 +909,11 @@ class StudentBot:
     # -------------------- действия --------------------
 
     def write_remark(self, peer_id: int, ctx: UserCtx, text: Optional[str]):
-        if not (ctx.direction and ctx.student):
+        if not (ctx.table_group_key and ctx.direction and ctx.student):
             self.show_main(peer_id, "Сначала выберите студента.")
             return
         self.api.set_student_remark(
-            self.table_id(),
+            self.table_id(ctx.table_group_key),
             ctx.direction,
             ctx.student,
             ctx.selected_date,
@@ -794,21 +928,24 @@ class StudentBot:
         self.show_student_profile(peer_id, ctx)
 
     def set_status(self, peer_id: int, ctx: UserCtx, status_value: str):
-        if not (ctx.direction and ctx.student):
+        if not (ctx.table_group_key and ctx.direction and ctx.student):
             self.show_main(peer_id, "Сначала выберите студента.")
             return
         self.api.set_student_status(
-            self.table_id(), ctx.direction, ctx.student, status_value, ctx.group
+            self.table_id(ctx.table_group_key), ctx.direction, ctx.student, status_value, ctx.group
         )
         self.send(peer_id, f"✅ Статус обновлён: {status_value}")
         ctx.students_cache = []
         self.show_student_profile(peer_id, ctx)
 
     def show_report_archives(self, peer_id: int, ctx: UserCtx):
+        if not ctx.table_group_key:
+            self.show_table_groups(peer_id, ctx)
+            return
         if not ctx.direction:
             self.show_directions(peer_id, ctx)
             return
-        archives = self.api.list_report_archives(self.table_id())
+        archives = self.api.list_report_archives(self.table_id(ctx.table_group_key))
         ctx.report_archives_cache = archives
         kb = VkKeyboard(one_time=False, inline=False)
         if archives:
@@ -837,13 +974,16 @@ class StudentBot:
         year: Optional[int] = None,
         month: Optional[int] = None,
     ):
+        if not ctx.table_group_key:
+            self.show_table_groups(peer_id, ctx)
+            return
         if not ctx.direction:
             self.show_directions(peer_id, ctx)
             return
         period = f" за {month:02d}.{year}" if year and month else ""
         self.send(peer_id, f"⏳ Готовлю Word-отчет{period} по направлению «{ctx.direction}»...")
         blob, filename = self.api.export_monitoring_report_docx(
-            self.table_id(), ctx.direction, year=year, month=month
+            self.table_id(ctx.table_group_key), ctx.direction, year=year, month=month
         )
         self.send_document(
             peer_id,
@@ -854,8 +994,12 @@ class StudentBot:
         )
 
     def export_table_to_vk(self, peer_id: int):
+        ctx = self._ctx(peer_id)
+        if not ctx.table_group_key:
+            self.show_table_groups(peer_id, ctx)
+            return
         self.send(peer_id, "⏳ Готовлю актуальную таблицу к выгрузке...")
-        table_id = self.table_id()
+        table_id = self.table_id(ctx.table_group_key)
         blob, filename = self.api.export_table_xlsx(table_id)
         self.send_document(
             peer_id,

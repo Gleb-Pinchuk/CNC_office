@@ -47,9 +47,11 @@ def generate_monitoring_report_docx(
     findings = rows["findings"]
 
     doc = Document()
+    _apply_default_font(doc)
     _build_cover(doc, direction, report_date or date.today())
     doc.add_page_break()
     _build_body(doc, direction, groups, rows["checked_count"], findings)
+    _normalize_doc_fonts(doc)
 
     out = BytesIO()
     doc.save(out)
@@ -198,3 +200,17 @@ def _student_word(count: int) -> str:
 
 def _safe_filename(value: str) -> str:
     return "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in value)[:80]
+
+
+def _apply_default_font(doc) -> None:
+    normal_style = doc.styles["Normal"]
+    normal_style.font.name = "Times New Roman"
+    normal_style.font.size = Pt(12)
+
+
+def _normalize_doc_fonts(doc) -> None:
+    for paragraph in doc.paragraphs:
+        for run in paragraph.runs:
+            run.font.name = "Times New Roman"
+            if run.font.size is None:
+                run.font.size = Pt(12)

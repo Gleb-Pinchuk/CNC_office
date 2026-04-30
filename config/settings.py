@@ -75,6 +75,10 @@ CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = os.getenv("TIMEZONE", "Europe/Moscow")
 CELERY_BEAT_SCHEDULE = {
+    "pull-nextcloud-updates": {
+        "task": "bot_api.tasks.pull_nextcloud_updates",
+        "schedule": timedelta(minutes=10),
+    },
     "push-pending-nextcloud": {
         "task": "bot_api.tasks.push_pending_nextcloud",
         "schedule": timedelta(minutes=5),
