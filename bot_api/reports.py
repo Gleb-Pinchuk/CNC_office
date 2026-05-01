@@ -81,18 +81,18 @@ def _build_cover(doc, direction: str, report_date: date) -> None:
     for _ in range(7):
         doc.add_paragraph("")
 
-    developer = getattr(settings, "MONITORING_REPORT_DEVELOPER", "Тагирова А.Р.")
-    approver = getattr(settings, "MONITORING_REPORT_APPROVER", "Яшев Э.А.")
+    developer = ""
+    approver = ""
 
     p = doc.add_paragraph()
     p.add_run("Разработчик:\nПреподаватель (специалист)")
     p.add_run("\t\t\t\t\t\t")
-    p.add_run(developer)
+    p.add_run(developer or "________________________")
 
     p = doc.add_paragraph()
     p.add_run("Согласовано:\nРуководитель проекта 2 уровня")
     p.add_run("\t\t\t\t\t")
-    p.add_run(approver)
+    p.add_run(approver or "________________________")
 
     doc.add_paragraph("")
     year = doc.add_paragraph(f"{report_date.year} г.")
