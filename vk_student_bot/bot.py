@@ -647,16 +647,7 @@ class StudentBot:
         ctx = self._ctx(peer_id)
         ctx.current_view = "main"
         kb = VkKeyboard(one_time=False, inline=False)
-        kb.add_button("Группа таблицы", VkKeyboardColor.PRIMARY, payload=_pl("tbls"))
-        kb.add_line()
-        kb.add_button("Направления", VkKeyboardColor.PRIMARY, payload=_pl("dirs"))
-        kb.add_line()
-        kb.add_button("Группы", VkKeyboardColor.SECONDARY, payload=_pl("grps"))
-        kb.add_button("Студенты", VkKeyboardColor.SECONDARY, payload=_pl("sts"))
-        kb.add_line()
-        kb.add_button("Выбор даты", VkKeyboardColor.SECONDARY, payload=_pl("date"))
-        kb.add_line()
-        kb.add_button("Отчет Excel", VkKeyboardColor.POSITIVE, payload=_pl("exp_xlsx"))
+        kb.add_button("Алабуга Политех", VkKeyboardColor.PRIMARY, payload=_pl("tbls"))
         suffix = []
         if ctx.table_group_key and ctx.table_group_key in TABLE_GROUPS_BY_KEY:
             suffix.append(f"Группа таблицы: {TABLE_GROUPS_BY_KEY[ctx.table_group_key]['title']}")
@@ -677,7 +668,7 @@ class StudentBot:
             kb.add_button(group["title"][:40], VkKeyboardColor.PRIMARY, payload=_pl("tbl", k=group["key"]))
             kb.add_line()
         kb.add_button("В меню", VkKeyboardColor.SECONDARY, payload=_pl("main"))
-        self.send(peer_id, "Выберите Группу:", keyboard=kb)
+        self.send(peer_id, "Выберите группу таблиц:", keyboard=kb)
 
     def show_directions(self, peer_id: int, ctx: UserCtx):
         if not ctx.table_group_key:
@@ -721,6 +712,8 @@ class StudentBot:
             kb.add_line()
             kb.add_button("📄 Отчет Word", VkKeyboardColor.POSITIVE, payload=_pl("rep_cur"))
             kb.add_line()
+            kb.add_button("📤 Экспорт Excel", VkKeyboardColor.POSITIVE, payload=_pl("exp_xlsx"))
+            kb.add_line()
             kb.add_button("🔙 Меню", VkKeyboardColor.SECONDARY, payload=_pl("main"))
             self.send(peer_id, f"В направлении «{ctx.direction}» группы не найдены.", keyboard=kb)
             return
@@ -753,6 +746,8 @@ class StudentBot:
         kb.add_line()
         kb.add_button("📄 Отчет Word", VkKeyboardColor.POSITIVE, payload=_pl("rep_cur"))
         kb.add_button("🗂 Архив отчетов", VkKeyboardColor.SECONDARY, payload=_pl("rep_arc"))
+        kb.add_line()
+        kb.add_button("📤 Экспорт Excel", VkKeyboardColor.POSITIVE, payload=_pl("exp_xlsx"))
         kb.add_line()
         kb.add_button("🔙 Меню", VkKeyboardColor.SECONDARY, payload=_pl("main"))
         self.send(
