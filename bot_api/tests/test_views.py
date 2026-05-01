@@ -2,7 +2,7 @@ import pytest
 from django.test import override_settings
 from rest_framework import status
 
-from sections.models import SectionTable
+from sections.models import SectionTable, SectionTableMonthlyArchive
 
 
 @pytest.mark.django_db
@@ -193,6 +193,48 @@ class TestBotApiViews:
             == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
         assert "attachment; filename=" in response["Content-Disposition"]
+        assert len(response.content) > 100
+
+    @override_settings(
+        CNC_BOT_API_SECRET="secret-token", CNC_BOT_TABLE_OWNER_USERNAME="bot_owner"
+    )
+    def test_export_table_xlsx_archive_returns_attachment(self, client):
+        from django.contrib.auth import get_user_model
+
+        owner = get_user_model().objects.create_user(
+            username="bot_owner", password="pass"
+        )
+        table = SectionTable.objects.create(
+            owner=owner,
+            title="Rangers main",
+            section_type="rangers",
+            content={"custom_sheet": {"data": [["A1"]], "name": "Sheet1"}},
+        )
+        SectionTableMonthlyArchive.objects.create(
+            table=table,
+            year=2026,
+            month=4,
+            content={"custom_sheet": {"data": [["ARCHIVE"]], "name": "Sheet1"}},
+        )
+
+        response = client.post(
+            "/api/bot/gateway/",
+            {
+                "action": "export_table_xlsx",
+                "table_id": table.id,
+                "year": 2026,
+                "month": 4,
+            },
+            format="json",
+            HTTP_X_CNC_BOT_TOKEN="secret-token",
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        assert (
+            response["Content-Type"]
+            == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+        assert "04.2026.xlsx" in response["Content-Disposition"]
         assert len(response.content) > 100
 
     @override_settings(

@@ -724,6 +724,8 @@ class BotGatewayView(APIView):
         title_contains = (
             request.data.get("title_contains") or request.data.get("table_title") or ""
         )
+        year = request.data.get("year")
+        month = request.data.get("month")
         if table_id:
             table = SectionTable.objects.filter(owner=owner, id=table_id).first()
         else:
@@ -732,14 +734,34 @@ class BotGatewayView(APIView):
             return Response(
                 {"detail": "Таблица не найдена"}, status=status.HTTP_404_NOT_FOUND
             )
+        content = table.content if isinstance(table.content, dict) else {}
+        filename = (table.title or "table").replace("/", "_").replace("\\", "_")
+        if year and month:
+            try:
+                year_i = int(year)
+                month_i = int(month)
+            except (TypeError, ValueError):
+                return Response(
+                    {"detail": "year и month должны быть числами"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            archive = SectionTableMonthlyArchive.objects.filter(
+                table=table, year=year_i, month=month_i
+            ).first()
+            if not archive:
+                return Response(
+                    {"detail": "Архив таблицы за указанный месяц не найден"},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            content = archive.content if isinstance(archive.content, dict) else {}
+            filename = f"{filename}_{month_i:02d}.{year_i}"
         xlsx = export_custom_sheet_to_xlsx_bytes(
-            table.title, table.content if isinstance(table.content, dict) else {}
+            table.title, content
         )
         resp = HttpResponse(
             xlsx,
             content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
-        filename = (table.title or "table").replace("/", "_").replace("\\", "_")
         resp["Content-Disposition"] = f'attachment; filename="{filename}.xlsx"'
         return resp
 

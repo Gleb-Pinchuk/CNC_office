@@ -52,7 +52,11 @@ def pull_nextcloud_updates(self):
 def rollover_monthly_tables(self):
     """Ежедневно проверяет, нужно ли перекатить таблицу мониторинга на новый месяц."""
     from bot_api.monthly_rollover import rollover_table_if_needed
-    from bot_api.services.nextcloud_sync import find_section_table, load_nextcloud_sync_configs_from_env
+    from bot_api.services.nextcloud_sync import (
+        find_section_table,
+        load_nextcloud_sync_configs_from_env,
+        push_to_nextcloud,
+    )
 
     cfgs = load_nextcloud_sync_configs_from_env()
     if not cfgs:
@@ -65,7 +69,12 @@ def rollover_monthly_tables(self):
             logger.warning("Monthly rollover: SectionTable не найдена для key=%s", cfg.key)
             continue
         try:
-            results.append(rollover_table_if_needed(table))
+            result = rollover_table_if_needed(table)
+            if result.get("changed"):
+                # Сразу пушим обновление нового месяца в Nextcloud,
+                # чтобы pull-задача не вернула старые замечания обратно в БД.
+                push_to_nextcloud(cfg, force=True)
+            results.append(result)
         except Exception:
             logger.exception("Monthly rollover failed for key=%s", cfg.key)
             raise

@@ -126,6 +126,36 @@ def rollover_table_if_needed(
         content = locked.content if isinstance(locked.content, dict) else {}
         detected = content_month(content, ref_date=current)
         if detected == (current.year, current.month):
+            prev_year, prev_month = previous_month(current)
+            has_prev_archive = locked.monthly_archives.filter(
+                year=prev_year, month=prev_month
+            ).exists()
+            if not has_prev_archive:
+                SectionTableMonthlyArchive.objects.update_or_create(
+                    table=locked,
+                    year=prev_year,
+                    month=prev_month,
+                    defaults={"content": deepcopy(content)},
+                )
+                new_content = deepcopy(content)
+                changed = apply_month_headers(
+                    new_content, current.year, current.month, fallback
+                )
+                if changed:
+                    locked.content = new_content
+                    locked.needs_nextcloud_push = True
+                    locked.save(
+                        update_fields=["content", "needs_nextcloud_push", "updated_at"]
+                    )
+                _prune_archives(locked, retention_months)
+                return {
+                    "ok": True,
+                    "changed": changed,
+                    "reason": "current_month_repaired",
+                    "archive_year": prev_year,
+                    "archive_month": prev_month,
+                    "table_id": locked.pk,
+                }
             _prune_archives(locked, retention_months)
             return {"ok": True, "changed": False, "reason": "already_current"}
 

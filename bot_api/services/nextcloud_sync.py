@@ -148,6 +148,14 @@ def pull_from_nextcloud(cfg: NextcloudSyncConfig) -> Dict[str, Any]:
         return {"ok": False, "error": "section_table_not_found"}
     with transaction.atomic():
         st = SectionTable.objects.select_for_update().get(pk=table.pk)
+        if st.needs_nextcloud_push:
+            return {
+                "ok": True,
+                "skipped": True,
+                "reason": "local_pending_push",
+                "table_id": table.pk,
+                "action": "pull",
+            }
         st.content = new_content
         st.needs_nextcloud_push = False
         st.save(update_fields=["content", "needs_nextcloud_push", "updated_at"])

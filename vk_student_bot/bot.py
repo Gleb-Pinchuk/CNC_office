@@ -255,10 +255,16 @@ class CNCApi:
             body["group"] = group
         return self.post("set_student_status", body)
 
-    def export_table_xlsx(self, table_id: int) -> tuple[bytes, str]:
+    def export_table_xlsx(
+        self, table_id: int, year: Optional[int] = None, month: Optional[int] = None
+    ) -> tuple[bytes, str]:
+        payload: Dict[str, Any] = {"action": "export_table_xlsx", "table_id": table_id}
+        if year and month:
+            payload["year"] = year
+            payload["month"] = month
         r = requests.post(
             f"{self.base}/bot/gateway/",
-            json={"action": "export_table_xlsx", "table_id": table_id},
+            json=payload,
             headers=_headers(),
             timeout=90,
         )
@@ -567,6 +573,17 @@ class StudentBot:
                     self.export_report_to_vk(
                         peer_id,
                         ctx,
+                        year=int(archive.get("year")),
+                        month=int(archive.get("month")),
+                    )
+                else:
+                    self.show_report_archives(peer_id, ctx)
+            elif cmd == "rep_x":
+                idx = int(p.get("i", -1))
+                if 0 <= idx < len(ctx.report_archives_cache):
+                    archive = ctx.report_archives_cache[idx]
+                    self.export_table_to_vk(
+                        peer_id,
                         year=int(archive.get("year")),
                         month=int(archive.get("month")),
                     )
@@ -945,13 +962,21 @@ class StudentBot:
         kb = VkKeyboard(one_time=False, inline=False)
         if archives:
             for i, archive in enumerate(archives[:3]):
+                label = str(archive.get("label") or f"{archive.get('month'):02d}.{archive.get('year')}")
                 kb.add_button(
-                    str(archive.get("label") or f"{archive.get('month'):02d}.{archive.get('year')}")[:40],
+                    f"📄 Word {label}"[:40],
                     VkKeyboardColor.PRIMARY,
                     payload=_pl("rep_m", i=i),
                 )
                 kb.add_line()
+                kb.add_button(
+                    f"📤 Excel {label}"[:40],
+                    VkKeyboardColor.POSITIVE,
+                    payload=_pl("rep_x", i=i),
+                )
+                kb.add_line()
         kb.add_button("📄 Текущий отчет", VkKeyboardColor.POSITIVE, payload=_pl("rep_cur"))
+        kb.add_button("📤 Текущий Excel", VkKeyboardColor.POSITIVE, payload=_pl("exp_xlsx"))
         kb.add_line()
         kb.add_button("📋 Группы", VkKeyboardColor.SECONDARY, payload=_pl("grps"))
         kb.add_button("🔙 Меню", VkKeyboardColor.SECONDARY, payload=_pl("main"))
@@ -988,19 +1013,22 @@ class StudentBot:
             mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         )
 
-    def export_table_to_vk(self, peer_id: int):
+    def export_table_to_vk(
+        self, peer_id: int, year: Optional[int] = None, month: Optional[int] = None
+    ):
         ctx = self._ctx(peer_id)
         if not ctx.table_group_key:
             self.show_table_groups(peer_id, ctx)
             return
-        self.send(peer_id, "⏳ Готовлю актуальную таблицу к выгрузке...")
+        period = f" за {month:02d}.{year}" if year and month else ""
+        self.send(peer_id, f"⏳ Готовлю таблицу к выгрузке{period}...")
         table_id = self.table_id(ctx.table_group_key)
-        blob, filename = self.api.export_table_xlsx(table_id)
+        blob, filename = self.api.export_table_xlsx(table_id, year=year, month=month)
         self.send_document(
             peer_id,
             filename,
             blob,
-            "✅ Актуальная таблица из БД:",
+            f"✅ Таблица{period}:",
             mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
 
