@@ -356,7 +356,7 @@ def _parse_payload(raw: Optional[Any]) -> dict:
         return {}
 
 
-PER_PAGE = 6  # максимум кнопок-элементов на странице (влезает в VK: 10 рядов)
+PER_PAGE = 5  # держим запас по лимиту VK: max 10 рядов у default keyboard
 
 
 class StudentBot:
