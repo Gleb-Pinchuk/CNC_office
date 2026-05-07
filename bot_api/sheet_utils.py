@@ -3,6 +3,10 @@
 from typing import Optional, Tuple
 
 
+def _normalize_sheet_name(value: str) -> str:
+    return "".join(ch for ch in str(value or "").strip().lower() if ch.isalnum())
+
+
 def get_workbook_sheets(content: dict) -> Tuple[list, int]:
     """
     Возвращает (sheets: list, active_index: int).
@@ -50,12 +54,34 @@ def find_sheet_by_name(sheets: list, sheet_name: Optional[str]):
         return None
     if not sheet_name or not str(sheet_name).strip():
         return sheets[0]
-    target = str(sheet_name).strip().lower()
+    target_raw = str(sheet_name).strip().lower()
+    target_norm = _normalize_sheet_name(sheet_name)
+
+    # 1) strict case-insensitive match
     for sh in sheets:
         name = str(sh.get("name") or "").strip().lower()
-        if name == target:
+        if name == target_raw:
             return sh
-    return None
+
+    # 2) normalized exact match (ignore spaces/punctuations/casing)
+    for sh in sheets:
+        name_norm = _normalize_sheet_name(sh.get("name") or "")
+        if name_norm and name_norm == target_norm:
+            return sh
+
+    # 3) unique fuzzy contains match to survive minor renames in archives
+    candidates = []
+    for sh in sheets:
+        name_norm = _normalize_sheet_name(sh.get("name") or "")
+        if not name_norm:
+            continue
+        if target_norm in name_norm or name_norm in target_norm:
+            candidates.append(sh)
+    if len(candidates) == 1:
+        return candidates[0]
+
+    # 4) as a final fallback use the first sheet
+    return sheets[0]
 
 
 def _ensure_cell(data: list, row: int, col: int):

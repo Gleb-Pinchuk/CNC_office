@@ -819,6 +819,14 @@ class BotGatewayView(APIView):
                 )
             content = archive.content if isinstance(archive.content, dict) else {}
             filename_year, filename_month = year_i, month_i
+        else:
+            # Ensure "current report" reflects actual current month headers/remarks,
+            # even if daily rollover task hasn't run yet.
+            from bot_api.monthly_rollover import rollover_table_if_needed
+
+            rollover_table_if_needed(table)
+            table.refresh_from_db(fields=["content"])
+            content = table.content if isinstance(table.content, dict) else {}
 
         try:
             docx = generate_monitoring_report_docx(
