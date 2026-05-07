@@ -432,12 +432,24 @@ class StudentBot:
 
     def run(self):
         logger.info("Запуск VK-бота мониторинга…")
-        for event in self.long_poll.listen():
+        reconnect_delay = 5
+        while True:
             try:
-                if event.type == VkBotEventType.MESSAGE_NEW:
-                    self.handle(event.obj.message)
+                for event in self.long_poll.listen():
+                    try:
+                        if event.type == VkBotEventType.MESSAGE_NEW:
+                            self.handle(event.obj.message)
+                    except Exception:
+                        logger.exception("Ошибка обработки сообщения")
+                reconnect_delay = 5
             except Exception:
-                logger.exception("Ошибка обработки сообщения")
+                logger.exception(
+                    "Longpoll оборвался, повторное подключение через %s сек.",
+                    reconnect_delay,
+                )
+                time.sleep(reconnect_delay)
+                reconnect_delay = min(reconnect_delay * 2, 60)
+                self.long_poll = VkBotLongPoll(self.vk_session, VK_GROUP_ID)
 
     # -------------------- маршрутизация сообщений --------------------
 

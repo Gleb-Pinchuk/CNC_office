@@ -137,26 +137,33 @@ def rollover_table_if_needed(
                     month=prev_month,
                     defaults={"content": deepcopy(content)},
                 )
-                new_content = deepcopy(content)
-                changed = apply_month_headers(
-                    new_content, current.year, current.month, fallback
+            new_content = deepcopy(content)
+            changed = apply_month_headers(new_content, current.year, current.month, fallback)
+            if changed:
+                locked.content = new_content
+                locked.needs_nextcloud_push = True
+                locked.save(
+                    update_fields=["content", "needs_nextcloud_push", "updated_at"]
                 )
-                if changed:
-                    locked.content = new_content
-                    locked.needs_nextcloud_push = True
-                    locked.save(
-                        update_fields=["content", "needs_nextcloud_push", "updated_at"]
-                    )
-                _prune_archives(locked, retention_months)
+            _prune_archives(locked, retention_months)
+            if changed:
                 return {
                     "ok": True,
-                    "changed": changed,
+                    "changed": True,
                     "reason": "current_month_repaired",
                     "archive_year": prev_year,
                     "archive_month": prev_month,
                     "table_id": locked.pk,
                 }
-            _prune_archives(locked, retention_months)
+            if not has_prev_archive:
+                return {
+                    "ok": True,
+                    "changed": False,
+                    "reason": "current_month_archived",
+                    "archive_year": prev_year,
+                    "archive_month": prev_month,
+                    "table_id": locked.pk,
+                }
             return {"ok": True, "changed": False, "reason": "already_current"}
 
         archive_year, archive_month = detected or previous_month(current)

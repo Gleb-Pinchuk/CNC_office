@@ -136,3 +136,46 @@ def test_rollover_repairs_current_month_with_stale_remarks_and_no_archive():
     data = table.content["custom_sheet"]["sheets"][0]["data"]
     assert data[1][2:6] == ["", "", "", ""]
     assert table.needs_nextcloud_push is True
+
+
+@pytest.mark.django_db
+def test_rollover_repairs_current_month_even_when_previous_archive_exists():
+    from django.contrib.auth import get_user_model
+
+    owner = get_user_model().objects.create_user(username="bot_owner_3", password="pass")
+    content = {
+        "custom_sheet": {
+            "version": 2,
+            "activeSheetIndex": 0,
+            "sheets": [
+                {
+                    "name": "BIM",
+                    "data": [
+                        ["Группа", "ФИО", "01.05-04.05", "05.05-11.05", "12.05-18.05", "19.05-25.05"],
+                        ["BIM-25-1", "Иванов Иван", "старое", "", "старое", ""],
+                    ],
+                }
+            ],
+        }
+    }
+    table = SectionTable.objects.create(
+        owner=owner,
+        title="Rangers existing archive",
+        section_type="rangers",
+        content=content,
+    )
+    SectionTableMonthlyArchive.objects.create(
+        table=table,
+        year=2026,
+        month=4,
+        content=content,
+    )
+
+    result = rollover_table_if_needed(table, today=date(2026, 5, 20), fallback_col=5)
+
+    assert result["changed"] is True
+    assert result["reason"] == "current_month_repaired"
+    assert SectionTableMonthlyArchive.objects.filter(table=table, year=2026, month=4).count() == 1
+    table.refresh_from_db()
+    data = table.content["custom_sheet"]["sheets"][0]["data"]
+    assert data[1][2:6] == ["", "", "", ""]
