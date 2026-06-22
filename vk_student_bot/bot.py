@@ -154,6 +154,12 @@ class CNCApi:
                         detail = r.json().get("detail", text)
                     except Exception:
                         detail = text
+                    if isinstance(detail, str) and detail.lstrip().startswith("<!"):
+                        detail = (
+                            f"сервер вернул HTML {r.status_code} (внутренняя ошибка Django). "
+                            "Проверьте логи web/gunicorn и переменные CNC_BOT_API_SECRET, "
+                            "CNC_BOT_TABLE_OWNER_USERNAME."
+                        )
                     raise CNCApiError(f"Ошибка API ({r.status_code}): {detail}")
                 return r.json()
             except CNCApiError:

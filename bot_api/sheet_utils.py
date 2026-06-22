@@ -49,6 +49,17 @@ def get_workbook_sheets(content: dict) -> Tuple[list, int]:
     return [], 0
 
 
+def sheet_display_names(sheets: list) -> list:
+    """Имена листов для API; устойчиво к битым элементам в sheets."""
+    names = []
+    for i, sh in enumerate(sheets or []):
+        if isinstance(sh, dict):
+            names.append(str(sh.get("name") or f"Лист{i + 1}"))
+        else:
+            names.append(f"Лист{i + 1}")
+    return names
+
+
 def find_sheet_by_name(sheets: list, sheet_name: Optional[str]):
     if not sheets:
         return None

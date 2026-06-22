@@ -70,6 +70,78 @@ class TestBotApiViews:
     @override_settings(
         CNC_BOT_API_SECRET="secret-token", CNC_BOT_TABLE_OWNER_USERNAME="bot_owner"
     )
+    def test_lookup_table_tolerates_malformed_sheet_entries(self, client):
+        from django.contrib.auth import get_user_model
+
+        owner = get_user_model().objects.create_user(
+            username="bot_owner", password="pass"
+        )
+        SectionTable.objects.create(
+            owner=owner,
+            title="Rangers main",
+            section_type="rangers",
+            content={
+                "custom_sheet": {
+                    "version": 2,
+                    "activeSheetIndex": 0,
+                    "sheets": [
+                        None,
+                        {"name": "ЧПУ", "data": [["A"]]},
+                        "broken",
+                    ],
+                }
+            },
+        )
+
+        response = client.post(
+            "/api/bot/gateway/",
+            {"action": "lookup_table", "title_contains": "main"},
+            format="json",
+            HTTP_X_CNC_BOT_TOKEN="secret-token",
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["sheet_names"] == ["Лист1", "ЧПУ", "Лист3"]
+
+    @override_settings(
+        CNC_BOT_API_SECRET="secret-token", CNC_BOT_TABLE_OWNER_USERNAME="bot_owner"
+    )
+    def test_gateway_rejects_token_with_wrong_length_without_500(self, client):
+        response = client.post(
+            "/api/bot/gateway/",
+            {"action": "lookup_table"},
+            format="json",
+            HTTP_X_CNC_BOT_TOKEN="wrong-length",
+        )
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert response.data["detail"] == "Недопустимый токен бота"
+
+    @override_settings(
+        CNC_BOT_API_SECRET="secret-token", CNC_BOT_TABLE_OWNER_USERNAME="bot_owner"
+    )
+    def test_lookup_table_returns_404_when_table_missing(self, client):
+        from django.contrib.auth import get_user_model
+
+        get_user_model().objects.create_user(username="bot_owner", password="pass")
+
+        response = client.post(
+            "/api/bot/gateway/",
+            {
+                "action": "lookup_table",
+                "section_type": "rangers",
+                "title_contains": "missing",
+            },
+            format="json",
+            HTTP_X_CNC_BOT_TOKEN="secret-token",
+        )
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+        assert "Таблица не найдена" in response.data["detail"]
+
+    @override_settings(
+        CNC_BOT_API_SECRET="secret-token", CNC_BOT_TABLE_OWNER_USERNAME="bot_owner"
+    )
     def test_list_and_get_sheet_data(self, client):
         from django.contrib.auth import get_user_model
 

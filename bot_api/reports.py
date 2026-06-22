@@ -6,8 +6,24 @@ from typing import Any, Optional
 
 from django.conf import settings
 
-from bot_api.monthly_rollover import find_week_columns
+from bot_api.monthly_rollover import detect_sheet_month, find_week_columns
 from bot_api.sheet_utils import find_sheet_by_name, get_workbook_sheets
+
+_MONTH_NAMES_RU = (
+    "",
+    "январь",
+    "февраль",
+    "март",
+    "апрель",
+    "май",
+    "июнь",
+    "июль",
+    "август",
+    "сентябрь",
+    "октябрь",
+    "ноябрь",
+    "декабрь",
+)
 
 try:
     from docx import Document
@@ -25,6 +41,8 @@ def generate_monitoring_report_docx(
     content: dict,
     sheet_name: str,
     report_date: Optional[date] = None,
+    report_year: Optional[int] = None,
+    report_month: Optional[int] = None,
 ) -> bytes:
     if Document is None:
         raise RuntimeError("python-docx не установлен")
@@ -46,11 +64,26 @@ def generate_monitoring_report_docx(
     groups = sorted({row["group"] for row in rows["students"] if row["group"]}, key=str.lower)
     findings = rows["findings"]
 
+    period_year, period_month = _resolve_report_period(
+        data,
+        report_date=report_date,
+        report_year=report_year,
+        report_month=report_month,
+    )
+
     doc = Document()
     _apply_default_font(doc)
-    _build_cover(doc, direction, report_date or date.today())
+    _build_cover(doc, direction, period_year, period_month)
     doc.add_page_break()
-    _build_body(doc, direction, groups, rows["checked_count"], findings)
+    _build_body(
+        doc,
+        direction,
+        groups,
+        rows["checked_count"],
+        findings,
+        period_year,
+        period_month,
+    )
     _normalize_doc_fonts(doc)
 
     out = BytesIO()
@@ -64,7 +97,31 @@ def report_filename(sheet_name: str, year: Optional[int] = None, month: Optional
     return f"monitoring_{safe_sheet}{period}.docx"
 
 
-def _build_cover(doc, direction: str, report_date: date) -> None:
+def _resolve_report_period(
+    sheet_data: list,
+    *,
+    report_date: Optional[date],
+    report_year: Optional[int],
+    report_month: Optional[int],
+) -> tuple[int, int]:
+    if report_year and report_month:
+        return int(report_year), int(report_month)
+    if report_date:
+        return report_date.year, report_date.month
+    detected = detect_sheet_month(sheet_data)
+    if detected:
+        return detected
+    today = date.today()
+    return today.year, today.month
+
+
+def _format_report_period(year: int, month: int) -> str:
+    if 1 <= month <= 12:
+        return f"Отчёт за {_MONTH_NAMES_RU[month]} {year} г."
+    return f"{year} г."
+
+
+def _build_cover(doc, direction: str, report_year: int, report_month: int) -> None:
     for _ in range(6):
         doc.add_paragraph("")
 
@@ -81,8 +138,8 @@ def _build_cover(doc, direction: str, report_date: date) -> None:
     for _ in range(7):
         doc.add_paragraph("")
 
-    developer = ""
-    approver = ""
+    developer = getattr(settings, "MONITORING_REPORT_DEVELOPER", "") or ""
+    approver = getattr(settings, "MONITORING_REPORT_APPROVER", "") or ""
 
     p = doc.add_paragraph()
     p.add_run("Разработчик:\nПреподаватель (специалист)")
@@ -95,12 +152,21 @@ def _build_cover(doc, direction: str, report_date: date) -> None:
     p.add_run(approver or "________________________")
 
     doc.add_paragraph("")
-    year = doc.add_paragraph(f"{report_date.year} г.")
-    year.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    period = doc.add_paragraph(_format_report_period(report_year, report_month))
+    period.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
 
-def _build_body(doc, direction: str, groups: list[str], checked_count: int, findings: list[dict]) -> None:
+def _build_body(
+    doc,
+    direction: str,
+    groups: list[str],
+    checked_count: int,
+    findings: list[dict],
+    report_year: int,
+    report_month: int,
+) -> None:
     groups_text = ", ".join(groups) if groups else "группы не указаны"
+    doc.add_paragraph(_format_report_period(report_year, report_month))
     doc.add_paragraph(
         f"Проведён просмотр открытых профилей и публикаций студентов групп: {groups_text}."
     )
@@ -187,7 +253,9 @@ def _cell(row: list, idx: int) -> str:
 
 def _is_no_remark(value: str) -> bool:
     lowered = value.strip().lower()
-    return lowered in {"замечаний нет", "нет", "без замечаний"}
+    if lowered in {"замечаний нет", "нет", "без замечаний", "-", "—"}:
+        return True
+    return lowered.startswith("замечаний нет")
 
 
 def _student_word(count: int) -> str:

@@ -17,7 +17,12 @@ from sections.models import SectionTable, SectionTableMonthlyArchive
 
 from .remark_utils import parse_input_date
 from .reports import generate_monitoring_report_docx, report_filename
-from .sheet_utils import find_sheet_by_name, get_workbook_sheets, set_cell_value
+from .sheet_utils import (
+    find_sheet_by_name,
+    get_workbook_sheets,
+    set_cell_value,
+    sheet_display_names,
+)
 from .student_sheet import find_one_student_row, list_groups, search_students
 from .week_column import pick_week_col_by_date
 
@@ -25,13 +30,18 @@ logger = logging.getLogger(__name__)
 
 
 def _bot_secret_ok(request) -> bool:
-    secret = getattr(settings, "CNC_BOT_API_SECRET", "") or os.getenv(
-        "CNC_BOT_API_SECRET", ""
-    )
+    secret = (
+        getattr(settings, "CNC_BOT_API_SECRET", "") or os.getenv("CNC_BOT_API_SECRET", "")
+    ).strip()
     if not secret:
         logger.warning("CNC_BOT_API_SECRET не задан")
         return False
-    token = request.headers.get("X-CNC-Bot-Token", "")
+    token = (request.headers.get("X-CNC-Bot-Token") or "").strip()
+    if not token:
+        return False
+    # compare_digest бросает ValueError при разной длине — иначе клиент видит HTML 500.
+    if len(token) != len(secret):
+        return False
     return compare_digest(token, secret)
 
 
@@ -59,6 +69,19 @@ class BotGatewayView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
+        try:
+            return self._dispatch(request)
+        except Exception:
+            logger.exception(
+                "bot gateway: необработанная ошибка action=%s",
+                (request.data.get("action") if hasattr(request, "data") else None),
+            )
+            return Response(
+                {"detail": "Внутренняя ошибка сервера при обработке запроса бота"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+    def _dispatch(self, request):
         if not _bot_secret_ok(request):
             return Response(
                 {"detail": "Недопустимый токен бота"}, status=status.HTTP_403_FORBIDDEN
@@ -645,7 +668,7 @@ class BotGatewayView(APIView):
 
         logger.info(f"Таблица найдена: id={table.id}, title={table.title}")
         sheets, ai = get_workbook_sheets(table.content or {})
-        names = [str(s.get("name") or f"Лист{i + 1}") for i, s in enumerate(sheets)]
+        names = sheet_display_names(sheets)
         return Response(
             {
                 "id": table.id,
@@ -664,7 +687,7 @@ class BotGatewayView(APIView):
                 {"detail": "Таблица не найдена"}, status=status.HTTP_404_NOT_FOUND
             )
         sheets, ai = get_workbook_sheets(table.content or {})
-        names = [str(s.get("name") or f"Лист{i + 1}") for i, s in enumerate(sheets)]
+        names = sheet_display_names(sheets)
         return Response({"sheet_names": names, "active_sheet_index": ai})
 
     def _get_sheet_data(self, request, owner):
@@ -820,19 +843,31 @@ class BotGatewayView(APIView):
             content = archive.content if isinstance(archive.content, dict) else {}
             filename_year, filename_month = year_i, month_i
         else:
-            # Ensure "current report" reflects actual current month headers/remarks,
-            # even if daily rollover task hasn't run yet.
-            from bot_api.monthly_rollover import rollover_table_if_needed
-
-            rollover_table_if_needed(table)
-            table.refresh_from_db(fields=["content"])
+            # Как Excel: берём актуальное содержимое из БД без rollover —
+            # иначе apply_month_headers может очистить колонки замечаний перед отчётом.
             content = table.content if isinstance(table.content, dict) else {}
+
+        report_year = report_month = None
+        if filename_year and filename_month:
+            report_year, report_month = filename_year, filename_month
+        else:
+            from bot_api.monthly_rollover import detect_sheet_month
+
+            sheets, _ = get_workbook_sheets(content)
+            sh = find_sheet_by_name(sheets, sheet_name)
+            sheet_data = sh.get("data") if sh and isinstance(sh.get("data"), list) else []
+            if sheet_data:
+                detected = detect_sheet_month(sheet_data)
+                if detected:
+                    report_year, report_month = detected
 
         try:
             docx = generate_monitoring_report_docx(
                 table_title=table.title,
                 content=content,
                 sheet_name=sheet_name,
+                report_year=report_year,
+                report_month=report_month,
             )
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_404_NOT_FOUND)

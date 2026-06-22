@@ -40,7 +40,7 @@ def find_week_columns(sheet_data: list, fallback_col: int) -> list[int]:
     for idx, value in enumerate(header):
         if parse_date_range_from_header_cell(value, today):
             found.append(idx)
-    if len(found) >= 4:
+    if found:
         return found[:4]
     return _fallback_week_columns(fallback_col)
 
