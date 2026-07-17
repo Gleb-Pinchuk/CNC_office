@@ -49,7 +49,7 @@ def load_moderation_config() -> ModerationConfig:
     ).strip()
     social_cols = _parse_int_list(
         os.getenv("BOT_SHEET_SOCIAL_COLS", ""),
-        getattr(settings, "BOT_SHEET_SOCIAL_COLS", "13,14,15"),
+        getattr(settings, "BOT_SHEET_SOCIAL_COLS", "4,5,6"),
     )
     default_rules_path = settings.BASE_DIR / "bot_api" / "moderation_data" / "rules.json"
     rules_path = Path(os.getenv("SOCIAL_MOD_RULES_PATH", str(default_rules_path)))

@@ -79,7 +79,13 @@ def make_progress_notifier(
                     f"(tried {links_tried}, skip {links_skipped})",
                     f"Постов получено: {posts}",
                     f"Срабатываний правил: {flagged}",
-                    f"Колонки соцсетей: {cols}",
+                    f"Колонки соцсетей: {cols}"
+                    + (
+                        f" (в env: {info.get('social_cols_cfg')})"
+                        if info.get("social_cols_cfg")
+                        and info.get("social_cols_cfg") != cols
+                        else ""
+                    ),
                     f"skip_tg={info.get('skip_tg')} skip_tiktok={info.get('skip_tiktok')} "
                     f"proxy={'да' if info.get('proxy') else 'нет'}",
                     "",

@@ -105,20 +105,38 @@ def _normalize_url(token: str, platform: str) -> str:
 
 def _platform_from_header(header_value: str) -> str:
     hv = (header_value or "").strip().lower()
+    if not hv:
+        return ""
     if "tiktok" in hv or "тикток" in hv or "тик ток" in hv:
         return "tiktok"
     if "vk" in hv or "вк" in hv or "вконтакте" in hv:
         return "vk"
     if "tg" in hv or "тг" in hv or "telegram" in hv or "телеграм" in hv:
         return "tg"
-    return "tg"
+    return ""
+
+
+def _resolve_social_cols(header_row: Optional[list], configured: list[int]) -> list[int]:
+    """
+    Колонки соцсетей: если в шапке явно ТГ/ВК/ТикТок — берём их.
+    Иначе — BOT_SHEET_SOCIAL_COLS (чтобы не читать чужие недели при кривом env).
+    """
+    detected: list[int] = []
+    if isinstance(header_row, list):
+        for idx, header_value in enumerate(header_row):
+            if _platform_from_header(str(header_value or "")):
+                detected.append(idx)
+    if detected:
+        return detected
+    return list(configured)
 
 
 def _extract_social_links(row: list, header_row: Optional[list], social_cols: list[int]) -> list[str]:
     out: list[str] = []
     seen: set[str] = set()
     preferred = ["tg", "vk", "tiktok"]
-    for pos, idx in enumerate(social_cols):
+    cols = _resolve_social_cols(header_row, social_cols)
+    for pos, idx in enumerate(cols):
         if idx < 0 or idx >= len(row):
             continue
         raw = "" if row[idx] is None else str(row[idx]).strip()
@@ -140,6 +158,11 @@ def _extract_social_links(row: list, header_row: Optional[list], social_cols: li
             seen.add(url)
             out.append(url)
     return out
+
+
+def _detect_social_cols(header_row: Optional[list], configured: list[int]) -> list[int]:
+    """Колонки для диагностики (фактически используемые)."""
+    return _resolve_social_cols(header_row, configured)
 
 
 def _platform_from_url(url: str) -> str:
@@ -286,6 +309,7 @@ def run_social_moderation_scan(
     stats = ScanStats()
     today = scan_date or datetime.now().date()
     stop = False
+    effective_social_cols: list[int] = list(cfg.social_cols)
 
     if not sheets:
         logger.warning("Social moderation: no sheets found in table content")
@@ -311,6 +335,7 @@ def run_social_moderation_scan(
             continue
         header_row = data[0] if isinstance(data[0], list) else None
         week_col = pick_week_col_by_date(data, today) or cfg.remark_col
+        effective_social_cols = _detect_social_cols(header_row, cfg.social_cols)
         students = search_students(
             data,
             fio_col=cfg.fio_col,
@@ -467,7 +492,8 @@ def run_social_moderation_scan(
         posts=stats.posts_fetched,
         sample_errors=list(stats.sample_errors or [])[:5],
         sample_links=list(stats.sample_links or [])[:5],
-        social_cols=list(cfg.social_cols),
+        social_cols=list(effective_social_cols),
+        social_cols_cfg=list(cfg.social_cols),
         skip_tg=cfg.skip_tg,
         skip_tiktok=cfg.skip_tiktok,
         proxy=bool(cfg.proxy_url),
