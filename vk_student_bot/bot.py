@@ -330,8 +330,19 @@ class CNCApi:
     def restore_student_from_trash(self, trash_id: int) -> dict:
         return self.post("restore_student_from_trash", {"trash_id": trash_id})
 
-    def run_social_moderation(self, max_students: Optional[int] = None) -> dict:
-        body: Dict[str, Any] = {}
+    def run_social_moderation(
+        self,
+        *,
+        table_id: int,
+        sheet_name: str,
+        peer_id: int,
+        max_students: Optional[int] = None,
+    ) -> dict:
+        body: Dict[str, Any] = {
+            "table_id": table_id,
+            "sheet_name": sheet_name,
+            "peer_id": peer_id,
+        }
         if max_students:
             body["max_students"] = max_students
         return self.post("run_social_moderation", body)
@@ -746,7 +757,12 @@ class StudentBot:
             if cmd == "main":
                 self.show_main(peer_id, "Главное меню")
             elif cmd == "ai_scan":
+                self.confirm_ai_scan(peer_id, ctx)
+            elif cmd == "ai_yes":
                 self.start_ai_scan(peer_id, ctx)
+            elif cmd == "ai_no":
+                self.send(peer_id, "Проверка ИИ отменена.")
+                self.show_groups(peer_id, ctx)
             elif cmd == "tbls":
                 self.show_table_groups(peer_id, ctx)
             elif cmd == "tbl":
@@ -1021,8 +1037,6 @@ class StudentBot:
         ctx.current_view = "main"
         kb = VkKeyboard(one_time=False, inline=False)
         kb.add_button("Алабуга Политех", VkKeyboardColor.PRIMARY, payload=_pl("tbls"))
-        kb.add_line()
-        kb.add_button("ИИ: проверка соцсетей", VkKeyboardColor.POSITIVE, payload=_pl("ai_scan"))
         suffix = []
         if ctx.table_group_key and ctx.table_group_key in TABLE_GROUPS_BY_KEY:
             suffix.append(f"Группа таблицы: {TABLE_GROUPS_BY_KEY[ctx.table_group_key]['title']}")
@@ -1036,26 +1050,54 @@ class StudentBot:
         body = text + "\n\n" + " · ".join(suffix)
         self.send(peer_id, body, keyboard=kb)
 
-    def start_ai_scan(self, peer_id: int, ctx: UserCtx):
+    def confirm_ai_scan(self, peer_id: int, ctx: UserCtx):
+        if not ctx.table_group_key:
+            self.show_table_groups(peer_id, ctx)
+            return
+        if not ctx.direction:
+            self.show_directions(peer_id, ctx)
+            return
+        kb = VkKeyboard(one_time=False, inline=False)
+        kb.add_button("Да, запустить", VkKeyboardColor.POSITIVE, payload=_pl("ai_yes"))
+        kb.add_line()
+        kb.add_button("Нет", VkKeyboardColor.SECONDARY, payload=_pl("ai_no"))
         self.send(
             peer_id,
-            "Запускаю ИИ-проверку соцсетей… Это может занять несколько минут. "
-            "Бот ответит, когда задача поставлена в очередь.",
+            (
+                f"Запустить ИИ-проверку соцсетей по направлению «{ctx.direction}»?\n\n"
+                "Будут проверены только студенты этого листа. "
+                "Прогресс придёт вам в чат."
+            ),
+            keyboard=kb,
         )
+
+    def start_ai_scan(self, peer_id: int, ctx: UserCtx):
+        if not (ctx.table_group_key and ctx.direction):
+            self.send(peer_id, "Сначала выберите направление.")
+            self.show_groups(peer_id, ctx)
+            return
         try:
-            result = self.api.run_social_moderation()
+            tid = self.table_id(ctx.table_group_key)
+            result = self.api.run_social_moderation(
+                table_id=tid,
+                sheet_name=ctx.direction,
+                peer_id=peer_id,
+            )
         except CNCApiError as e:
-            self.send(peer_id, f"❌ Не удалось запустить проверку: {e}")
-            self.show_main(peer_id, "Главное меню")
+            msg = str(e)
+            if "уже выполняется" in msg.lower() or "409" in msg:
+                self.send(
+                    peer_id,
+                    f"⏳ Проверка направления «{ctx.direction}» уже выполняется. "
+                    "Дождитесь окончания или выберите другое направление.",
+                )
+            else:
+                self.send(peer_id, f"❌ Не удалось запустить проверку: {e}")
+            self.show_groups(peer_id, ctx)
             return
         detail = (result or {}).get("detail") or "Проверка запущена."
-        self.send(
-            peer_id,
-            f"✅ {detail}\n\n"
-            "Когда Celery закончит работу — откройте нужное направление и "
-            "нажмите «Отчет Word».",
-        )
-        self.show_main(peer_id, "Главное меню")
+        self.send(peer_id, f"✅ {detail}")
+        self.show_groups(peer_id, ctx)
 
     def show_table_groups(self, peer_id: int, ctx: UserCtx):
         ctx.current_view = "table_groups"
@@ -1110,15 +1152,15 @@ class StudentBot:
         groups = ctx.groups_cache
         if not groups:
             kb = VkKeyboard(one_time=False, inline=False)
-            kb.add_button("🎓 Направления", VkKeyboardColor.PRIMARY, payload=_pl("dirs"))
+            kb.add_button("Направления", VkKeyboardColor.PRIMARY, payload=_pl("dirs"))
             kb.add_line()
-            kb.add_button("🗑 Корзина", VkKeyboardColor.SECONDARY, payload=_pl("trash"))
+            kb.add_button("Проверка ИИ", VkKeyboardColor.POSITIVE, payload=_pl("ai_scan"))
             kb.add_line()
-            kb.add_button("📄 Отчет Word", VkKeyboardColor.POSITIVE, payload=_pl("rep_cur"))
+            kb.add_button("Корзина", VkKeyboardColor.SECONDARY, payload=_pl("trash"))
             kb.add_line()
-            kb.add_button("📤 Экспорт Excel", VkKeyboardColor.POSITIVE, payload=_pl("exp_xlsx"))
+            kb.add_button("Отчет Word", VkKeyboardColor.POSITIVE, payload=_pl("rep_cur"))
             kb.add_line()
-            kb.add_button("🔙 Меню", VkKeyboardColor.SECONDARY, payload=_pl("main"))
+            kb.add_button("Меню", VkKeyboardColor.SECONDARY, payload=_pl("main"))
             self.send(peer_id, f"В направлении «{ctx.direction}» группы не найдены.", keyboard=kb)
             return
         ctx.current_view = "groups"
@@ -1128,7 +1170,7 @@ class StudentBot:
         start = page * GROUPS_PER_PAGE
         shown = groups[start : start + GROUPS_PER_PAGE]
 
-        # Макс рядов: 4 группы + 1 nav + 3 footer = 8 (лимит VK default = 10)
+        # Макс: 4 группы + nav + 4 footer ≤ 9 (лимит VK = 10)
         kb = VkKeyboard(one_time=False, inline=False)
         for i, g in enumerate(shown):
             kb.add_button(g[:40], VkKeyboardColor.PRIMARY, payload=_pl("grp", i=start + i))
@@ -1136,6 +1178,8 @@ class StudentBot:
         _add_nav_row(kb, page=page, total_pages=total_pages, page_cmd="gpage")
         kb.add_button("Направления", VkKeyboardColor.SECONDARY, payload=_pl("dirs"))
         kb.add_button("Корзина", VkKeyboardColor.SECONDARY, payload=_pl("trash"))
+        kb.add_line()
+        kb.add_button("Проверка ИИ", VkKeyboardColor.POSITIVE, payload=_pl("ai_scan"))
         kb.add_line()
         kb.add_button("Отчет Word", VkKeyboardColor.POSITIVE, payload=_pl("rep_cur"))
         kb.add_button("Архив", VkKeyboardColor.SECONDARY, payload=_pl("rep_arc"))
@@ -1147,7 +1191,6 @@ class StudentBot:
             f"Направление: {ctx.direction}\nВыберите группу ({page + 1}/{total_pages}):",
             keyboard=kb,
         )
-
     def show_students(self, peer_id: int, ctx: UserCtx):
         if not ctx.table_group_key:
             self.show_table_groups(peer_id, ctx)

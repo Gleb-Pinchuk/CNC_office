@@ -4,7 +4,7 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Optional
+from typing import Callable, Optional
 from urllib.parse import urlparse
 
 import requests
@@ -12,7 +12,7 @@ from django.contrib.auth import get_user_model
 from django.db import transaction
 
 from bot_api.evidence import upsert_remark_evidence
-from bot_api.sheet_utils import get_workbook_sheets, set_cell_value
+from bot_api.sheet_utils import find_sheet_by_name, get_workbook_sheets, set_cell_value
 from bot_api.student_sheet import search_students
 from bot_api.week_column import pick_week_col_by_date
 from sections.models import SectionTable
@@ -21,6 +21,9 @@ from .classifier import LightweightClassifier, MatchResult
 from .config import load_moderation_config
 from .rules_store import load_rules
 from .social_scan import SocialEntry, fetch_social_entries
+
+# Callable[[dict], None] — прогресс для VK
+ProgressCallback = Optional[Callable[..., None]]
 
 logger = logging.getLogger(__name__)
 
@@ -230,11 +233,16 @@ def run_social_moderation_scan(
     dry_run: bool = True,
     max_students: Optional[int] = None,
     save_evidence: bool = True,
+    table_id: Optional[int] = None,
+    sheet_name: Optional[str] = None,
+    progress_callback: ProgressCallback = None,
 ) -> ScanStats:
+    """
+    Скан соцсетей.
+    Если sheet_name задан — только этот лист (направление).
+    Если table_id задан — конкретная SectionTable, иначе поиск по env.
+    """
     cfg = load_moderation_config()
-    if not cfg.table_owner_username:
-        raise RuntimeError("Не задан CNC_BOT_TABLE_OWNER_USERNAME")
-
     rules = load_rules(cfg.rules_path)
     classifier = LightweightClassifier(
         rules=rules,
@@ -242,14 +250,21 @@ def run_social_moderation_scan(
         allow_hash_distance=cfg.allow_hash_distance,
         timeout_sec=cfg.request_timeout_sec,
     )
-    User = get_user_model()
-    owner = User.objects.filter(username=cfg.table_owner_username).first()
-    if not owner:
-        raise RuntimeError(f"Не найден владелец таблиц: {cfg.table_owner_username}")
 
-    table = _find_table(owner, cfg.section_type, cfg.title_fragment)
-    if not table:
-        raise RuntimeError("Таблица для модерации не найдена")
+    if table_id:
+        table = SectionTable.objects.filter(pk=table_id).first()
+        if not table:
+            raise RuntimeError(f"Таблица id={table_id} не найдена")
+    else:
+        if not cfg.table_owner_username:
+            raise RuntimeError("Не задан CNC_BOT_TABLE_OWNER_USERNAME")
+        User = get_user_model()
+        owner = User.objects.filter(username=cfg.table_owner_username).first()
+        if not owner:
+            raise RuntimeError(f"Не найден владелец таблиц: {cfg.table_owner_username}")
+        table = _find_table(owner, cfg.section_type, cfg.title_fragment)
+        if not table:
+            raise RuntimeError("Таблица для модерации не найдена")
 
     content = table.content if isinstance(table.content, dict) else {}
     sheets, _ = get_workbook_sheets(content)
@@ -261,8 +276,21 @@ def run_social_moderation_scan(
         logger.warning("Social moderation: no sheets found in table content")
         return stats
 
+    if sheet_name:
+        sh = find_sheet_by_name(sheets, sheet_name)
+        if not sh:
+            raise RuntimeError(f"Лист/направление «{sheet_name}» не найден")
+        sheets = [sh]
+
+    def _emit(**kwargs):
+        if progress_callback:
+            try:
+                progress_callback(kwargs)
+            except Exception:
+                logger.exception("progress_callback failed")
+
     for sheet in sheets:
-        sheet_name = str(sheet.get("name") or "")
+        current_sheet = str(sheet.get("name") or "")
         data = sheet.get("data") or []
         if not data:
             continue
@@ -276,8 +304,31 @@ def run_social_moderation_scan(
             skip_dismissed=True,
         )
         if not students:
-            logger.info("Social moderation: no students in sheet '%s'", sheet_name)
+            logger.info("Social moderation: no students in sheet '%s'", current_sheet)
+            _emit(
+                pct=100,
+                checked=0,
+                total=0,
+                flagged=0,
+                evidence=0,
+                sheet_name=current_sheet,
+                done=False,
+            )
             continue
+
+        total = len(students)
+        if max_students:
+            total = min(total, max_students)
+        _emit(
+            pct=0,
+            checked=0,
+            total=total,
+            flagged=0,
+            evidence=0,
+            sheet_name=current_sheet,
+            done=False,
+        )
+
         for student in students:
             if max_students and stats.checked_students >= max_students:
                 stop = True
@@ -312,35 +363,44 @@ def run_social_moderation_scan(
                         break
                 if violation:
                     break
-            if not violation:
-                continue
 
-            stats.flagged_students += 1
-            link, match, entry = violation
-            remark = _build_remark(match, link, today)
-            if dry_run:
-                logger.info(
-                    "[dry-run] %s / %s -> %s (thumb=%s)",
-                    sheet_name,
-                    student.get("fio", ""),
-                    remark,
-                    bool(entry.thumbnail_url),
-                )
-                continue
+            if violation:
+                stats.flagged_students += 1
+                link, match, entry = violation
+                remark = _build_remark(match, link, today)
+                if dry_run:
+                    logger.info(
+                        "[dry-run] %s / %s -> %s (thumb=%s)",
+                        current_sheet,
+                        student.get("fio", ""),
+                        remark,
+                        bool(entry.thumbnail_url),
+                    )
+                else:
+                    set_cell_value(content, current_sheet, row_idx, week_col, remark)
+                    stats.updated_cells += 1
+                    if save_evidence:
+                        if _save_hit_evidence(
+                            table=table,
+                            sheet_name=current_sheet,
+                            student_fio=str(student.get("fio") or ""),
+                            remark_date=today,
+                            entry=entry,
+                            timeout_sec=cfg.request_timeout_sec,
+                            proxy_url=cfg.proxy_url,
+                        ):
+                            stats.evidence_saved += 1
 
-            set_cell_value(content, sheet_name, row_idx, week_col, remark)
-            stats.updated_cells += 1
-            if save_evidence:
-                if _save_hit_evidence(
-                    table=table,
-                    sheet_name=sheet_name,
-                    student_fio=str(student.get("fio") or ""),
-                    remark_date=today,
-                    entry=entry,
-                    timeout_sec=cfg.request_timeout_sec,
-                    proxy_url=cfg.proxy_url,
-                ):
-                    stats.evidence_saved += 1
+            pct = int(stats.checked_students * 100 / total) if total else 100
+            _emit(
+                pct=min(pct, 99),
+                checked=stats.checked_students,
+                total=total,
+                flagged=stats.flagged_students,
+                evidence=stats.evidence_saved,
+                sheet_name=current_sheet,
+                done=False,
+            )
         if stop:
             break
 
@@ -351,12 +411,25 @@ def run_social_moderation_scan(
                 needs_nextcloud_push=True,
             )
 
+    done_sheet = sheet_name or (str(sheets[0].get("name") or "") if sheets else "")
+    _emit(
+        pct=100,
+        checked=stats.checked_students,
+        total=stats.checked_students,
+        flagged=stats.flagged_students,
+        evidence=stats.evidence_saved,
+        sheet_name=done_sheet,
+        done=True,
+    )
+
     logger.info(
-        "Social moderation finished: checked=%s flagged=%s cells=%s evidence=%s dry_run=%s",
+        "Social moderation finished: checked=%s flagged=%s cells=%s evidence=%s "
+        "sheet=%s dry_run=%s",
         stats.checked_students,
         stats.flagged_students,
         stats.updated_cells,
         stats.evidence_saved,
+        sheet_name,
         dry_run,
     )
     return stats

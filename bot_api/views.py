@@ -885,28 +885,73 @@ class BotGatewayView(APIView):
         return table
 
     def _run_social_moderation(self, request, owner):
-        """Запуск ИИ-проверки соцсетей из VK-бота (через Celery)."""
+        """Запуск ИИ-проверки соцсетей из VK-бота (через Celery), одно направление."""
+        table_id = request.data.get("table_id")
+        sheet_name = (request.data.get("sheet_name") or "").strip()
+        peer_id = request.data.get("peer_id")
         max_students = request.data.get("max_students")
         try:
             max_students_int = int(max_students) if max_students not in (None, "") else 0
         except (TypeError, ValueError):
             max_students_int = 0
+        try:
+            table_id_int = int(table_id) if table_id not in (None, "") else None
+        except (TypeError, ValueError):
+            table_id_int = None
+        try:
+            peer_id_int = int(peer_id) if peer_id not in (None, "") else None
+        except (TypeError, ValueError):
+            peer_id_int = None
 
+        if not table_id_int or not sheet_name:
+            return Response(
+                {"detail": "Нужны table_id и sheet_name (направление)"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        table = SectionTable.objects.filter(owner=owner, id=table_id_int).first()
+        if not table:
+            return Response(
+                {"detail": "Таблица не найдена"}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        from bot_api.moderation.locks import release_direction_lock, try_acquire_direction_lock
         from bot_api.tasks import run_social_moderation_scan_task
 
-        async_result = run_social_moderation_scan_task.delay(
-            force=True,
-            max_students=max_students_int or None,
-        )
+        if not try_acquire_direction_lock(table_id_int, sheet_name):
+            return Response(
+                {
+                    "status": "busy",
+                    "queued": False,
+                    "detail": (
+                        f"Проверка направления «{sheet_name}» уже выполняется. "
+                        "Дождитесь окончания или выберите другое направление."
+                    ),
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        try:
+            async_result = run_social_moderation_scan_task.delay(
+                force=True,
+                max_students=max_students_int or None,
+                table_id=table_id_int,
+                sheet_name=sheet_name,
+                peer_id=peer_id_int,
+                lock_held=True,
+            )
+        except Exception:
+            release_direction_lock(table_id_int, sheet_name)
+            raise
         return Response(
             {
                 "status": "ok",
                 "queued": True,
                 "task_id": str(async_result.id),
+                "sheet_name": sheet_name,
                 "detail": (
-                    "Проверка соцсетей поставлена в очередь. "
-                    "Когда закончится — замечания и скрины появятся в таблице; "
-                    "после этого жмите «Отчет Word»."
+                    f"Проверка «{sheet_name}» поставлена в очередь. "
+                    "Прогресс придёт отдельными сообщениями."
                 ),
             }
         )
