@@ -72,6 +72,10 @@ jobs:
             rc-service cnc-office-celery-worker stop || true
             rc-service cnc-office-web stop || true
             pkill -f '[g]unicorn config.wsgi:application' || true
+            # сироты long-poll (иначе VK шлёт одно событие нескольким bot.py)
+            pkill -f '/opt/cnc_office/vk_student_bot/bot.py' || true
+            pkill -f '[p]ython -u bot.py' || true
+            sleep 1
 
             mkdir -p "$PROJECT_DIR"
             for item in "$PROJECT_DIR"/* "$PROJECT_DIR"/.[!.]* "$PROJECT_DIR"/..?*; do

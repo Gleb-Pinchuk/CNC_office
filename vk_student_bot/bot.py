@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+import atexit
 import json
 import logging
 import os
 import random
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TextIO
 
 import requests
 import vk_api
@@ -438,7 +440,94 @@ def _parse_payload(raw: Optional[Any]) -> dict:
         return {}
 
 
-PER_PAGE = 5  # держим запас по лимиту VK: max 10 рядов у default keyboard
+PER_PAGE = 5  # студенты / корзина; запас по лимиту VK (max 10 рядов default keyboard)
+GROUPS_PER_PAGE = 4  # группы: место под пагинацию + компактный footer
+BOT_LOCK_EXIT = 99  # второй экземпляр; wrapper ждёт и пробует снова
+_LOCK_FH: Optional[TextIO] = None
+
+
+def _bot_lock_path() -> str:
+    override = os.getenv("BOT_LOCK_FILE", "").strip()
+    if override:
+        return override
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), ".cnc_vk_bot.lock")
+
+
+def acquire_singleton_lock() -> None:
+    """Один процесс bot.py на хост: иначе VK шлёт одно событие всем long-poll."""
+    global _LOCK_FH
+    path = _bot_lock_path()
+    fh = open(path, "a+", encoding="utf-8")
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            fh.seek(0)
+            try:
+                msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+            except OSError:
+                fh.close()
+                logger.error("Уже запущен другой экземпляр бота (lock=%s)", path)
+                sys.exit(BOT_LOCK_EXIT)
+        else:
+            import fcntl
+
+            try:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                fh.close()
+                logger.error("Уже запущен другой экземпляр бота (lock=%s)", path)
+                sys.exit(BOT_LOCK_EXIT)
+        fh.seek(0)
+        fh.truncate()
+        fh.write(str(os.getpid()))
+        fh.flush()
+        _LOCK_FH = fh
+
+        def _release() -> None:
+            global _LOCK_FH
+            if _LOCK_FH is None:
+                return
+            try:
+                if os.name == "nt":
+                    import msvcrt
+
+                    _LOCK_FH.seek(0)
+                    msvcrt.locking(_LOCK_FH.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(_LOCK_FH.fileno(), fcntl.LOCK_UN)
+            except Exception:
+                pass
+            try:
+                _LOCK_FH.close()
+            except Exception:
+                pass
+            _LOCK_FH = None
+
+        atexit.register(_release)
+    except Exception:
+        fh.close()
+        raise
+
+
+def _add_nav_row(kb: VkKeyboard, *, page: int, total_pages: int, page_cmd: str) -> None:
+    if total_pages <= 1:
+        return
+    if page > 0:
+        kb.add_button(
+            "⬅️",
+            VkKeyboardColor.SECONDARY,
+            payload=_pl(page_cmd, p=page - 1),
+        )
+    if page < total_pages - 1:
+        kb.add_button(
+            "➡️",
+            VkKeyboardColor.SECONDARY,
+            payload=_pl(page_cmd, p=page + 1),
+        )
+    kb.add_line()
 
 
 class StudentBot:
@@ -962,10 +1051,16 @@ class StudentBot:
                 keyboard=kb,
             )
             return
-        # по 1 кнопке в ряд — всегда помещается и выглядит аккуратно
-        for i, name in enumerate(dirs[:8]):
+        # до 6 направлений + 2 ряда footer ≤ 8 (лимит VK default keyboard = 10)
+        for i, name in enumerate(dirs[:6]):
             kb.add_button(name[:40], VkKeyboardColor.PRIMARY, payload=_pl("dir", i=i))
             kb.add_line()
+        if len(dirs) > 6:
+            logger.warning(
+                "Направлений %s > 6 для key=%s — показаны первые 6",
+                len(dirs),
+                ctx.table_group_key,
+            )
         kb.add_button("Сменить группу таблиц", VkKeyboardColor.SECONDARY, payload=_pl("tbls"))
         kb.add_line()
         kb.add_button("В меню", VkKeyboardColor.SECONDARY, payload=_pl("main"))
@@ -996,40 +1091,26 @@ class StudentBot:
             self.send(peer_id, f"В направлении «{ctx.direction}» группы не найдены.", keyboard=kb)
             return
         ctx.current_view = "groups"
-        total_pages = max(1, (len(groups) + PER_PAGE - 1) // PER_PAGE)
+        total_pages = max(1, (len(groups) + GROUPS_PER_PAGE - 1) // GROUPS_PER_PAGE)
         page = max(0, min(ctx.groups_page, total_pages - 1))
         ctx.groups_page = page
-        start = page * PER_PAGE
-        shown = groups[start : start + PER_PAGE]
+        start = page * GROUPS_PER_PAGE
+        shown = groups[start : start + GROUPS_PER_PAGE]
 
+        # Макс рядов: 4 группы + 1 nav + 3 footer = 8 (лимит VK default = 10)
         kb = VkKeyboard(one_time=False, inline=False)
         for i, g in enumerate(shown):
             kb.add_button(g[:40], VkKeyboardColor.PRIMARY, payload=_pl("grp", i=start + i))
             kb.add_line()
-        if total_pages > 1:
-            if page > 0:
-                kb.add_button(
-                    "⬅️ Назад",
-                    VkKeyboardColor.SECONDARY,
-                    payload=_pl("gpage", p=page - 1),
-                )
-            if page < total_pages - 1:
-                kb.add_button(
-                    "➡️ Вперед",
-                    VkKeyboardColor.SECONDARY,
-                    payload=_pl("gpage", p=page + 1),
-                )
-            kb.add_line()
-        kb.add_button("🎓 Направления", VkKeyboardColor.SECONDARY, payload=_pl("dirs"))
+        _add_nav_row(kb, page=page, total_pages=total_pages, page_cmd="gpage")
+        kb.add_button("Направления", VkKeyboardColor.SECONDARY, payload=_pl("dirs"))
+        kb.add_button("Корзина", VkKeyboardColor.SECONDARY, payload=_pl("trash"))
         kb.add_line()
-        kb.add_button("🗑 Корзина", VkKeyboardColor.SECONDARY, payload=_pl("trash"))
+        kb.add_button("Отчет Word", VkKeyboardColor.POSITIVE, payload=_pl("rep_cur"))
+        kb.add_button("Архив", VkKeyboardColor.SECONDARY, payload=_pl("rep_arc"))
         kb.add_line()
-        kb.add_button("📄 Отчет Word", VkKeyboardColor.POSITIVE, payload=_pl("rep_cur"))
-        kb.add_button("🗂 Архив отчетов", VkKeyboardColor.SECONDARY, payload=_pl("rep_arc"))
-        kb.add_line()
-        kb.add_button("📤 Экспорт Excel", VkKeyboardColor.POSITIVE, payload=_pl("exp_xlsx"))
-        kb.add_line()
-        kb.add_button("🔙 Меню", VkKeyboardColor.SECONDARY, payload=_pl("main"))
+        kb.add_button("Excel", VkKeyboardColor.POSITIVE, payload=_pl("exp_xlsx"))
+        kb.add_button("Меню", VkKeyboardColor.SECONDARY, payload=_pl("main"))
         self.send(
             peer_id,
             f"Направление: {ctx.direction}\nВыберите группу ({page + 1}/{total_pages}):",
@@ -1625,4 +1706,5 @@ def _largest_photo_url(photo: dict) -> Optional[str]:
 
 
 if __name__ == "__main__":
+    acquire_singleton_lock()
     StudentBot().run()
