@@ -5,12 +5,14 @@ import re
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Optional
+from urllib.parse import urlparse
 
+import requests
 from django.contrib.auth import get_user_model
 from django.db import transaction
 
-from bot_api.sheet_utils import set_cell_value
-from bot_api.sheet_utils import get_workbook_sheets
+from bot_api.evidence import upsert_remark_evidence
+from bot_api.sheet_utils import get_workbook_sheets, set_cell_value
 from bot_api.student_sheet import search_students
 from bot_api.week_column import pick_week_col_by_date
 from sections.models import SectionTable
@@ -18,7 +20,7 @@ from sections.models import SectionTable
 from .classifier import LightweightClassifier, MatchResult
 from .config import load_moderation_config
 from .rules_store import load_rules
-from .social_scan import fetch_social_entries
+from .social_scan import SocialEntry, fetch_social_entries
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +30,7 @@ class ScanStats:
     checked_students: int = 0
     flagged_students: int = 0
     updated_cells: int = 0
+    evidence_saved: int = 0
 
 
 def _clean_token(token: str) -> str:
@@ -144,11 +147,89 @@ def _build_remark(match: MatchResult, link: str, scan_date: date) -> str:
     return (match.remark_text or "выявлен запрещенный контент").strip()
 
 
+def _guess_image_meta(url: str, content_type: str) -> tuple[str, str]:
+    ct = (content_type or "").lower().split(";")[0].strip()
+    path = urlparse(url or "").path.lower()
+    if "png" in ct or path.endswith(".png"):
+        return "evidence.png", "image/png"
+    if "webp" in ct or path.endswith(".webp"):
+        return "evidence.webp", "image/webp"
+    return "evidence.jpg", "image/jpeg"
+
+
+def download_evidence_bytes(
+    url: str,
+    *,
+    timeout_sec: int = 10,
+    proxy_url: str = "",
+) -> Optional[tuple[bytes, str, str]]:
+    """Скачать превью поста для RemarkEvidence. (raw, filename, content_type) или None."""
+    if not (url or "").strip():
+        return None
+    proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
+    try:
+        resp = requests.get(url, timeout=timeout_sec, proxies=proxies)
+        resp.raise_for_status()
+        raw = resp.content or b""
+        if not raw:
+            return None
+        filename, content_type = _guess_image_meta(url, resp.headers.get("Content-Type", ""))
+        return raw, filename, content_type
+    except Exception:
+        logger.warning("Не удалось скачать evidence thumbnail: %s", url[:200], exc_info=True)
+        return None
+
+
+def _save_hit_evidence(
+    *,
+    table: SectionTable,
+    sheet_name: str,
+    student_fio: str,
+    remark_date: date,
+    entry: SocialEntry,
+    timeout_sec: int,
+    proxy_url: str,
+) -> bool:
+    downloaded = download_evidence_bytes(
+        entry.thumbnail_url,
+        timeout_sec=timeout_sec,
+        proxy_url=proxy_url,
+    )
+    if not downloaded:
+        logger.info(
+            "Evidence skip (no thumbnail) fio=%s sheet=%s post=%s",
+            student_fio,
+            sheet_name,
+            (entry.post_url or "")[:120],
+        )
+        return False
+    raw, filename, content_type = downloaded
+    try:
+        upsert_remark_evidence(
+            table=table,
+            sheet_name=sheet_name,
+            student_fio=student_fio,
+            remark_date=remark_date,
+            raw=raw,
+            filename=filename,
+            content_type=content_type,
+        )
+        return True
+    except Exception:
+        logger.exception(
+            "Evidence upsert failed fio=%s sheet=%s",
+            student_fio,
+            sheet_name,
+        )
+        return False
+
+
 def run_social_moderation_scan(
     *,
     scan_date: Optional[date] = None,
     dry_run: bool = True,
     max_students: Optional[int] = None,
+    save_evidence: bool = True,
 ) -> ScanStats:
     cfg = load_moderation_config()
     if not cfg.table_owner_username:
@@ -202,10 +283,16 @@ def run_social_moderation_scan(
                 stop = True
                 break
             row_idx = int(student["row_index"])
-            row = data[row_idx] if row_idx < len(data) and isinstance(data[row_idx], list) else []
-            links = _extract_social_links(row, header_row, cfg.social_cols)[: cfg.max_links_per_student]
+            row = (
+                data[row_idx]
+                if row_idx < len(data) and isinstance(data[row_idx], list)
+                else []
+            )
+            links = _extract_social_links(row, header_row, cfg.social_cols)[
+                : cfg.max_links_per_student
+            ]
             stats.checked_students += 1
-            violation: Optional[tuple[str, MatchResult]] = None
+            violation: Optional[tuple[str, MatchResult, SocialEntry]] = None
             for link in links:
                 platform = _platform_from_url(link)
                 if cfg.skip_tg and platform == "tg":
@@ -221,7 +308,7 @@ def run_social_moderation_scan(
                 for entry in entries:
                     result = classifier.classify(entry)
                     if result.is_violation:
-                        violation = (link, result)
+                        violation = (link, result, entry)
                         break
                 if violation:
                     break
@@ -229,19 +316,31 @@ def run_social_moderation_scan(
                 continue
 
             stats.flagged_students += 1
-            link, match = violation
+            link, match, entry = violation
             remark = _build_remark(match, link, today)
             if dry_run:
                 logger.info(
-                    "[dry-run] %s / %s -> %s",
+                    "[dry-run] %s / %s -> %s (thumb=%s)",
                     sheet_name,
                     student.get("fio", ""),
                     remark,
+                    bool(entry.thumbnail_url),
                 )
                 continue
 
             set_cell_value(content, sheet_name, row_idx, week_col, remark)
             stats.updated_cells += 1
+            if save_evidence:
+                if _save_hit_evidence(
+                    table=table,
+                    sheet_name=sheet_name,
+                    student_fio=str(student.get("fio") or ""),
+                    remark_date=today,
+                    entry=entry,
+                    timeout_sec=cfg.request_timeout_sec,
+                    proxy_url=cfg.proxy_url,
+                ):
+                    stats.evidence_saved += 1
         if stop:
             break
 
@@ -252,5 +351,12 @@ def run_social_moderation_scan(
                 needs_nextcloud_push=True,
             )
 
+    logger.info(
+        "Social moderation finished: checked=%s flagged=%s cells=%s evidence=%s dry_run=%s",
+        stats.checked_students,
+        stats.flagged_students,
+        stats.updated_cells,
+        stats.evidence_saved,
+        dry_run,
+    )
     return stats
-

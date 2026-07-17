@@ -121,15 +121,18 @@ def run_social_moderation_scan_task(self):
     stats = run_social_moderation_scan(
         dry_run=False,
         max_students=getattr(settings, "SOCIAL_MOD_MAX_STUDENTS_PER_RUN", 0) or None,
+        save_evidence=True,
     )
     logger.info(
-        "Social moderation done: checked=%s flagged=%s updated=%s",
+        "Social moderation done: checked=%s flagged=%s updated=%s evidence=%s",
         stats.checked_students,
         stats.flagged_students,
         stats.updated_cells,
+        stats.evidence_saved,
     )
     return {
         "checked": stats.checked_students,
         "flagged": stats.flagged_students,
         "updated": stats.updated_cells,
+        "evidence": stats.evidence_saved,
     }
