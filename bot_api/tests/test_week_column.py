@@ -1,6 +1,12 @@
 from datetime import date
 
-from bot_api.week_column import parse_date_from_header_cell, pick_week_col_by_date
+from bot_api.week_column import (
+    build_month_week_ranges,
+    format_week_range_header,
+    parse_date_from_header_cell,
+    parse_date_range_from_header_cell,
+    pick_week_col_by_date,
+)
 
 
 def test_parse_date_from_header_cell():
@@ -15,4 +21,43 @@ def test_pick_week_col_by_date_prefers_same_iso_week():
     ]
     assert pick_week_col_by_date(data, date(2026, 4, 21)) == 3
     assert pick_week_col_by_date(data, date(2026, 4, 14)) == 2
+
+
+def test_parse_date_range_from_header_cell_without_year():
+    assert parse_date_range_from_header_cell("20.04-26.04", date(2026, 4, 26)) == (
+        date(2026, 4, 20),
+        date(2026, 4, 26),
+    )
+
+
+def test_pick_week_col_by_date_uses_last_available_week_for_later_date():
+    data = [
+        ["ФИО", "Группа", "Статус", "13.04-19.04", "20.04-26.04", "Статус учебы"],
+        ["Иванов", "Г1", "учится", "", "", "учится"],
+    ]
+
+    assert pick_week_col_by_date(data, date(2026, 4, 26)) == 4
+    assert pick_week_col_by_date(data, date(2026, 4, 27)) == 4
+
+
+def test_build_month_week_ranges_includes_short_first_week_when_needed():
+    ranges = build_month_week_ranges(2026, 4)
+
+    assert [format_week_range_header(start, end) for start, end in ranges] == [
+        "01.04-05.04",
+        "06.04-12.04",
+        "13.04-19.04",
+        "20.04-26.04",
+    ]
+
+
+def test_build_month_week_ranges_skips_short_first_week_when_four_full_weeks_exist():
+    ranges = build_month_week_ranges(2026, 5)
+
+    assert [format_week_range_header(start, end) for start, end in ranges] == [
+        "04.05-10.05",
+        "11.05-17.05",
+        "18.05-24.05",
+        "25.05-31.05",
+    ]
 

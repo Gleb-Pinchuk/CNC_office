@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from django.contrib.auth import get_user_model
 from django.db import transaction
@@ -21,6 +22,8 @@ from sections.models import SectionTable
 
 @dataclass
 class NextcloudSyncConfig:
+    key: str
+    label: str
     base_url: str
     username: str
     password: str
@@ -31,6 +34,65 @@ class NextcloudSyncConfig:
 
 
 def load_nextcloud_sync_config_from_env() -> Optional[NextcloudSyncConfig]:
+    """Backward-compatible loader for a single sync config."""
+    all_cfgs = load_nextcloud_sync_configs_from_env()
+    return all_cfgs[0] if all_cfgs else None
+
+
+def load_nextcloud_sync_configs_from_env() -> List[NextcloudSyncConfig]:
+    """Load one or many sync configs from env.
+
+    Preferred format:
+    NEXTCLOUD_SYNC_GROUPS_JSON='[{"key":"prod","label":"...","file_relative_path":"...","title_fragment":"...","direction_sheets":[...]}]'
+
+    Russian names can be passed as JSON unicode escapes (ASCII-safe), for example:
+    "\\u0420\\u0435\\u0439\\u043d\\u0434..."
+    """
+    multi_raw = (os.getenv("NEXTCLOUD_SYNC_GROUPS_JSON") or "").strip()
+    if multi_raw:
+        try:
+            parsed = json.loads(multi_raw)
+            if not isinstance(parsed, list):
+                raise ValueError("NEXTCLOUD_SYNC_GROUPS_JSON должен быть JSON-массивом")
+            out: List[NextcloudSyncConfig] = []
+            for idx, item in enumerate(parsed):
+                if not isinstance(item, dict):
+                    continue
+                base = str(item.get("base_url") or os.getenv("NEXTCLOUD_BASE_URL") or "").strip().rstrip("/")
+                user = str(item.get("username") or os.getenv("NEXTCLOUD_USERNAME") or "").strip()
+                pwd = str(
+                    item.get("password")
+                    or os.getenv("NEXTCLOUD_PASSWORD")
+                    or os.getenv("NEXTCLOUD_APP_TOKEN")
+                    or ""
+                ).strip()
+                rel = str(item.get("file_relative_path") or item.get("file_path") or "").strip()
+                owner = str(item.get("owner_username") or os.getenv("CNC_BOT_TABLE_OWNER_USERNAME") or "").strip()
+                st = str(item.get("section_type") or os.getenv("CNC_SECTION_TYPE") or "rangers").strip()
+                title = str(item.get("title_fragment") or "").strip()
+                key = str(item.get("key") or f"group_{idx + 1}").strip()
+                label = str(item.get("label") or key).strip()
+                if not all([base, user, pwd, rel, owner, key]):
+                    continue
+                out.append(
+                    NextcloudSyncConfig(
+                        key=key,
+                        label=label,
+                        base_url=base,
+                        username=user,
+                        password=pwd,
+                        file_relative_path=rel,
+                        owner_username=owner,
+                        section_type=st,
+                        title_fragment=title,
+                    )
+                )
+            if out:
+                return out
+        except Exception:
+            # Не валим воркер: в случае ошибки формата используем single-config fallback.
+            pass
+
     base = (os.getenv("NEXTCLOUD_BASE_URL") or "").strip().rstrip("/")
     user = (os.getenv("NEXTCLOUD_USERNAME") or "").strip()
     pwd = (os.getenv("NEXTCLOUD_PASSWORD") or os.getenv("NEXTCLOUD_APP_TOKEN") or "").strip()
@@ -39,16 +101,20 @@ def load_nextcloud_sync_config_from_env() -> Optional[NextcloudSyncConfig]:
     st = (os.getenv("CNC_SECTION_TYPE") or "rangers").strip()
     title = (os.getenv("CNC_TABLE_TITLE_FRAGMENT") or "").strip()
     if not all([base, user, pwd, rel, owner]):
-        return None
-    return NextcloudSyncConfig(
-        base_url=base,
-        username=user,
-        password=pwd,
-        file_relative_path=rel,
-        owner_username=owner,
-        section_type=st,
-        title_fragment=title,
-    )
+        return []
+    return [
+        NextcloudSyncConfig(
+            key="default",
+            label="default",
+            base_url=base,
+            username=user,
+            password=pwd,
+            file_relative_path=rel,
+            owner_username=owner,
+            section_type=st,
+            title_fragment=title,
+        )
+    ]
 
 
 def find_section_table(cfg: NextcloudSyncConfig) -> Optional[SectionTable]:
@@ -82,9 +148,21 @@ def pull_from_nextcloud(cfg: NextcloudSyncConfig) -> Dict[str, Any]:
         return {"ok": False, "error": "section_table_not_found"}
     with transaction.atomic():
         st = SectionTable.objects.select_for_update().get(pk=table.pk)
+        if st.needs_nextcloud_push:
+            return {
+                "ok": True,
+                "skipped": True,
+                "reason": "local_pending_push",
+                "table_id": table.pk,
+                "action": "pull",
+            }
         st.content = new_content
         st.needs_nextcloud_push = False
         st.save(update_fields=["content", "needs_nextcloud_push", "updated_at"])
+    # После pull даты могли смениться в Excel без очистки — догоняем rollover.
+    from bot_api.monthly_rollover import rollover_table_if_needed
+
+    rollover_table_if_needed(table)
     return {"ok": True, "table_id": table.pk, "action": "pull"}
 
 

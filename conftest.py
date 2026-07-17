@@ -3,7 +3,6 @@ from django.contrib.auth import get_user_model
 from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient
 
-from documents.models import Document
 from files.models import StorageFile, StorageFolder
 from sections.models import SectionTable
 
@@ -42,6 +41,9 @@ def test_file(user, folder):
 
 @pytest.fixture
 def document(user):
+    pytest.importorskip("documents")
+    from documents.models import Document
+
     return Document.objects.create(
         owner=user, title="Doc1", doc_type="spreadsheet", content={}
     )

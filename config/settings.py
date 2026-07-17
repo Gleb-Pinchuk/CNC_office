@@ -4,8 +4,10 @@ Django settings for config project.
 
 import os
 from datetime import timedelta
+from importlib.util import find_spec
 from pathlib import Path
 
+from celery.schedules import crontab
 from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -41,10 +43,12 @@ INSTALLED_APPS = [
     # Local apps
     "files",
     "users",
-    "documents",
     "sections",
     "bot_api",
 ]
+
+if find_spec("documents"):
+    INSTALLED_APPS.append("documents")
 
 ENABLE_OIDC = os.getenv("ENABLE_OIDC", "False").lower() in ("true", "1", "yes")
 if ENABLE_OIDC:
@@ -57,12 +61,14 @@ CNC_BOT_TABLE_OWNER_USERNAME = os.getenv("CNC_BOT_TABLE_OWNER_USERNAME", "")
 # Индексы колонок в листах Excel (0-based), должны совпадать с vk_student_bot
 BOT_SHEET_FIO_COL = int(os.getenv("BOT_SHEET_FIO_COL", "2"))
 BOT_SHEET_GROUP_COL = int(os.getenv("BOT_SHEET_GROUP_COL", "1"))
-BOT_SHEET_STATUS_COL = int(os.getenv("BOT_SHEET_STATUS_COL", "11"))
-BOT_SHEET_REMARK_COL = int(os.getenv("BOT_SHEET_REMARK_COL", "12"))
-BOT_SHEET_SOCIAL_COLS = os.getenv("BOT_SHEET_SOCIAL_COLS", "13,14,15")
+BOT_SHEET_STATUS_COL = int(os.getenv("BOT_SHEET_STATUS_COL", "12"))
+BOT_SHEET_REMARK_COL = int(os.getenv("BOT_SHEET_REMARK_COL", "11"))
+BOT_SHEET_SOCIAL_COLS = os.getenv("BOT_SHEET_SOCIAL_COLS", "4,5,6")
+MONITORING_REPORT_DEVELOPER = os.getenv("MONITORING_REPORT_DEVELOPER", "Тагирова А.Р.")
+MONITORING_REPORT_APPROVER = os.getenv("MONITORING_REPORT_APPROVER", "Яшев Э.А.")
 
 # Celery / Redis
-CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://redis:6379/0")
+CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://127.0.0.1:6379/0")
 CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", CELERY_BROKER_URL)
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
@@ -78,9 +84,21 @@ SOCIAL_MODERATION_SCHEDULE_MINUTES = int(
 )
 SOCIAL_MOD_MAX_STUDENTS_PER_RUN = int(os.getenv("SOCIAL_MOD_MAX_STUDENTS_PER_RUN", "0"))
 CELERY_BEAT_SCHEDULE = {
+    "pull-nextcloud-updates": {
+        "task": "bot_api.tasks.pull_nextcloud_updates",
+        "schedule": timedelta(minutes=10),
+    },
     "push-pending-nextcloud": {
         "task": "bot_api.tasks.push_pending_nextcloud",
         "schedule": timedelta(minutes=5),
+    },
+    "rollover-monthly-tables": {
+        "task": "bot_api.tasks.rollover_monthly_tables",
+        "schedule": crontab(hour=3, minute=10),
+    },
+    "purge-expired-student-trash": {
+        "task": "bot_api.tasks.purge_expired_student_trash",
+        "schedule": crontab(hour=4, minute=15),
     },
 }
 if SOCIAL_MODERATION_ENABLED:
@@ -134,7 +152,7 @@ DATABASES = {
         "NAME": os.getenv("POSTGRES_DB", "cnc_office"),
         "USER": os.getenv("POSTGRES_USER", "cnc_user"),
         "PASSWORD": os.getenv("POSTGRES_PASSWORD", "cnc_password"),
-        "HOST": os.getenv("DB_HOST", "db"),
+        "HOST": os.getenv("DB_HOST", "127.0.0.1"),
         "PORT": os.getenv("DB_PORT", "5432"),
     }
 }

@@ -1,0 +1,30 @@
+#!/sbin/openrc-run
+
+description="CNC Office PostgreSQL SSH tunnel"
+command="/usr/bin/ssh"
+command_background="yes"
+pidfile="/run/${RC_SVCNAME}.pid"
+output_log="/var/log/cnc-office/${RC_SVCNAME}.log"
+error_log="/var/log/cnc-office/${RC_SVCNAME}.log"
+
+depend() {
+    need net
+}
+
+start_pre() {
+    checkpath -d -m 0755 -o cnc:cnc /var/log/cnc-office
+    checkpath -d -m 0755 /run
+    set -a
+    . /etc/cnc-office/app.env
+    set +a
+    command_user="cnc:cnc"
+    command_args="-NT \
+        -o ExitOnForwardFailure=yes \
+        -o ServerAliveInterval=30 \
+        -o ServerAliveCountMax=3 \
+        -o StrictHostKeyChecking=accept-new \
+        -i ${DB_TUNNEL_IDENTITY_FILE} \
+        -p ${DB_TUNNEL_SSH_PORT} \
+        -L ${DB_TUNNEL_LOCAL_HOST}:${DB_TUNNEL_LOCAL_PORT}:${DB_TUNNEL_REMOTE_HOST}:${DB_TUNNEL_REMOTE_PORT} \
+        ${DB_TUNNEL_USER}@${DB_TUNNEL_HOST}"
+}

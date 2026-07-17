@@ -3,6 +3,10 @@
 from typing import Optional, Tuple
 
 
+def _normalize_sheet_name(value: str) -> str:
+    return "".join(ch for ch in str(value or "").strip().lower() if ch.isalnum())
+
+
 def get_workbook_sheets(content: dict) -> Tuple[list, int]:
     """
     Возвращает (sheets: list, active_index: int).
@@ -45,17 +49,50 @@ def get_workbook_sheets(content: dict) -> Tuple[list, int]:
     return [], 0
 
 
+def sheet_display_names(sheets: list) -> list:
+    """Имена листов для API; устойчиво к битым элементам в sheets."""
+    names = []
+    for i, sh in enumerate(sheets or []):
+        if isinstance(sh, dict):
+            names.append(str(sh.get("name") or f"Лист{i + 1}"))
+        else:
+            names.append(f"Лист{i + 1}")
+    return names
+
+
 def find_sheet_by_name(sheets: list, sheet_name: Optional[str]):
     if not sheets:
         return None
     if not sheet_name or not str(sheet_name).strip():
         return sheets[0]
-    target = str(sheet_name).strip().lower()
+    target_raw = str(sheet_name).strip().lower()
+    target_norm = _normalize_sheet_name(sheet_name)
+
+    # 1) strict case-insensitive match
     for sh in sheets:
         name = str(sh.get("name") or "").strip().lower()
-        if name == target:
+        if name == target_raw:
             return sh
-    return None
+
+    # 2) normalized exact match (ignore spaces/punctuations/casing)
+    for sh in sheets:
+        name_norm = _normalize_sheet_name(sh.get("name") or "")
+        if name_norm and name_norm == target_norm:
+            return sh
+
+    # 3) unique fuzzy contains match to survive minor renames in archives
+    candidates = []
+    for sh in sheets:
+        name_norm = _normalize_sheet_name(sh.get("name") or "")
+        if not name_norm:
+            continue
+        if target_norm in name_norm or name_norm in target_norm:
+            candidates.append(sh)
+    if len(candidates) == 1:
+        return candidates[0]
+
+    # 4) as a final fallback use the first sheet
+    return sheets[0]
 
 
 def _ensure_cell(data: list, row: int, col: int):
@@ -71,13 +108,7 @@ def _ensure_cell(data: list, row: int, col: int):
         r.append("")
 
 
-def set_cell_value(
-    content: dict, sheet_name: Optional[str], row: int, col: int, value: str
-) -> dict:
-    """
-    Пишет в content.custom_sheet, возвращает обновлённый content (тот же dict).
-    row, col — 0-based (0 = первая строка таблицы, обычно заголовки).
-    """
+def _ensure_sheet(content: dict, sheet_name: Optional[str], *, min_row: int = 0, min_col: int = 0):
     if not isinstance(content, dict):
         content = {}
     if not isinstance(content.get("custom_sheet"), dict):
@@ -87,8 +118,8 @@ def set_cell_value(
     if not sheets:
         new_sheet = {
             "name": "Лист1",
-            "rows": max(20, row + 1),
-            "cols": max(10, col + 1),
+            "rows": max(20, min_row + 1),
+            "cols": max(10, min_col + 1),
             "data": [],
             "styles": {},
         }
@@ -113,6 +144,44 @@ def set_cell_value(
     if not isinstance(data, list):
         data = []
         sh["data"] = data
+    return content, sh, data
+
+
+def set_cell_value(
+    content: dict, sheet_name: Optional[str], row: int, col: int, value: str
+) -> dict:
+    """
+    Пишет в content.custom_sheet, возвращает обновлённый content (тот же dict).
+    row, col — 0-based (0 = первая строка таблицы, обычно заголовки).
+    """
+    content, sh, data = _ensure_sheet(content, sheet_name, min_row=row, min_col=col)
     _ensure_cell(data, row, col)
     data[row][col] = value if value is not None else ""
+    if isinstance(sh.get("rows"), int):
+        sh["rows"] = max(int(sh["rows"]), len(data))
+    return content
+
+
+def delete_sheet_row(content: dict, sheet_name: Optional[str], row: int) -> dict:
+    """Удаляет строку data[row] (0-based)."""
+    content, sh, data = _ensure_sheet(content, sheet_name)
+    if 0 <= row < len(data):
+        data.pop(row)
+        if isinstance(sh.get("rows"), int):
+            sh["rows"] = max(len(data), 1)
+    return content
+
+
+def insert_sheet_row(
+    content: dict, sheet_name: Optional[str], row: int, values: list
+) -> dict:
+    """Вставляет копию values в data на позицию row (0-based)."""
+    row_values = list(values) if values is not None else []
+    content, sh, data = _ensure_sheet(
+        content, sheet_name, min_row=row, min_col=max(len(row_values) - 1, 0)
+    )
+    idx = max(0, min(int(row), len(data)))
+    data.insert(idx, row_values)
+    if isinstance(sh.get("rows"), int):
+        sh["rows"] = max(int(sh["rows"]), len(data))
     return content

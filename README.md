@@ -22,11 +22,30 @@
 
 ---
 
+## 1.1) Перенос без Docker на два сервера
+
+Для схемы `ssh -p 2222 root@92.255.253.148` (Django/Celery/Redis/VK-бот) + `ssh -p 2223 root@92.255.253.148` (PostgreSQL) используйте инструкцию:
+
+```bash
+ops/deploy_systemd_ssh_tunnel.md
+```
+
+В этой схеме для Alpine Linux сервисы запускаются через OpenRC, Django слушает только `127.0.0.1:8000`, а подключение к PostgreSQL идёт через постоянный SSH-туннель `127.0.0.1:15432 -> 127.0.0.1:5432`.
+
+GitHub Actions деплоит эту схему через `.github/workflows/deploy.yml`. В `production` secrets должны быть заданы:
+
+- `DEPLOY_HOST=92.255.253.148`
+- `DEPLOY_USERNAME=root`
+- `DEPLOY_SSH_KEY` - приватный SSH-ключ для входа на app-сервер
+
+---
+
 ## 2) Что нужно на новом сервере
 
-- Ubuntu/Debian сервер
+- Alpine Linux, Ubuntu/Debian или другой Linux-сервер
 - доступ по SSH
-- Docker + Docker Compose plugin
+- Docker + Docker Compose plugin, если используете Docker-сценарий ниже
+- Python venv + OpenRC/systemd + Redis + PostgreSQL client, если используете перенос без Docker
 - домен или IP
 - рабочий Nextcloud WebDAV доступ к `.xlsx`
 - VK group token + group id

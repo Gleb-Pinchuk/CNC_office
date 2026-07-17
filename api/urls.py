@@ -1,3 +1,5 @@
+from importlib.util import find_spec
+
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
@@ -19,5 +21,7 @@ urlpatterns = [
     path("", include(router.urls)),
     path("users/", include("users.urls")),
     path("health/", health_check, name="health"),
-    path("", include("documents.urls")),
 ]
+
+if find_spec("documents"):
+    urlpatterns.append(path("", include("documents.urls")))

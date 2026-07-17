@@ -13,24 +13,45 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from api.xlsx_export import export_custom_sheet_to_xlsx_bytes
-from sections.models import SectionTable
+from sections.models import SectionTable, SectionTableMonthlyArchive
 
+from .evidence import (
+    delete_all_remark_evidence_for_student,
+    delete_remark_evidence,
+    load_evidence_bytes_map,
+    upsert_remark_evidence,
+)
+from .models import StudentTrash
 from .remark_utils import parse_input_date
-from .sheet_utils import find_sheet_by_name, get_workbook_sheets, set_cell_value
-from .student_sheet import find_one_student_row, list_groups, search_students
+from .reports import generate_monitoring_report_docx, report_filename
+from .sheet_utils import (
+    delete_sheet_row,
+    find_sheet_by_name,
+    get_workbook_sheets,
+    insert_sheet_row,
+    set_cell_value,
+    sheet_display_names,
+)
+from .student_sheet import find_one_student_row, list_groups, normalize_cell, search_students
+from .trash import find_insert_row_in_group, trash_expires_at
 from .week_column import pick_week_col_by_date
 
 logger = logging.getLogger(__name__)
 
 
 def _bot_secret_ok(request) -> bool:
-    secret = getattr(settings, "CNC_BOT_API_SECRET", "") or os.getenv(
-        "CNC_BOT_API_SECRET", ""
-    )
+    secret = (
+        getattr(settings, "CNC_BOT_API_SECRET", "") or os.getenv("CNC_BOT_API_SECRET", "")
+    ).strip()
     if not secret:
         logger.warning("CNC_BOT_API_SECRET не задан")
         return False
-    token = request.headers.get("X-CNC-Bot-Token", "")
+    token = (request.headers.get("X-CNC-Bot-Token") or "").strip()
+    if not token:
+        return False
+    # compare_digest бросает ValueError при разной длине — иначе клиент видит HTML 500.
+    if len(token) != len(secret):
+        return False
     return compare_digest(token, secret)
 
 
@@ -58,6 +79,19 @@ class BotGatewayView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
+        try:
+            return self._dispatch(request)
+        except Exception:
+            logger.exception(
+                "bot gateway: необработанная ошибка action=%s",
+                (request.data.get("action") if hasattr(request, "data") else None),
+            )
+            return Response(
+                {"detail": "Внутренняя ошибка сервера при обработке запроса бота"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+    def _dispatch(self, request):
         if not _bot_secret_ok(request):
             return Response(
                 {"detail": "Недопустимый токен бота"}, status=status.HTTP_403_FORBIDDEN
@@ -93,8 +127,18 @@ class BotGatewayView(APIView):
             return self._get_student_profile(request, owner)
         if action == "set_student_status":
             return self._set_student_status(request, owner)
+        if action == "expel_student_to_trash":
+            return self._expel_student_to_trash(request, owner)
+        if action == "list_trashed_students":
+            return self._list_trashed_students(request, owner)
+        if action == "restore_student_from_trash":
+            return self._restore_student_from_trash(request, owner)
         if action == "export_table_xlsx":
             return self._export_table_xlsx(request, owner)
+        if action == "list_report_archives":
+            return self._list_report_archives(request, owner)
+        if action == "export_monitoring_report_docx":
+            return self._export_monitoring_report_docx(request, owner)
         return Response(
             {"detail": f"Неизвестное action: {action}"},
             status=status.HTTP_400_BAD_REQUEST,
@@ -111,14 +155,24 @@ class BotGatewayView(APIView):
         return (
             int(getattr(settings, "BOT_SHEET_FIO_COL", 2)),
             int(getattr(settings, "BOT_SHEET_GROUP_COL", 1)),
-            int(getattr(settings, "BOT_SHEET_STATUS_COL", 11)),
-            int(getattr(settings, "BOT_SHEET_REMARK_COL", 12)),
+            int(getattr(settings, "BOT_SHEET_STATUS_COL", 12)),
+            int(getattr(settings, "BOT_SHEET_REMARK_COL", 11)),
         )
+
+    @staticmethod
+    def _status_col_from_header(sheet_data, fallback_col: int) -> int:
+        if not sheet_data or not isinstance(sheet_data[0], list):
+            return fallback_col
+        for idx, value in enumerate(sheet_data[0]):
+            header = str(value or "").strip().lower()
+            if header in {"состояние", "статус", "статус учебы", "статус обучения"}:
+                return idx
+        return fallback_col
 
     def _social_cols(self):
         raw = (
             getattr(settings, "BOT_SHEET_SOCIAL_COLS", "")
-            or os.getenv("BOT_SHEET_SOCIAL_COLS", "13,14,15")
+            or os.getenv("BOT_SHEET_SOCIAL_COLS", "4,5,6")
         )
         out = []
         for part in str(raw).split(","):
@@ -227,8 +281,20 @@ class BotGatewayView(APIView):
         links = []
         profiles = []
         seen = set()
+        seen_cols = set()
         preferred = ["tg", "vk", "tiktok"]
+        candidates = []
         for pos, idx in enumerate(self._social_cols()):
+            candidates.append((idx, pos))
+            seen_cols.add(idx)
+        if isinstance(header_row, list):
+            for idx, header_value in enumerate(header_row):
+                if idx in seen_cols:
+                    continue
+                if self._platform_from_header(str(header_value or "")):
+                    candidates.append((idx, None))
+                    seen_cols.add(idx)
+        for pos, (idx, configured_pos) in enumerate(candidates):
             if idx < 0 or idx >= len(row):
                 continue
             raw = "" if row[idx] is None else str(row[idx]).strip()
@@ -238,7 +304,11 @@ class BotGatewayView(APIView):
             if isinstance(header_row, list) and idx < len(header_row):
                 header_hint = str(header_row[idx] or "")
             default_platform = self._platform_from_header(header_hint) or (
-                preferred[pos] if pos < len(preferred) else "tg"
+                preferred[configured_pos]
+                if configured_pos is not None and configured_pos < len(preferred)
+                else preferred[pos]
+                if pos < len(preferred)
+                else "tg"
             )
             parts = [p for p in re.split(r"[\s,;\n]+", raw) if p and p.strip()]
             if not parts:
@@ -288,6 +358,7 @@ class BotGatewayView(APIView):
             return Response(
                 {"detail": "Лист не найден"}, status=status.HTTP_404_NOT_FOUND
             )
+        st_c = self._status_col_from_header(data, st_c)
         students = search_students(
             data,
             fio_col=fio_c,
@@ -315,6 +386,7 @@ class BotGatewayView(APIView):
             return Response(
                 {"detail": "Лист не найден"}, status=status.HTTP_404_NOT_FOUND
             )
+        st_c = self._status_col_from_header(data, st_c)
         students = search_students(
             data,
             fio_col=fio_c,
@@ -348,6 +420,7 @@ class BotGatewayView(APIView):
             return Response(
                 {"detail": "Лист не найден"}, status=status.HTTP_404_NOT_FOUND
             )
+        st_c = self._status_col_from_header(data, st_c)
         one, allm = find_one_student_row(
             data,
             student_fio,
@@ -413,6 +486,34 @@ class BotGatewayView(APIView):
                 {"detail": "Неверный формат даты remark_date"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        has_remark_text = bool(remark_text and str(remark_text).strip())
+        evidence_file = request.FILES.get("evidence")
+        evidence_raw = None
+        evidence_name = ""
+        evidence_ct = ""
+        if has_remark_text and evidence_file is not None:
+            evidence_raw = evidence_file.read()
+            evidence_name = getattr(evidence_file, "name", "") or ""
+            evidence_ct = getattr(evidence_file, "content_type", "") or ""
+            try:
+                # Предварительная проверка до записи в таблицу.
+                from .evidence import validate_evidence_upload
+
+                err = validate_evidence_upload(
+                    raw=evidence_raw,
+                    filename=evidence_name,
+                    content_type=evidence_ct,
+                )
+                if err:
+                    return Response({"detail": err}, status=status.HTTP_400_BAD_REQUEST)
+            except Exception:
+                logger.exception("evidence validate failed")
+                return Response(
+                    {"detail": "Некорректный файл доказательства"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
         fio_c, gcol, st_c, rcol_default = self._bot_cols()
         with transaction.atomic():
             table = (
@@ -429,6 +530,7 @@ class BotGatewayView(APIView):
                 return Response(
                     {"detail": "Лист не найден"}, status=status.HTTP_404_NOT_FOUND
                 )
+            st_c = self._status_col_from_header(data, st_c)
             one, allm = find_one_student_row(
                 data,
                 student_fio,
@@ -455,11 +557,10 @@ class BotGatewayView(APIView):
                 return Response(
                     {"detail": "Некорректная строка"}, status=status.HTTP_400_BAD_REQUEST
                 )
-            row = data[row_idx]
             rcol = pick_week_col_by_date(data, rd) or rcol_default
             # В выбранной недельной колонке храним только итоговый текст замечания,
             # без префикса даты (дата уже определяет саму колонку недели).
-            if remark_text and str(remark_text).strip():
+            if has_remark_text:
                 new_cell = str(remark_text).strip()
             else:
                 new_cell = no_phrase
@@ -468,12 +569,34 @@ class BotGatewayView(APIView):
             table.content = content
             table.needs_nextcloud_push = True
             table.save(update_fields=["content", "needs_nextcloud_push", "updated_at"])
+
+            evidence_saved = False
+            sheet_key = str(sheet_name or "").strip()
+            if not has_remark_text:
+                delete_remark_evidence(
+                    table=table,
+                    sheet_name=sheet_key,
+                    student_fio=student_fio,
+                    remark_date=rd,
+                )
+            elif evidence_raw is not None:
+                upsert_remark_evidence(
+                    table=table,
+                    sheet_name=sheet_key,
+                    student_fio=student_fio,
+                    remark_date=rd,
+                    raw=evidence_raw,
+                    filename=evidence_name,
+                    content_type=evidence_ct,
+                )
+                evidence_saved = True
         logger.info(
-            "Замечание по студенту: table=%s sheet=%s row=%s date=%s",
+            "Замечание по студенту: table=%s sheet=%s row=%s date=%s evidence=%s",
             table_id,
             sheet_name,
             row_idx,
             remark_date_raw,
+            evidence_saved,
         )
         return Response(
             {
@@ -481,6 +604,7 @@ class BotGatewayView(APIView):
                 "table_id": table.id,
                 "row_index": row_idx,
                 "remark_col": rcol,
+                "evidence_saved": evidence_saved,
             }
         )
 
@@ -511,6 +635,7 @@ class BotGatewayView(APIView):
                 return Response(
                     {"detail": "Лист не найден"}, status=status.HTTP_404_NOT_FOUND
                 )
+            st_c = self._status_col_from_header(data, st_c)
             one, allm = find_one_student_row(
                 data,
                 student_fio,
@@ -547,6 +672,195 @@ class BotGatewayView(APIView):
                 "status_col": st_c,
             }
         )
+
+    def _expel_student_to_trash(self, request, owner):
+        table_id = request.data.get("table_id")
+        sheet_name = (request.data.get("sheet_name") or "").strip()
+        student_fio = (request.data.get("student_fio") or "").strip()
+        group_filter = request.data.get("group") or request.data.get("group_name")
+        if not student_fio or not sheet_name:
+            return Response(
+                {"detail": "Нужны student_fio и sheet_name"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        fio_c, gcol, st_c, _ = self._bot_cols()
+        with transaction.atomic():
+            table = (
+                SectionTable.objects.select_for_update()
+                .filter(owner=owner, id=table_id)
+                .first()
+            )
+            if not table:
+                return Response(
+                    {"detail": "Таблица не найдена"}, status=status.HTTP_404_NOT_FOUND
+                )
+            _, data = self._sheet_data_for_table(table, sheet_name)
+            if data is None:
+                return Response(
+                    {"detail": "Лист не найден"}, status=status.HTTP_404_NOT_FOUND
+                )
+            st_c = self._status_col_from_header(data, st_c)
+            one, allm = find_one_student_row(
+                data,
+                student_fio,
+                fio_col=fio_c,
+                group_col=gcol,
+                status_col=st_c,
+                group_filter=group_filter,
+                skip_dismissed=False,
+            )
+            if not one:
+                return Response(
+                    {"detail": "Студент не найден"},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            if len(allm) > 1 and not (group_filter or "").strip():
+                return Response(
+                    {
+                        "detail": "Несколько совпадений, укажите group",
+                        "candidates": allm[:15],
+                    },
+                    status=status.HTTP_409_CONFLICT,
+                )
+            row_idx = int(one["row_index"])
+            row = data[row_idx] if 0 <= row_idx < len(data) else None
+            if not isinstance(row, list):
+                return Response(
+                    {"detail": "Строка студента повреждена"},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
+            row_copy = list(row)
+            group_name = normalize_cell(row_copy, gcol) or (group_filter or "")
+            fio_saved = normalize_cell(row_copy, fio_c) or student_fio
+            trash = StudentTrash.objects.create(
+                table=table,
+                sheet_name=sheet_name,
+                student_fio=fio_saved,
+                group_name=group_name,
+                row_data=row_copy,
+                original_row_index=row_idx,
+                expires_at=trash_expires_at(),
+            )
+            content = table.content if isinstance(table.content, dict) else {}
+            delete_sheet_row(content, sheet_name, row_idx)
+            table.content = content
+            table.needs_nextcloud_push = True
+            table.save(update_fields=["content", "needs_nextcloud_push", "updated_at"])
+        return Response(
+            {
+                "status": "ok",
+                "trash_id": trash.id,
+                "student_fio": trash.student_fio,
+                "group": trash.group_name,
+                "sheet_name": trash.sheet_name,
+                "expires_at": trash.expires_at.isoformat(),
+            }
+        )
+
+    def _list_trashed_students(self, request, owner):
+        table_id = request.data.get("table_id")
+        sheet_name = (request.data.get("sheet_name") or "").strip()
+        if not sheet_name:
+            return Response(
+                {"detail": "Нужен sheet_name"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        table = SectionTable.objects.filter(owner=owner, id=table_id).first()
+        if not table:
+            return Response(
+                {"detail": "Таблица не найдена"}, status=status.HTTP_404_NOT_FOUND
+            )
+        from django.utils import timezone
+
+        now = timezone.now()
+        qs = StudentTrash.objects.filter(
+            table=table,
+            sheet_name=sheet_name,
+            expires_at__gt=now,
+        ).order_by("student_fio", "-deleted_at")
+        items = [
+            {
+                "id": item.id,
+                "fio": item.student_fio,
+                "group": item.group_name,
+                "sheet_name": item.sheet_name,
+                "deleted_at": item.deleted_at.isoformat(),
+                "expires_at": item.expires_at.isoformat(),
+            }
+            for item in qs
+        ]
+        return Response({"students": items, "count": len(items)})
+
+    def _restore_student_from_trash(self, request, owner):
+        trash_id = request.data.get("trash_id")
+        if not trash_id:
+            return Response(
+                {"detail": "Нужен trash_id"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        fio_c, gcol, st_c, _ = self._bot_cols()
+        with transaction.atomic():
+            trash = (
+                StudentTrash.objects.select_for_update()
+                .select_related("table")
+                .filter(id=trash_id)
+                .first()
+            )
+            if not trash:
+                return Response(
+                    {"detail": "Запись корзины не найдена"},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            table = (
+                SectionTable.objects.select_for_update()
+                .filter(owner=owner, id=trash.table_id)
+                .first()
+            )
+            if not table:
+                return Response(
+                    {"detail": "Таблица не найдена"}, status=status.HTTP_404_NOT_FOUND
+                )
+            from django.utils import timezone
+
+            if trash.expires_at <= timezone.now():
+                delete_all_remark_evidence_for_student(
+                    table=table,
+                    sheet_name=trash.sheet_name,
+                    student_fio=trash.student_fio,
+                )
+                trash.delete()
+                return Response(
+                    {"detail": "Срок хранения в корзине истёк"},
+                    status=status.HTTP_410_GONE,
+                )
+            _, data = self._sheet_data_for_table(table, trash.sheet_name)
+            if data is None:
+                return Response(
+                    {"detail": "Лист не найден"}, status=status.HTTP_404_NOT_FOUND
+                )
+            row_values = list(trash.row_data or [])
+            group_name = trash.group_name or normalize_cell(row_values, gcol)
+            insert_at = find_insert_row_in_group(
+                data,
+                fio=trash.student_fio,
+                group=group_name,
+                fio_col=fio_c,
+                group_col=gcol,
+            )
+            content = table.content if isinstance(table.content, dict) else {}
+            insert_sheet_row(content, trash.sheet_name, insert_at, row_values)
+            table.content = content
+            table.needs_nextcloud_push = True
+            table.save(update_fields=["content", "needs_nextcloud_push", "updated_at"])
+            restored = {
+                "trash_id": trash.id,
+                "student_fio": trash.student_fio,
+                "group": group_name,
+                "sheet_name": trash.sheet_name,
+                "row_index": insert_at,
+            }
+            trash.delete()
+        return Response({"status": "ok", **restored})
 
     def _find_table(self, owner, section_type: str, title_contains: str):
         qs = SectionTable.objects.filter(owner=owner, section_type=section_type)
@@ -609,7 +923,7 @@ class BotGatewayView(APIView):
 
         logger.info(f"Таблица найдена: id={table.id}, title={table.title}")
         sheets, ai = get_workbook_sheets(table.content or {})
-        names = [str(s.get("name") or f"Лист{i + 1}") for i, s in enumerate(sheets)]
+        names = sheet_display_names(sheets)
         return Response(
             {
                 "id": table.id,
@@ -628,7 +942,7 @@ class BotGatewayView(APIView):
                 {"detail": "Таблица не найдена"}, status=status.HTTP_404_NOT_FOUND
             )
         sheets, ai = get_workbook_sheets(table.content or {})
-        names = [str(s.get("name") or f"Лист{i + 1}") for i, s in enumerate(sheets)]
+        names = sheet_display_names(sheets)
         return Response({"sheet_names": names, "active_sheet_index": ai})
 
     def _get_sheet_data(self, request, owner):
@@ -688,6 +1002,8 @@ class BotGatewayView(APIView):
         title_contains = (
             request.data.get("title_contains") or request.data.get("table_title") or ""
         )
+        year = request.data.get("year")
+        month = request.data.get("month")
         if table_id:
             table = SectionTable.objects.filter(owner=owner, id=table_id).first()
         else:
@@ -696,15 +1012,129 @@ class BotGatewayView(APIView):
             return Response(
                 {"detail": "Таблица не найдена"}, status=status.HTTP_404_NOT_FOUND
             )
+        content = table.content if isinstance(table.content, dict) else {}
+        filename = (table.title or "table").replace("/", "_").replace("\\", "_")
+        if year and month:
+            try:
+                year_i = int(year)
+                month_i = int(month)
+            except (TypeError, ValueError):
+                return Response(
+                    {"detail": "year и month должны быть числами"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            archive = SectionTableMonthlyArchive.objects.filter(
+                table=table, year=year_i, month=month_i
+            ).first()
+            if not archive:
+                return Response(
+                    {"detail": "Архив таблицы за указанный месяц не найден"},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            content = archive.content if isinstance(archive.content, dict) else {}
+            filename = f"{filename}_{month_i:02d}.{year_i}"
         xlsx = export_custom_sheet_to_xlsx_bytes(
-            table.title, table.content if isinstance(table.content, dict) else {}
+            table.title, content
         )
         resp = HttpResponse(
             xlsx,
             content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
-        filename = (table.title or "table").replace("/", "_").replace("\\", "_")
         resp["Content-Disposition"] = f'attachment; filename="{filename}.xlsx"'
+        return resp
+
+    def _list_report_archives(self, request, owner):
+        table_id = request.data.get("table_id")
+        table = SectionTable.objects.filter(owner=owner, id=table_id).first()
+        if not table:
+            return Response(
+                {"detail": "Таблица не найдена"}, status=status.HTTP_404_NOT_FOUND
+            )
+        archives = [
+            {
+                "year": archive.year,
+                "month": archive.month,
+                "label": f"{archive.month:02d}.{archive.year}",
+            }
+            for archive in table.monthly_archives.order_by("-year", "-month")[:3]
+        ]
+        return Response({"archives": archives})
+
+    def _export_monitoring_report_docx(self, request, owner):
+        table_id = request.data.get("table_id")
+        sheet_name = (request.data.get("sheet_name") or "").strip()
+        if not sheet_name:
+            return Response(
+                {"detail": "Нужен sheet_name"}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        table = SectionTable.objects.filter(owner=owner, id=table_id).first()
+        if not table:
+            return Response(
+                {"detail": "Таблица не найдена"}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        year = request.data.get("year")
+        month = request.data.get("month")
+        content = table.content if isinstance(table.content, dict) else {}
+        filename_year = filename_month = None
+        if year and month:
+            try:
+                year_i = int(year)
+                month_i = int(month)
+            except (TypeError, ValueError):
+                return Response(
+                    {"detail": "year и month должны быть числами"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            archive = SectionTableMonthlyArchive.objects.filter(
+                table=table, year=year_i, month=month_i
+            ).first()
+            if not archive:
+                return Response(
+                    {"detail": "Архив за указанный месяц не найден"},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            content = archive.content if isinstance(archive.content, dict) else {}
+            filename_year, filename_month = year_i, month_i
+        else:
+            # Как Excel: берём актуальное содержимое из БД без rollover —
+            # иначе apply_month_headers может очистить колонки замечаний перед отчётом.
+            content = table.content if isinstance(table.content, dict) else {}
+
+        report_year = report_month = None
+        if filename_year and filename_month:
+            report_year, report_month = filename_year, filename_month
+        else:
+            from bot_api.monthly_rollover import detect_sheet_month
+
+            sheets, _ = get_workbook_sheets(content)
+            sh = find_sheet_by_name(sheets, sheet_name)
+            sheet_data = sh.get("data") if sh and isinstance(sh.get("data"), list) else []
+            if sheet_data:
+                detected = detect_sheet_month(sheet_data)
+                if detected:
+                    report_year, report_month = detected
+
+        evidence_map = load_evidence_bytes_map(table=table, sheet_name=sheet_name)
+        try:
+            docx = generate_monitoring_report_docx(
+                table_title=table.title,
+                content=content,
+                sheet_name=sheet_name,
+                report_year=report_year,
+                report_month=report_month,
+                evidence_by_fio_date=evidence_map,
+            )
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_404_NOT_FOUND)
+
+        resp = HttpResponse(
+            docx,
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+        filename = report_filename(sheet_name, filename_year, filename_month)
+        resp["Content-Disposition"] = f'attachment; filename="{filename}"'
         return resp
 
 
