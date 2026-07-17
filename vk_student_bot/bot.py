@@ -330,6 +330,12 @@ class CNCApi:
     def restore_student_from_trash(self, trash_id: int) -> dict:
         return self.post("restore_student_from_trash", {"trash_id": trash_id})
 
+    def run_social_moderation(self, max_students: Optional[int] = None) -> dict:
+        body: Dict[str, Any] = {}
+        if max_students:
+            body["max_students"] = max_students
+        return self.post("run_social_moderation", body)
+
     def export_table_xlsx(
         self, table_id: int, year: Optional[int] = None, month: Optional[int] = None
     ) -> tuple[bytes, str]:
@@ -739,6 +745,8 @@ class StudentBot:
         try:
             if cmd == "main":
                 self.show_main(peer_id, "Главное меню")
+            elif cmd == "ai_scan":
+                self.start_ai_scan(peer_id, ctx)
             elif cmd == "tbls":
                 self.show_table_groups(peer_id, ctx)
             elif cmd == "tbl":
@@ -1013,6 +1021,8 @@ class StudentBot:
         ctx.current_view = "main"
         kb = VkKeyboard(one_time=False, inline=False)
         kb.add_button("Алабуга Политех", VkKeyboardColor.PRIMARY, payload=_pl("tbls"))
+        kb.add_line()
+        kb.add_button("ИИ: проверка соцсетей", VkKeyboardColor.POSITIVE, payload=_pl("ai_scan"))
         suffix = []
         if ctx.table_group_key and ctx.table_group_key in TABLE_GROUPS_BY_KEY:
             suffix.append(f"Группа таблицы: {TABLE_GROUPS_BY_KEY[ctx.table_group_key]['title']}")
@@ -1025,6 +1035,27 @@ class StudentBot:
         suffix.append(f"Дата: {ctx.selected_date}")
         body = text + "\n\n" + " · ".join(suffix)
         self.send(peer_id, body, keyboard=kb)
+
+    def start_ai_scan(self, peer_id: int, ctx: UserCtx):
+        self.send(
+            peer_id,
+            "Запускаю ИИ-проверку соцсетей… Это может занять несколько минут. "
+            "Бот ответит, когда задача поставлена в очередь.",
+        )
+        try:
+            result = self.api.run_social_moderation()
+        except CNCApiError as e:
+            self.send(peer_id, f"❌ Не удалось запустить проверку: {e}")
+            self.show_main(peer_id, "Главное меню")
+            return
+        detail = (result or {}).get("detail") or "Проверка запущена."
+        self.send(
+            peer_id,
+            f"✅ {detail}\n\n"
+            "Когда Celery закончит работу — откройте нужное направление и "
+            "нажмите «Отчет Word».",
+        )
+        self.show_main(peer_id, "Главное меню")
 
     def show_table_groups(self, peer_id: int, ctx: UserCtx):
         ctx.current_view = "table_groups"

@@ -139,6 +139,8 @@ class BotGatewayView(APIView):
             return self._list_report_archives(request, owner)
         if action == "export_monitoring_report_docx":
             return self._export_monitoring_report_docx(request, owner)
+        if action == "run_social_moderation":
+            return self._run_social_moderation(request, owner)
         return Response(
             {"detail": f"Неизвестное action: {action}"},
             status=status.HTTP_400_BAD_REQUEST,
@@ -881,6 +883,33 @@ class BotGatewayView(APIView):
             table = qs_fallback.order_by("-updated_at").first()
 
         return table
+
+    def _run_social_moderation(self, request, owner):
+        """Запуск ИИ-проверки соцсетей из VK-бота (через Celery)."""
+        max_students = request.data.get("max_students")
+        try:
+            max_students_int = int(max_students) if max_students not in (None, "") else 0
+        except (TypeError, ValueError):
+            max_students_int = 0
+
+        from bot_api.tasks import run_social_moderation_scan_task
+
+        async_result = run_social_moderation_scan_task.delay(
+            force=True,
+            max_students=max_students_int or None,
+        )
+        return Response(
+            {
+                "status": "ok",
+                "queued": True,
+                "task_id": str(async_result.id),
+                "detail": (
+                    "Проверка соцсетей поставлена в очередь. "
+                    "Когда закончится — замечания и скрины появятся в таблице; "
+                    "после этого жмите «Отчет Word»."
+                ),
+            }
+        )
 
     def _lookup_table(self, request, owner):
         section_type = request.data.get("section_type") or "rangers"

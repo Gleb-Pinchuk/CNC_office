@@ -111,16 +111,19 @@ def purge_expired_student_trash(self):
 
 
 @shared_task(bind=True, ignore_result=True)
-def run_social_moderation_scan_task(self):
-    """Периодический авто-обход соцсетей студентов и запись AI-замечаний."""
-    if not getattr(settings, "SOCIAL_MODERATION_ENABLED", False):
+def run_social_moderation_scan_task(self, force=False, max_students=None):
+    """Периодический / ручной обход соцсетей и запись AI-замечаний + evidence."""
+    if not force and not getattr(settings, "SOCIAL_MODERATION_ENABLED", False):
         logger.info("Social moderation is disabled; skip")
         return None
     from bot_api.moderation.service import run_social_moderation_scan
 
+    limit = max_students
+    if limit is None:
+        limit = getattr(settings, "SOCIAL_MOD_MAX_STUDENTS_PER_RUN", 0) or None
     stats = run_social_moderation_scan(
         dry_run=False,
-        max_students=getattr(settings, "SOCIAL_MOD_MAX_STUDENTS_PER_RUN", 0) or None,
+        max_students=limit,
         save_evidence=True,
     )
     logger.info(
