@@ -108,13 +108,7 @@ def _ensure_cell(data: list, row: int, col: int):
         r.append("")
 
 
-def set_cell_value(
-    content: dict, sheet_name: Optional[str], row: int, col: int, value: str
-) -> dict:
-    """
-    Пишет в content.custom_sheet, возвращает обновлённый content (тот же dict).
-    row, col — 0-based (0 = первая строка таблицы, обычно заголовки).
-    """
+def _ensure_sheet(content: dict, sheet_name: Optional[str], *, min_row: int = 0, min_col: int = 0):
     if not isinstance(content, dict):
         content = {}
     if not isinstance(content.get("custom_sheet"), dict):
@@ -124,8 +118,8 @@ def set_cell_value(
     if not sheets:
         new_sheet = {
             "name": "Лист1",
-            "rows": max(20, row + 1),
-            "cols": max(10, col + 1),
+            "rows": max(20, min_row + 1),
+            "cols": max(10, min_col + 1),
             "data": [],
             "styles": {},
         }
@@ -150,6 +144,44 @@ def set_cell_value(
     if not isinstance(data, list):
         data = []
         sh["data"] = data
+    return content, sh, data
+
+
+def set_cell_value(
+    content: dict, sheet_name: Optional[str], row: int, col: int, value: str
+) -> dict:
+    """
+    Пишет в content.custom_sheet, возвращает обновлённый content (тот же dict).
+    row, col — 0-based (0 = первая строка таблицы, обычно заголовки).
+    """
+    content, sh, data = _ensure_sheet(content, sheet_name, min_row=row, min_col=col)
     _ensure_cell(data, row, col)
     data[row][col] = value if value is not None else ""
+    if isinstance(sh.get("rows"), int):
+        sh["rows"] = max(int(sh["rows"]), len(data))
+    return content
+
+
+def delete_sheet_row(content: dict, sheet_name: Optional[str], row: int) -> dict:
+    """Удаляет строку data[row] (0-based)."""
+    content, sh, data = _ensure_sheet(content, sheet_name)
+    if 0 <= row < len(data):
+        data.pop(row)
+        if isinstance(sh.get("rows"), int):
+            sh["rows"] = max(len(data), 1)
+    return content
+
+
+def insert_sheet_row(
+    content: dict, sheet_name: Optional[str], row: int, values: list
+) -> dict:
+    """Вставляет копию values в data на позицию row (0-based)."""
+    row_values = list(values) if values is not None else []
+    content, sh, data = _ensure_sheet(
+        content, sheet_name, min_row=row, min_col=max(len(row_values) - 1, 0)
+    )
+    idx = max(0, min(int(row), len(data)))
+    data.insert(idx, row_values)
+    if isinstance(sh.get("rows"), int):
+        sh["rows"] = max(int(sh["rows"]), len(data))
     return content

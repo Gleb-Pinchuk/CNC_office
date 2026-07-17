@@ -79,3 +79,31 @@ def rollover_monthly_tables(self):
             logger.exception("Monthly rollover failed for key=%s", cfg.key)
             raise
     return results
+
+
+@shared_task(bind=True, ignore_result=True)
+def purge_expired_student_trash(self):
+    """Ежедневно: удалить из корзины записи старше TTL вместе со скринами."""
+    from django.utils import timezone
+
+    from bot_api.evidence import delete_all_remark_evidence_for_student
+    from bot_api.models import StudentTrash
+
+    now = timezone.now()
+    expired = list(StudentTrash.objects.filter(expires_at__lte=now).select_related("table"))
+    removed = 0
+    for item in expired:
+        try:
+            delete_all_remark_evidence_for_student(
+                table=item.table,
+                sheet_name=item.sheet_name,
+                student_fio=item.student_fio,
+            )
+            item.delete()
+            removed += 1
+        except Exception:
+            logger.exception(
+                "Trash purge failed id=%s fio=%s", item.id, item.student_fio
+            )
+    logger.info("Trash purge: removed %s of %s expired", removed, len(expired))
+    return {"removed": removed, "candidates": len(expired)}

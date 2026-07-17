@@ -15,16 +15,25 @@ from rest_framework.views import APIView
 from api.xlsx_export import export_custom_sheet_to_xlsx_bytes
 from sections.models import SectionTable, SectionTableMonthlyArchive
 
-from .evidence import delete_remark_evidence, load_evidence_bytes_map, upsert_remark_evidence
+from .evidence import (
+    delete_all_remark_evidence_for_student,
+    delete_remark_evidence,
+    load_evidence_bytes_map,
+    upsert_remark_evidence,
+)
+from .models import StudentTrash
 from .remark_utils import parse_input_date
 from .reports import generate_monitoring_report_docx, report_filename
 from .sheet_utils import (
+    delete_sheet_row,
     find_sheet_by_name,
     get_workbook_sheets,
+    insert_sheet_row,
     set_cell_value,
     sheet_display_names,
 )
-from .student_sheet import find_one_student_row, list_groups, search_students
+from .student_sheet import find_one_student_row, list_groups, normalize_cell, search_students
+from .trash import find_insert_row_in_group, trash_expires_at
 from .week_column import pick_week_col_by_date
 
 logger = logging.getLogger(__name__)
@@ -118,6 +127,12 @@ class BotGatewayView(APIView):
             return self._get_student_profile(request, owner)
         if action == "set_student_status":
             return self._set_student_status(request, owner)
+        if action == "expel_student_to_trash":
+            return self._expel_student_to_trash(request, owner)
+        if action == "list_trashed_students":
+            return self._list_trashed_students(request, owner)
+        if action == "restore_student_from_trash":
+            return self._restore_student_from_trash(request, owner)
         if action == "export_table_xlsx":
             return self._export_table_xlsx(request, owner)
         if action == "list_report_archives":
@@ -657,6 +672,195 @@ class BotGatewayView(APIView):
                 "status_col": st_c,
             }
         )
+
+    def _expel_student_to_trash(self, request, owner):
+        table_id = request.data.get("table_id")
+        sheet_name = (request.data.get("sheet_name") or "").strip()
+        student_fio = (request.data.get("student_fio") or "").strip()
+        group_filter = request.data.get("group") or request.data.get("group_name")
+        if not student_fio or not sheet_name:
+            return Response(
+                {"detail": "Нужны student_fio и sheet_name"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        fio_c, gcol, st_c, _ = self._bot_cols()
+        with transaction.atomic():
+            table = (
+                SectionTable.objects.select_for_update()
+                .filter(owner=owner, id=table_id)
+                .first()
+            )
+            if not table:
+                return Response(
+                    {"detail": "Таблица не найдена"}, status=status.HTTP_404_NOT_FOUND
+                )
+            _, data = self._sheet_data_for_table(table, sheet_name)
+            if data is None:
+                return Response(
+                    {"detail": "Лист не найден"}, status=status.HTTP_404_NOT_FOUND
+                )
+            st_c = self._status_col_from_header(data, st_c)
+            one, allm = find_one_student_row(
+                data,
+                student_fio,
+                fio_col=fio_c,
+                group_col=gcol,
+                status_col=st_c,
+                group_filter=group_filter,
+                skip_dismissed=False,
+            )
+            if not one:
+                return Response(
+                    {"detail": "Студент не найден"},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            if len(allm) > 1 and not (group_filter or "").strip():
+                return Response(
+                    {
+                        "detail": "Несколько совпадений, укажите group",
+                        "candidates": allm[:15],
+                    },
+                    status=status.HTTP_409_CONFLICT,
+                )
+            row_idx = int(one["row_index"])
+            row = data[row_idx] if 0 <= row_idx < len(data) else None
+            if not isinstance(row, list):
+                return Response(
+                    {"detail": "Строка студента повреждена"},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
+            row_copy = list(row)
+            group_name = normalize_cell(row_copy, gcol) or (group_filter or "")
+            fio_saved = normalize_cell(row_copy, fio_c) or student_fio
+            trash = StudentTrash.objects.create(
+                table=table,
+                sheet_name=sheet_name,
+                student_fio=fio_saved,
+                group_name=group_name,
+                row_data=row_copy,
+                original_row_index=row_idx,
+                expires_at=trash_expires_at(),
+            )
+            content = table.content if isinstance(table.content, dict) else {}
+            delete_sheet_row(content, sheet_name, row_idx)
+            table.content = content
+            table.needs_nextcloud_push = True
+            table.save(update_fields=["content", "needs_nextcloud_push", "updated_at"])
+        return Response(
+            {
+                "status": "ok",
+                "trash_id": trash.id,
+                "student_fio": trash.student_fio,
+                "group": trash.group_name,
+                "sheet_name": trash.sheet_name,
+                "expires_at": trash.expires_at.isoformat(),
+            }
+        )
+
+    def _list_trashed_students(self, request, owner):
+        table_id = request.data.get("table_id")
+        sheet_name = (request.data.get("sheet_name") or "").strip()
+        if not sheet_name:
+            return Response(
+                {"detail": "Нужен sheet_name"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        table = SectionTable.objects.filter(owner=owner, id=table_id).first()
+        if not table:
+            return Response(
+                {"detail": "Таблица не найдена"}, status=status.HTTP_404_NOT_FOUND
+            )
+        from django.utils import timezone
+
+        now = timezone.now()
+        qs = StudentTrash.objects.filter(
+            table=table,
+            sheet_name=sheet_name,
+            expires_at__gt=now,
+        ).order_by("student_fio", "-deleted_at")
+        items = [
+            {
+                "id": item.id,
+                "fio": item.student_fio,
+                "group": item.group_name,
+                "sheet_name": item.sheet_name,
+                "deleted_at": item.deleted_at.isoformat(),
+                "expires_at": item.expires_at.isoformat(),
+            }
+            for item in qs
+        ]
+        return Response({"students": items, "count": len(items)})
+
+    def _restore_student_from_trash(self, request, owner):
+        trash_id = request.data.get("trash_id")
+        if not trash_id:
+            return Response(
+                {"detail": "Нужен trash_id"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        fio_c, gcol, st_c, _ = self._bot_cols()
+        with transaction.atomic():
+            trash = (
+                StudentTrash.objects.select_for_update()
+                .select_related("table")
+                .filter(id=trash_id)
+                .first()
+            )
+            if not trash:
+                return Response(
+                    {"detail": "Запись корзины не найдена"},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            table = (
+                SectionTable.objects.select_for_update()
+                .filter(owner=owner, id=trash.table_id)
+                .first()
+            )
+            if not table:
+                return Response(
+                    {"detail": "Таблица не найдена"}, status=status.HTTP_404_NOT_FOUND
+                )
+            from django.utils import timezone
+
+            if trash.expires_at <= timezone.now():
+                delete_all_remark_evidence_for_student(
+                    table=table,
+                    sheet_name=trash.sheet_name,
+                    student_fio=trash.student_fio,
+                )
+                trash.delete()
+                return Response(
+                    {"detail": "Срок хранения в корзине истёк"},
+                    status=status.HTTP_410_GONE,
+                )
+            _, data = self._sheet_data_for_table(table, trash.sheet_name)
+            if data is None:
+                return Response(
+                    {"detail": "Лист не найден"}, status=status.HTTP_404_NOT_FOUND
+                )
+            row_values = list(trash.row_data or [])
+            group_name = trash.group_name or normalize_cell(row_values, gcol)
+            insert_at = find_insert_row_in_group(
+                data,
+                fio=trash.student_fio,
+                group=group_name,
+                fio_col=fio_c,
+                group_col=gcol,
+            )
+            content = table.content if isinstance(table.content, dict) else {}
+            insert_sheet_row(content, trash.sheet_name, insert_at, row_values)
+            table.content = content
+            table.needs_nextcloud_push = True
+            table.save(update_fields=["content", "needs_nextcloud_push", "updated_at"])
+            restored = {
+                "trash_id": trash.id,
+                "student_fio": trash.student_fio,
+                "group": group_name,
+                "sheet_name": trash.sheet_name,
+                "row_index": insert_at,
+            }
+            trash.delete()
+        return Response({"status": "ok", **restored})
 
     def _find_table(self, owner, section_type: str, title_contains: str):
         qs = SectionTable.objects.filter(owner=owner, section_type=section_type)

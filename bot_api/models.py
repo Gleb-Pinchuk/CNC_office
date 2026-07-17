@@ -52,3 +52,36 @@ class RemarkEvidence(models.Model):
     def delete_file(self) -> None:
         if self.image:
             self.image.delete(save=False)
+
+
+class StudentTrash(models.Model):
+    """Отчисленный студент: полная строка листа + TTL 30 дней."""
+
+    table = models.ForeignKey(
+        "sections.SectionTable",
+        on_delete=models.CASCADE,
+        related_name="trashed_students",
+        verbose_name="Таблица",
+    )
+    sheet_name = models.CharField(max_length=255, verbose_name="Лист / направление")
+    student_fio = models.CharField(max_length=255, verbose_name="ФИО студента")
+    group_name = models.CharField(max_length=255, blank=True, default="", verbose_name="Группа")
+    row_data = models.JSONField(default=list, verbose_name="Строка листа")
+    original_row_index = models.PositiveIntegerField(
+        null=True, blank=True, verbose_name="Исходный индекс строки"
+    )
+    deleted_at = models.DateTimeField(auto_now_add=True, verbose_name="Удалён")
+    expires_at = models.DateTimeField(verbose_name="Удалить навсегда после")
+
+    class Meta:
+        verbose_name = "Студент в корзине"
+        verbose_name_plural = "Корзина студентов"
+        ordering = ["-deleted_at"]
+        indexes = [
+            models.Index(fields=["table", "sheet_name", "expires_at"]),
+            models.Index(fields=["expires_at"]),
+            models.Index(fields=["table", "sheet_name", "student_fio"]),
+        ]
+
+    def __str__(self):
+        return f"{self.sheet_name}:{self.student_fio} (до {self.expires_at.date()})"

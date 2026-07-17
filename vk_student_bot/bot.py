@@ -303,6 +303,31 @@ class CNCApi:
             body["group"] = group
         return self.post("set_student_status", body)
 
+    def expel_student_to_trash(
+        self,
+        table_id: int,
+        sheet_name: str,
+        student_fio: str,
+        group: Optional[str],
+    ) -> dict:
+        body: Dict[str, Any] = {
+            "table_id": table_id,
+            "sheet_name": sheet_name,
+            "student_fio": student_fio,
+        }
+        if group:
+            body["group"] = group
+        return self.post("expel_student_to_trash", body)
+
+    def list_trashed_students(self, table_id: int, sheet_name: str) -> List[dict]:
+        return self.post(
+            "list_trashed_students",
+            {"table_id": table_id, "sheet_name": sheet_name},
+        ).get("students", [])
+
+    def restore_student_from_trash(self, trash_id: int) -> dict:
+        return self.post("restore_student_from_trash", {"trash_id": trash_id})
+
     def export_table_xlsx(
         self, table_id: int, year: Optional[int] = None, month: Optional[int] = None
     ) -> tuple[bytes, str]:
@@ -390,6 +415,8 @@ class UserCtx:
     directions_cache: List[str] = field(default_factory=list)
     groups_cache: List[str] = field(default_factory=list)
     students_cache: List[dict] = field(default_factory=list)
+    trash_cache: List[dict] = field(default_factory=list)
+    trash_page: int = 0
     report_archives_cache: List[dict] = field(default_factory=list)
 
 
@@ -743,10 +770,27 @@ class StudentBot:
                     "Введите текст замечания одним сообщением.\n"
                     "После текста бот попросит прислать скрин (фото или jpg/png/webp).",
                 )
-            elif cmd == "stu_st":
-                self.set_status(peer_id, ctx, "учится")
             elif cmd == "stu_ex":
-                self.set_status(peer_id, ctx, "отчислен")
+                self.confirm_expel(peer_id, ctx)
+            elif cmd == "ex_yes":
+                self.expel_student(peer_id, ctx)
+            elif cmd == "ex_no":
+                self.send(peer_id, "Отчисление отменено.")
+                self.show_student_actions(peer_id, ctx)
+            elif cmd == "trash":
+                self.show_trash(peer_id, ctx)
+            elif cmd == "tpage":
+                ctx.trash_page = int(p.get("p", 0))
+                self.show_trash(peer_id, ctx, refresh=False)
+            elif cmd == "ti":
+                idx = int(p.get("i", -1))
+                self.confirm_restore(peer_id, ctx, idx)
+            elif cmd == "tr_yes":
+                idx = int(p.get("i", -1))
+                self.restore_student(peer_id, ctx, idx)
+            elif cmd == "tr_no":
+                self.send(peer_id, "Восстановление отменено.")
+                self.show_trash(peer_id, ctx, refresh=False)
             elif cmd == "card":
                 self.show_student_profile(peer_id, ctx)
             else:
@@ -942,6 +986,8 @@ class StudentBot:
             kb = VkKeyboard(one_time=False, inline=False)
             kb.add_button("🎓 Направления", VkKeyboardColor.PRIMARY, payload=_pl("dirs"))
             kb.add_line()
+            kb.add_button("🗑 Корзина", VkKeyboardColor.SECONDARY, payload=_pl("trash"))
+            kb.add_line()
             kb.add_button("📄 Отчет Word", VkKeyboardColor.POSITIVE, payload=_pl("rep_cur"))
             kb.add_line()
             kb.add_button("📤 Экспорт Excel", VkKeyboardColor.POSITIVE, payload=_pl("exp_xlsx"))
@@ -975,6 +1021,8 @@ class StudentBot:
                 )
             kb.add_line()
         kb.add_button("🎓 Направления", VkKeyboardColor.SECONDARY, payload=_pl("dirs"))
+        kb.add_line()
+        kb.add_button("🗑 Корзина", VkKeyboardColor.SECONDARY, payload=_pl("trash"))
         kb.add_line()
         kb.add_button("📄 Отчет Word", VkKeyboardColor.POSITIVE, payload=_pl("rep_cur"))
         kb.add_button("🗂 Архив отчетов", VkKeyboardColor.SECONDARY, payload=_pl("rep_arc"))
@@ -1103,7 +1151,6 @@ class StudentBot:
         kb.add_line()
         kb.add_button("✍️ Замечание", VkKeyboardColor.NEGATIVE, payload=_pl("rem_txt"))
         kb.add_line()
-        kb.add_button("🎓 Учится", VkKeyboardColor.PRIMARY, payload=_pl("stu_st"))
         kb.add_button("🚫 Отчислен", VkKeyboardColor.SECONDARY, payload=_pl("stu_ex"))
         kb.add_line()
         kb.add_button("📅 Выбор даты", VkKeyboardColor.SECONDARY, payload=_pl("date"))
@@ -1206,6 +1253,175 @@ class StudentBot:
         else:
             self.send(peer_id, f"✅ Записано «замечаний нет» на {ctx.selected_date}.")
         self._go_next_student_or_list(peer_id, ctx)
+
+    def confirm_expel(self, peer_id: int, ctx: UserCtx):
+        if not (ctx.table_group_key and ctx.direction and ctx.student):
+            self.show_main(peer_id, "Сначала выберите студента.")
+            return
+        kb = VkKeyboard(one_time=False, inline=False)
+        kb.add_button("✅ Да, в корзину", VkKeyboardColor.NEGATIVE, payload=_pl("ex_yes"))
+        kb.add_line()
+        kb.add_button("❌ Нет", VkKeyboardColor.SECONDARY, payload=_pl("ex_no"))
+        self.send(
+            peer_id,
+            (
+                "Удалить студента в корзину на 30 дней?\n\n"
+                f"👤 {ctx.student}\n"
+                f"🏷 Группа: {ctx.group or '—'}\n"
+                f"📚 Направление: {ctx.direction}\n\n"
+                "Строка целиком (ФИО, соцсети, замечания) уйдёт из основной таблицы. "
+                "Скрины замечаний сохранятся до восстановления или истечения срока."
+            ),
+            keyboard=kb,
+        )
+
+    def expel_student(self, peer_id: int, ctx: UserCtx):
+        if not (ctx.table_group_key and ctx.direction and ctx.student):
+            self.show_main(peer_id, "Сначала выберите студента.")
+            return
+        students = self._student_list_snapshot(ctx)
+        current = (ctx.student or "").strip()
+        idx = next(
+            (i for i, s in enumerate(students) if (s.get("fio") or "").strip() == current),
+            -1,
+        )
+        try:
+            result = self.api.expel_student_to_trash(
+                self.table_id(ctx.table_group_key),
+                ctx.direction,
+                ctx.student,
+                ctx.group,
+            )
+        except CNCApiError as e:
+            self.send(peer_id, f"❌ Не удалось отчислить: {e}")
+            self.show_student_actions(peer_id, ctx)
+            return
+        self.send(
+            peer_id,
+            f"✅ «{result.get('student_fio') or ctx.student}» перемещён в корзину на 30 дней.",
+        )
+        ctx.students_cache = []
+        ctx.trash_cache = []
+        if idx >= 0 and idx + 1 < len(students):
+            next_fio = (students[idx + 1].get("fio") or "").strip()
+            if next_fio:
+                ctx.student = next_fio
+                ctx.students_page = (idx + 1) // PER_PAGE
+                self.show_student_profile(peer_id, ctx)
+                return
+        ctx.student = None
+        self.send(peer_id, "✅ Группа пройдена. Выберите студента или другую группу.")
+        self.show_students(peer_id, ctx)
+
+    def show_trash(self, peer_id: int, ctx: UserCtx, *, refresh: bool = True):
+        if not ctx.table_group_key:
+            self.show_table_groups(peer_id, ctx)
+            return
+        if not ctx.direction:
+            self.show_directions(peer_id, ctx)
+            return
+        if refresh or not ctx.trash_cache:
+            try:
+                ctx.trash_cache = self.api.list_trashed_students(
+                    self.table_id(ctx.table_group_key), ctx.direction
+                )
+                ctx.trash_page = 0
+            except CNCApiError as e:
+                self.send(peer_id, f"❌ Не удалось открыть корзину: {e}")
+                self.show_groups(peer_id, ctx)
+                return
+        items = ctx.trash_cache
+        kb = VkKeyboard(one_time=False, inline=False)
+        if not items:
+            kb.add_button("📋 К группам", VkKeyboardColor.PRIMARY, payload=_pl("grps"))
+            kb.add_line()
+            kb.add_button("🎓 Направления", VkKeyboardColor.SECONDARY, payload=_pl("dirs"))
+            kb.add_line()
+            kb.add_button("🔙 Меню", VkKeyboardColor.SECONDARY, payload=_pl("main"))
+            self.send(
+                peer_id,
+                f"🗑 Корзина направления «{ctx.direction}» пуста.",
+                keyboard=kb,
+            )
+            return
+        ctx.current_view = "trash"
+        total_pages = max(1, (len(items) + PER_PAGE - 1) // PER_PAGE)
+        page = max(0, min(ctx.trash_page, total_pages - 1))
+        ctx.trash_page = page
+        start = page * PER_PAGE
+        shown = items[start : start + PER_PAGE]
+        for i, item in enumerate(shown):
+            fio = (item.get("fio") or "").strip() or "—"
+            kb.add_button(fio[:40], VkKeyboardColor.PRIMARY, payload=_pl("ti", i=start + i))
+            kb.add_line()
+        if total_pages > 1:
+            if page > 0:
+                kb.add_button(
+                    "⬅️ Назад",
+                    VkKeyboardColor.SECONDARY,
+                    payload=_pl("tpage", p=page - 1),
+                )
+            if page < total_pages - 1:
+                kb.add_button(
+                    "➡️ Вперед",
+                    VkKeyboardColor.SECONDARY,
+                    payload=_pl("tpage", p=page + 1),
+                )
+            kb.add_line()
+        kb.add_button("📋 К группам", VkKeyboardColor.PRIMARY, payload=_pl("grps"))
+        kb.add_line()
+        kb.add_button("🔙 Меню", VkKeyboardColor.SECONDARY, payload=_pl("main"))
+        self.send(
+            peer_id,
+            f"🗑 Корзина «{ctx.direction}» ({page + 1}/{total_pages}). Выберите студента:",
+            keyboard=kb,
+        )
+
+    def confirm_restore(self, peer_id: int, ctx: UserCtx, idx: int):
+        if not (0 <= idx < len(ctx.trash_cache)):
+            self.show_trash(peer_id, ctx)
+            return
+        item = ctx.trash_cache[idx]
+        kb = VkKeyboard(one_time=False, inline=False)
+        kb.add_button("✅ Да", VkKeyboardColor.POSITIVE, payload=_pl("tr_yes", i=idx))
+        kb.add_line()
+        kb.add_button("❌ Нет", VkKeyboardColor.SECONDARY, payload=_pl("tr_no"))
+        self.send(
+            peer_id,
+            (
+                "Вы точно хотите восстановить данного студента?\n\n"
+                f"👤 {item.get('fio') or '—'}\n"
+                f"🏷 Группа: {item.get('group') or '—'}\n"
+                f"📚 Направление: {ctx.direction}"
+            ),
+            keyboard=kb,
+        )
+
+    def restore_student(self, peer_id: int, ctx: UserCtx, idx: int):
+        if not (0 <= idx < len(ctx.trash_cache)):
+            self.show_trash(peer_id, ctx)
+            return
+        item = ctx.trash_cache[idx]
+        trash_id = item.get("id")
+        if not trash_id:
+            self.send(peer_id, "❌ Нет id записи корзины.")
+            self.show_trash(peer_id, ctx)
+            return
+        try:
+            result = self.api.restore_student_from_trash(int(trash_id))
+        except CNCApiError as e:
+            self.send(peer_id, f"❌ Не удалось восстановить: {e}")
+            self.show_trash(peer_id, ctx)
+            return
+        fio = result.get("student_fio") or item.get("fio") or "студент"
+        group = result.get("group") or item.get("group") or "—"
+        self.send(
+            peer_id,
+            f"✅ «{fio}» восстановлен в группу «{group}» по алфавиту фамилии.",
+        )
+        ctx.trash_cache = []
+        ctx.students_cache = []
+        self.show_trash(peer_id, ctx)
 
     def set_status(self, peer_id: int, ctx: UserCtx, status_value: str):
         if not (ctx.table_group_key and ctx.direction and ctx.student):

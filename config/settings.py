@@ -87,6 +87,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "bot_api.tasks.rollover_monthly_tables",
         "schedule": crontab(hour=3, minute=10),
     },
+    "purge-expired-student-trash": {
+        "task": "bot_api.tasks.purge_expired_student_trash",
+        "schedule": crontab(hour=4, minute=15),
+    },
 }
 
 MIDDLEWARE = [

@@ -128,6 +128,29 @@ def delete_remark_evidence(
     return True
 
 
+@transaction.atomic
+def delete_all_remark_evidence_for_student(
+    *,
+    table: SectionTable,
+    sheet_name: str,
+    student_fio: str,
+) -> int:
+    """Удаляет все скрины замечаний студента на листе. Возвращает число удалённых."""
+    fio = normalize_fio(student_fio)
+    sheet = (sheet_name or "").strip()
+    qs = list(
+        RemarkEvidence.objects.select_for_update().filter(
+            table=table,
+            sheet_name=sheet,
+            student_fio=fio,
+        )
+    )
+    for obj in qs:
+        obj.delete_file()
+        obj.delete()
+    return len(qs)
+
+
 def load_evidence_bytes_map(
     *,
     table: SectionTable,
