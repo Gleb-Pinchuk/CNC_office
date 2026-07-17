@@ -65,7 +65,7 @@ def test_content_month_detects_previous_year_december_from_january():
 
 
 @pytest.mark.django_db
-def test_rollover_table_archives_previous_month_and_keeps_three_archives():
+def test_rollover_table_archives_previous_month_and_clears_live_cells():
     from django.contrib.auth import get_user_model
 
     owner = get_user_model().objects.create_user(username="bot_owner", password="pass")
@@ -93,23 +93,28 @@ def test_rollover_table_archives_previous_month_and_keeps_three_archives():
     result = rollover_table_if_needed(table, today=date(2026, 5, 1), fallback_col=5)
 
     assert result["changed"] is True
-    assert SectionTableMonthlyArchive.objects.filter(table=table, year=2026, month=4).exists()
+    assert result["reason"] == "month_rollover"
+    archive = SectionTableMonthlyArchive.objects.get(table=table, year=2026, month=4)
+    assert archive.content["custom_sheet"]["sheets"][0]["data"][1][4] == "замечание"
     table.refresh_from_db()
     data = table.content["custom_sheet"]["sheets"][0]["data"]
     assert data[0][2:6] == week_headers_for_month(2026, 5)
     assert data[1][2:6] == ["", "", "", ""]
+    assert table.live_monitoring_month == "2026-05"
     assert table.needs_nextcloud_push is True
 
 
 @pytest.mark.django_db
-def test_rollover_repairs_current_month_with_stale_remarks_and_no_archive():
+def test_rollover_does_not_wipe_current_month_remarks_when_stamped():
     from django.contrib.auth import get_user_model
 
     owner = get_user_model().objects.create_user(username="bot_owner_2", password="pass")
+    may_headers = week_headers_for_month(2026, 5)
     table = SectionTable.objects.create(
         owner=owner,
         title="Rangers current month",
         section_type="rangers",
+        live_monitoring_month="2026-05",
         content={
             "custom_sheet": {
                 "version": 2,
@@ -118,8 +123,8 @@ def test_rollover_repairs_current_month_with_stale_remarks_and_no_archive():
                     {
                         "name": "BIM",
                         "data": [
-                            ["Группа", "ФИО", "01.05-04.05", "05.05-11.05", "12.05-18.05", "19.05-25.05"],
-                            ["BIM-25-1", "Иванов Иван", "старое", "", "старое", ""],
+                            ["Группа", "ФИО", *may_headers],
+                            ["BIM-25-1", "Иванов Иван", "замечаний нет", "", "новое", ""],
                         ],
                     }
                 ],
@@ -129,20 +134,20 @@ def test_rollover_repairs_current_month_with_stale_remarks_and_no_archive():
 
     result = rollover_table_if_needed(table, today=date(2026, 5, 20), fallback_col=5)
 
-    assert result["changed"] is True
-    assert result["reason"] == "current_month_repaired"
-    assert SectionTableMonthlyArchive.objects.filter(table=table, year=2026, month=4).exists()
+    assert result["changed"] is False
+    assert result["reason"] == "already_current"
     table.refresh_from_db()
     data = table.content["custom_sheet"]["sheets"][0]["data"]
-    assert data[1][2:6] == ["", "", "", ""]
-    assert table.needs_nextcloud_push is True
+    assert data[1][2:6] == ["замечаний нет", "", "новое", ""]
 
 
 @pytest.mark.django_db
-def test_rollover_repairs_current_month_even_when_previous_archive_exists():
+def test_rollover_repairs_when_stamp_lags_behind_headers():
+    """Даты уже нового месяца, stamp старый — дочищаем ячейки один раз."""
     from django.contrib.auth import get_user_model
 
     owner = get_user_model().objects.create_user(username="bot_owner_3", password="pass")
+    may_headers = week_headers_for_month(2026, 5)
     content = {
         "custom_sheet": {
             "version": 2,
@@ -151,7 +156,7 @@ def test_rollover_repairs_current_month_even_when_previous_archive_exists():
                 {
                     "name": "BIM",
                     "data": [
-                        ["Группа", "ФИО", "01.05-04.05", "05.05-11.05", "12.05-18.05", "19.05-25.05"],
+                        ["Группа", "ФИО", *may_headers],
                         ["BIM-25-1", "Иванов Иван", "старое", "", "старое", ""],
                     ],
                 }
@@ -162,13 +167,14 @@ def test_rollover_repairs_current_month_even_when_previous_archive_exists():
         owner=owner,
         title="Rangers existing archive",
         section_type="rangers",
+        live_monitoring_month="2026-04",
         content=content,
     )
     SectionTableMonthlyArchive.objects.create(
         table=table,
         year=2026,
         month=4,
-        content=content,
+        content={"note": "real april archive"},
     )
 
     result = rollover_table_if_needed(table, today=date(2026, 5, 20), fallback_col=5)
@@ -179,3 +185,4 @@ def test_rollover_repairs_current_month_even_when_previous_archive_exists():
     table.refresh_from_db()
     data = table.content["custom_sheet"]["sheets"][0]["data"]
     assert data[1][2:6] == ["", "", "", ""]
+    assert table.live_monitoring_month == "2026-05"

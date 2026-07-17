@@ -23,6 +23,10 @@ def previous_month(value: date) -> tuple[int, int]:
     return prev.year, prev.month
 
 
+def month_stamp(year: int, month: int) -> str:
+    return f"{year:04d}-{month:02d}"
+
+
 def week_headers_for_month(year: int, month: int) -> list[str]:
     return [
         format_week_range_header(start, end)
@@ -74,7 +78,20 @@ def content_month(content: dict, ref_date: Optional[date] = None) -> Optional[tu
     return None
 
 
-def apply_month_headers(content: dict, year: int, month: int, fallback_col: int) -> bool:
+def apply_month_headers(
+    content: dict,
+    year: int,
+    month: int,
+    fallback_col: int,
+    *,
+    clear_week_cells: bool = True,
+) -> bool:
+    """
+    Ставит 4 заголовка недель на (year, month).
+    Если clear_week_cells=True — очищает ячейки замечаний в этих колонках.
+    Если clear_week_cells=False, но заголовки реально изменились — тоже очищает
+    (иначе под новыми датами останутся чужие замечания).
+    """
     sheets, _ = get_workbook_sheets(content if isinstance(content, dict) else {})
     headers = week_headers_for_month(year, month)
     if len(headers) != 4:
@@ -83,27 +100,28 @@ def apply_month_headers(content: dict, year: int, month: int, fallback_col: int)
     changed = False
     for sheet in sheets:
         data = sheet.get("data") if isinstance(sheet.get("data"), list) else []
-        if not data:
-            continue
-        if not isinstance(data[0], list):
+        if not data or not isinstance(data[0], list):
             continue
 
         cols = find_week_columns(data, fallback_col)
         header = data[0]
+        headers_updated = False
         for col, label in zip(cols, headers):
             _ensure_row_width(header, col)
             if header[col] != label:
                 header[col] = label
+                headers_updated = True
                 changed = True
 
-        for row in data[1:]:
-            if not isinstance(row, list):
-                continue
-            for col in cols:
-                _ensure_row_width(row, col)
-                if row[col] not in ("", None):
-                    row[col] = ""
-                    changed = True
+        if clear_week_cells or headers_updated:
+            for row in data[1:]:
+                if not isinstance(row, list):
+                    continue
+                for col in cols:
+                    _ensure_row_width(row, col)
+                    if row[col] not in ("", None):
+                        row[col] = ""
+                        changed = True
     return changed
 
 
@@ -120,16 +138,67 @@ def rollover_table_if_needed(
         if fallback_col is not None
         else getattr(settings, "BOT_SHEET_REMARK_COL", 11)
     )
+    expected_stamp = month_stamp(current.year, current.month)
 
     with transaction.atomic():
         locked = SectionTable.objects.select_for_update().get(pk=table.pk)
         content = locked.content if isinstance(locked.content, dict) else {}
         detected = content_month(content, ref_date=current)
+        stamp = (locked.live_monitoring_month or "").strip()
+
         if detected == (current.year, current.month):
             prev_year, prev_month = previous_month(current)
             has_prev_archive = locked.monthly_archives.filter(
                 year=prev_year, month=prev_month
             ).exists()
+
+            # Уже успешно перешли на этот месяц — не трогаем живые замечания.
+            if stamp == expected_stamp:
+                new_content = deepcopy(content)
+                changed = apply_month_headers(
+                    new_content,
+                    current.year,
+                    current.month,
+                    fallback,
+                    clear_week_cells=False,
+                )
+                update_fields = ["updated_at"]
+                if changed:
+                    locked.content = new_content
+                    locked.needs_nextcloud_push = True
+                    update_fields.extend(["content", "needs_nextcloud_push"])
+                locked.save(update_fields=update_fields)
+                _prune_archives(locked, retention_months)
+                return {
+                    "ok": True,
+                    "changed": changed,
+                    "reason": "headers_fixed" if changed else "already_current",
+                    "table_id": locked.pk,
+                }
+
+            # Первый запуск новой логики mid-month: запомнить месяц, не стирать.
+            if not stamp:
+                if not has_prev_archive:
+                    SectionTableMonthlyArchive.objects.update_or_create(
+                        table=locked,
+                        year=prev_year,
+                        month=prev_month,
+                        defaults={"content": deepcopy(content)},
+                    )
+                locked.live_monitoring_month = expected_stamp
+                locked.save(update_fields=["live_monitoring_month", "updated_at"])
+                _prune_archives(locked, retention_months)
+                return {
+                    "ok": True,
+                    "changed": False,
+                    "reason": "bootstrap_stamp",
+                    "archive_year": prev_year,
+                    "archive_month": prev_month,
+                    "table_id": locked.pk,
+                }
+
+            # stamp от прошлого месяца, а заголовки уже текущего —
+            # даты сменили без очистки: архив (если нет) + очистка.
             if not has_prev_archive:
                 SectionTableMonthlyArchive.objects.update_or_create(
                     table=locked,
@@ -138,34 +207,35 @@ def rollover_table_if_needed(
                     defaults={"content": deepcopy(content)},
                 )
             new_content = deepcopy(content)
-            changed = apply_month_headers(new_content, current.year, current.month, fallback)
-            if changed:
-                locked.content = new_content
-                locked.needs_nextcloud_push = True
-                locked.save(
-                    update_fields=["content", "needs_nextcloud_push", "updated_at"]
-                )
+            changed = apply_month_headers(
+                new_content,
+                current.year,
+                current.month,
+                fallback,
+                clear_week_cells=True,
+            )
+            locked.content = new_content
+            locked.needs_nextcloud_push = True
+            locked.live_monitoring_month = expected_stamp
+            locked.save(
+                update_fields=[
+                    "content",
+                    "needs_nextcloud_push",
+                    "live_monitoring_month",
+                    "updated_at",
+                ]
+            )
             _prune_archives(locked, retention_months)
-            if changed:
-                return {
-                    "ok": True,
-                    "changed": True,
-                    "reason": "current_month_repaired",
-                    "archive_year": prev_year,
-                    "archive_month": prev_month,
-                    "table_id": locked.pk,
-                }
-            if not has_prev_archive:
-                return {
-                    "ok": True,
-                    "changed": False,
-                    "reason": "current_month_archived",
-                    "archive_year": prev_year,
-                    "archive_month": prev_month,
-                    "table_id": locked.pk,
-                }
-            return {"ok": True, "changed": False, "reason": "already_current"}
+            return {
+                "ok": True,
+                "changed": True,
+                "reason": "current_month_repaired",
+                "archive_year": prev_year,
+                "archive_month": prev_month,
+                "table_id": locked.pk,
+            }
 
+        # Лист ещё прошлого месяца (или месяц не распознан) → полноценный rollover.
         archive_year, archive_month = detected or previous_month(current)
         SectionTableMonthlyArchive.objects.update_or_create(
             table=locked,
@@ -175,11 +245,20 @@ def rollover_table_if_needed(
         )
 
         new_content = deepcopy(content)
-        changed = apply_month_headers(new_content, current.year, current.month, fallback)
+        changed = apply_month_headers(
+            new_content,
+            current.year,
+            current.month,
+            fallback,
+            clear_week_cells=True,
+        )
+        update_fields = ["live_monitoring_month", "updated_at"]
+        locked.live_monitoring_month = expected_stamp
         if changed:
             locked.content = new_content
             locked.needs_nextcloud_push = True
-            locked.save(update_fields=["content", "needs_nextcloud_push", "updated_at"])
+            update_fields.extend(["content", "needs_nextcloud_push"])
+        locked.save(update_fields=update_fields)
 
         _prune_archives(locked, retention_months)
         return {
@@ -188,6 +267,7 @@ def rollover_table_if_needed(
             "archive_year": archive_year,
             "archive_month": archive_month,
             "table_id": locked.pk,
+            "reason": "month_rollover" if changed else "month_rollover_noop",
         }
 
 

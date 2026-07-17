@@ -159,6 +159,10 @@ def pull_from_nextcloud(cfg: NextcloudSyncConfig) -> Dict[str, Any]:
         st.content = new_content
         st.needs_nextcloud_push = False
         st.save(update_fields=["content", "needs_nextcloud_push", "updated_at"])
+    # После pull даты могли смениться в Excel без очистки — догоняем rollover.
+    from bot_api.monthly_rollover import rollover_table_if_needed
+
+    rollover_table_if_needed(table)
     return {"ok": True, "table_id": table.pk, "action": "pull"}
 
 

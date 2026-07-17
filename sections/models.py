@@ -31,6 +31,13 @@ class SectionTable(models.Model):
         default=False,
         verbose_name="Есть несинхронизированные изменения для Nextcloud",
     )
+    live_monitoring_month = models.CharField(
+        max_length=7,
+        blank=True,
+        default="",
+        verbose_name="Месяц живых колонок недель (YYYY-MM)",
+        help_text="После rollover: замечания текущего месяца не очищаются повторно.",
+    )
     last_nextcloud_push_at = models.DateTimeField(
         null=True,
         blank=True,
