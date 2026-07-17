@@ -32,6 +32,12 @@ class Command(BaseCommand):
             action="store_true",
             help="Не сохранять превью поста в RemarkEvidence (только текст в ячейку).",
         )
+        parser.add_argument("--table-id", type=int, default=0, help="ID SectionTable.")
+        parser.add_argument(
+            "--sheet",
+            default="",
+            help="Имя листа/направления (иначе все листы).",
+        )
 
     def handle(self, *args, **options):
         dry_run = not options["apply"]
@@ -47,13 +53,20 @@ class Command(BaseCommand):
             dry_run=dry_run,
             max_students=options["max_students"] or None,
             save_evidence=not options["no_evidence"],
+            table_id=options["table_id"] or None,
+            sheet_name=(options["sheet"] or "").strip() or None,
         )
         mode = "dry-run" if dry_run else "apply"
         self.stdout.write(
             self.style.SUCCESS(
                 f"[{mode}] checked={stats.checked_students} "
-                f"flagged={stats.flagged_students} updated={stats.updated_cells} "
-                f"evidence={stats.evidence_saved}"
+                f"with_links={stats.students_with_links} "
+                f"links_ok={stats.links_ok} links_fail={stats.links_fail} "
+                f"posts={stats.posts_fetched} flagged={stats.flagged_students} "
+                f"updated={stats.updated_cells} evidence={stats.evidence_saved}"
             )
         )
-
+        for err in (stats.sample_errors or [])[:5]:
+            self.stdout.write(self.style.WARNING(f"  err: {err}"))
+        for link in (stats.sample_links or [])[:5]:
+            self.stdout.write(f"  link: {link}")

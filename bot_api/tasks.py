@@ -119,10 +119,12 @@ def run_social_moderation_scan_task(
     sheet_name=None,
     peer_id=None,
     lock_held=False,
+    dry_run=False,
 ):
     """
     Обход соцсетей.
     Из бота: force=True + table_id + sheet_name + peer_id (прогресс в VK).
+    dry_run=True — диагностика без записи в таблицу/evidence.
     lock_held=True — лок уже взят в API; задача только отпускает в finally.
     Beat: без sheet_name — вся таблица (если SOCIAL_MODERATION_ENABLED).
     """
@@ -154,11 +156,12 @@ def run_social_moderation_scan_task(
     if peer_id and sheet_name:
         progress = make_progress_notifier(int(peer_id), sheet_name=str(sheet_name))
 
+    is_dry = bool(dry_run)
     try:
         stats = run_social_moderation_scan(
-            dry_run=False,
+            dry_run=is_dry,
             max_students=limit,
-            save_evidence=True,
+            save_evidence=not is_dry,
             table_id=int(table_id) if table_id else None,
             sheet_name=str(sheet_name) if sheet_name else None,
             progress_callback=progress,
@@ -173,12 +176,16 @@ def run_social_moderation_scan_task(
             release_direction_lock(int(table_id), str(sheet_name))
 
     logger.info(
-        "Social moderation done: checked=%s flagged=%s updated=%s evidence=%s sheet=%s",
+        "Social moderation done: checked=%s flagged=%s updated=%s evidence=%s "
+        "sheet=%s dry_run=%s links_ok=%s links_fail=%s",
         stats.checked_students,
         stats.flagged_students,
         stats.updated_cells,
         stats.evidence_saved,
         sheet_name,
+        is_dry,
+        stats.links_ok,
+        stats.links_fail,
     )
     return {
         "checked": stats.checked_students,
@@ -186,4 +193,9 @@ def run_social_moderation_scan_task(
         "updated": stats.updated_cells,
         "evidence": stats.evidence_saved,
         "sheet_name": sheet_name,
+        "dry_run": is_dry,
+        "with_links": stats.students_with_links,
+        "links_ok": stats.links_ok,
+        "links_fail": stats.links_fail,
+        "posts": stats.posts_fetched,
     }

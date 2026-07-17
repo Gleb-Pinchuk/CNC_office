@@ -337,11 +337,13 @@ class CNCApi:
         sheet_name: str,
         peer_id: int,
         max_students: Optional[int] = None,
+        dry_run: bool = False,
     ) -> dict:
         body: Dict[str, Any] = {
             "table_id": table_id,
             "sheet_name": sheet_name,
             "peer_id": peer_id,
+            "dry_run": bool(dry_run),
         }
         if max_students:
             body["max_students"] = max_students
@@ -757,9 +759,13 @@ class StudentBot:
             if cmd == "main":
                 self.show_main(peer_id, "Главное меню")
             elif cmd == "ai_scan":
-                self.confirm_ai_scan(peer_id, ctx)
+                self.confirm_ai_scan(peer_id, ctx, diagnostic=False)
+            elif cmd == "ai_diag":
+                self.confirm_ai_scan(peer_id, ctx, diagnostic=True)
             elif cmd == "ai_yes":
-                self.start_ai_scan(peer_id, ctx)
+                self.start_ai_scan(peer_id, ctx, diagnostic=False)
+            elif cmd == "ai_diag_yes":
+                self.start_ai_scan(peer_id, ctx, diagnostic=True)
             elif cmd == "ai_no":
                 self.send(peer_id, "Проверка ИИ отменена.")
                 self.show_groups(peer_id, ctx)
@@ -1050,7 +1056,7 @@ class StudentBot:
         body = text + "\n\n" + " · ".join(suffix)
         self.send(peer_id, body, keyboard=kb)
 
-    def confirm_ai_scan(self, peer_id: int, ctx: UserCtx):
+    def confirm_ai_scan(self, peer_id: int, ctx: UserCtx, *, diagnostic: bool = False):
         if not ctx.table_group_key:
             self.show_table_groups(peer_id, ctx)
             return
@@ -1058,20 +1064,28 @@ class StudentBot:
             self.show_directions(peer_id, ctx)
             return
         kb = VkKeyboard(one_time=False, inline=False)
-        kb.add_button("Да, запустить", VkKeyboardColor.POSITIVE, payload=_pl("ai_yes"))
-        kb.add_line()
-        kb.add_button("Нет", VkKeyboardColor.SECONDARY, payload=_pl("ai_no"))
-        self.send(
-            peer_id,
-            (
+        if diagnostic:
+            kb.add_button(
+                "Да, диагностика", VkKeyboardColor.POSITIVE, payload=_pl("ai_diag_yes")
+            )
+            text = (
+                f"Запустить диагностику ИИ по направлению «{ctx.direction}»?\n\n"
+                "Пройдёт по ссылкам и покажет: сколько ссылок ок/ошибка, "
+                "сколько постов скачано, срабатывания правил.\n"
+                "В таблицу ничего не запишет."
+            )
+        else:
+            kb.add_button("Да, запустить", VkKeyboardColor.POSITIVE, payload=_pl("ai_yes"))
+            text = (
                 f"Запустить ИИ-проверку соцсетей по направлению «{ctx.direction}»?\n\n"
                 "Будут проверены только студенты этого листа. "
                 "Прогресс придёт вам в чат."
-            ),
-            keyboard=kb,
-        )
+            )
+        kb.add_line()
+        kb.add_button("Нет", VkKeyboardColor.SECONDARY, payload=_pl("ai_no"))
+        self.send(peer_id, text, keyboard=kb)
 
-    def start_ai_scan(self, peer_id: int, ctx: UserCtx):
+    def start_ai_scan(self, peer_id: int, ctx: UserCtx, *, diagnostic: bool = False):
         if not (ctx.table_group_key and ctx.direction):
             self.send(peer_id, "Сначала выберите направление.")
             self.show_groups(peer_id, ctx)
@@ -1082,6 +1096,7 @@ class StudentBot:
                 table_id=tid,
                 sheet_name=ctx.direction,
                 peer_id=peer_id,
+                dry_run=diagnostic,
             )
         except CNCApiError as e:
             msg = str(e)
@@ -1155,6 +1170,7 @@ class StudentBot:
             kb.add_button("Направления", VkKeyboardColor.PRIMARY, payload=_pl("dirs"))
             kb.add_line()
             kb.add_button("Проверка ИИ", VkKeyboardColor.POSITIVE, payload=_pl("ai_scan"))
+            kb.add_button("ИИ диагноз", VkKeyboardColor.PRIMARY, payload=_pl("ai_diag"))
             kb.add_line()
             kb.add_button("Корзина", VkKeyboardColor.SECONDARY, payload=_pl("trash"))
             kb.add_line()
@@ -1180,6 +1196,7 @@ class StudentBot:
         kb.add_button("Корзина", VkKeyboardColor.SECONDARY, payload=_pl("trash"))
         kb.add_line()
         kb.add_button("Проверка ИИ", VkKeyboardColor.POSITIVE, payload=_pl("ai_scan"))
+        kb.add_button("ИИ диагноз", VkKeyboardColor.PRIMARY, payload=_pl("ai_diag"))
         kb.add_line()
         kb.add_button("Отчет Word", VkKeyboardColor.POSITIVE, payload=_pl("rep_cur"))
         kb.add_button("Архив", VkKeyboardColor.SECONDARY, payload=_pl("rep_arc"))

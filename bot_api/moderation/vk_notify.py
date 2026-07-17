@@ -56,19 +56,55 @@ def make_progress_notifier(
         evidence = int(info.get("evidence") or 0)
         direction = str(info.get("sheet_name") or sheet_name)
 
+        diagnostic = bool(info.get("diagnostic"))
+        mode = "диагностика" if diagnostic else "проверка ИИ"
+
         if done:
-            send_vk_message(
-                int(peer_id),
-                (
-                    f"✅ Проверка ИИ завершена\n"
-                    f"Направление: {direction}\n"
-                    f"Проверено: {checked}"
-                    + (f" / {total}" if total else "")
-                    + f"\nС замечаниями: {flagged}\n"
-                    f"Скринов сохранено: {evidence}\n\n"
-                    f"Можно нажать «Отчет Word»."
-                ),
-            )
+            if diagnostic:
+                with_links = int(info.get("with_links") or 0)
+                links_tried = int(info.get("links_tried") or 0)
+                links_ok = int(info.get("links_ok") or 0)
+                links_fail = int(info.get("links_fail") or 0)
+                links_skipped = int(info.get("links_skipped") or 0)
+                posts = int(info.get("posts") or 0)
+                cols = info.get("social_cols") or []
+                sample_errors = info.get("sample_errors") or []
+                sample_links = info.get("sample_links") or []
+                lines = [
+                    f"🔎 Диагностика ИИ завершена",
+                    f"Направление: {direction}",
+                    f"Студентов: {checked}" + (f" / {total}" if total else ""),
+                    f"С ссылками: {with_links}",
+                    f"Ссылок: ok {links_ok} / fail {links_fail} "
+                    f"(tried {links_tried}, skip {links_skipped})",
+                    f"Постов получено: {posts}",
+                    f"Срабатываний правил: {flagged}",
+                    f"Колонки соцсетей: {cols}",
+                    f"skip_tg={info.get('skip_tg')} skip_tiktok={info.get('skip_tiktok')} "
+                    f"proxy={'да' if info.get('proxy') else 'нет'}",
+                    "",
+                    "В таблицу ничего не записано.",
+                ]
+                if sample_links:
+                    lines.append("Примеры ссылок:")
+                    lines.extend(f"· {x}" for x in sample_links[:3])
+                if sample_errors:
+                    lines.append("Ошибки yt-dlp:")
+                    lines.extend(f"· {x}" for x in sample_errors[:3])
+                send_vk_message(int(peer_id), "\n".join(lines))
+            else:
+                send_vk_message(
+                    int(peer_id),
+                    (
+                        f"✅ Проверка ИИ завершена\n"
+                        f"Направление: {direction}\n"
+                        f"Проверено: {checked}"
+                        + (f" / {total}" if total else "")
+                        + f"\nС замечаниями: {flagged}\n"
+                        f"Скринов сохранено: {evidence}\n\n"
+                        f"Можно нажать «Отчет Word»."
+                    ),
+                )
             return
 
         if not state["started"]:
@@ -78,10 +114,14 @@ def make_progress_notifier(
             send_vk_message(
                 int(peer_id),
                 (
-                    f"⏳ Проверка ИИ запущена\n"
+                    f"⏳ {'Диагностика' if diagnostic else 'Проверка ИИ'} запущена\n"
                     f"Направление: {direction}\n"
                     f"Студентов в листе: {total or '—'}\n"
-                    f"Прогресс буду присылать по ходу…"
+                    + (
+                        "Режим без записи в таблицу.\n"
+                        if diagnostic
+                        else "Прогресс буду присылать по ходу…"
+                    )
                 ),
             )
             return
@@ -94,13 +134,19 @@ def make_progress_notifier(
             return
         state["last_pct_sent"] = bucket
         state["last_ts"] = now
+        extra = ""
+        if diagnostic:
+            extra = (
+                f"\nСсылки ok/fail: {int(info.get('links_ok') or 0)}/"
+                f"{int(info.get('links_fail') or 0)}"
+            )
         send_vk_message(
             int(peer_id),
             (
-                f"⏳ Проверка ИИ: {bucket}%\n"
+                f"⏳ {mode.capitalize()}: {bucket}%\n"
                 f"Направление: {direction}\n"
                 f"Проверено: {checked}/{total or '?'}\n"
-                f"С замечаниями: {flagged}"
+                f"Срабатываний: {flagged}{extra}"
             ),
         )
 

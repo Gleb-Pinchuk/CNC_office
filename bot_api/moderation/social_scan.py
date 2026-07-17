@@ -23,6 +23,12 @@ class SocialEntry:
         return " ".join([self.title, self.description]).strip().lower()
 
 
+@dataclass
+class FetchResult:
+    entries: list[SocialEntry]
+    error: str = ""
+
+
 def _as_entries(source_url: str, payload: dict[str, Any]) -> list[dict[str, Any]]:
     entries = payload.get("entries")
     if isinstance(entries, list) and entries:
@@ -38,6 +44,17 @@ def fetch_social_entries(
     timeout_sec: int,
     proxy_url: str = "",
 ) -> list[SocialEntry]:
+    return fetch_social_entries_result(
+        source_url, max_entries, timeout_sec, proxy_url=proxy_url
+    ).entries
+
+
+def fetch_social_entries_result(
+    source_url: str,
+    max_entries: int,
+    timeout_sec: int,
+    proxy_url: str = "",
+) -> FetchResult:
     options = {
         "quiet": True,
         "skip_download": True,
@@ -57,12 +74,12 @@ def fetch_social_entries(
         msg = str(exc)
         if "Unsupported URL" in msg:
             logger.warning("yt-dlp unsupported url: %s", source_url)
-        else:
-            logger.warning("yt-dlp download error for %s: %s", source_url, msg[:240])
-        return []
-    except Exception:
+            return FetchResult([], error="unsupported_url")
+        logger.warning("yt-dlp download error for %s: %s", source_url, msg[:240])
+        return FetchResult([], error=msg[:180] or "download_error")
+    except Exception as exc:
         logger.exception("yt-dlp failed for %s", source_url)
-        return []
+        return FetchResult([], error=str(exc)[:180] or "ytdlp_exception")
 
     out: list[SocialEntry] = []
     for item in _as_entries(source_url, info)[:max_entries]:
@@ -79,5 +96,6 @@ def fetch_social_entries(
                 thumbnail_url=thumb,
             )
         )
-    return out
-
+    if not out:
+        return FetchResult([], error="empty_extract")
+    return FetchResult(out)

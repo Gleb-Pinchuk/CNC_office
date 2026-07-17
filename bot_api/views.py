@@ -890,6 +890,7 @@ class BotGatewayView(APIView):
         sheet_name = (request.data.get("sheet_name") or "").strip()
         peer_id = request.data.get("peer_id")
         max_students = request.data.get("max_students")
+        dry_run = bool(request.data.get("dry_run") or request.data.get("diagnostic"))
         try:
             max_students_int = int(max_students) if max_students not in (None, "") else 0
         except (TypeError, ValueError):
@@ -939,18 +940,21 @@ class BotGatewayView(APIView):
                 sheet_name=sheet_name,
                 peer_id=peer_id_int,
                 lock_held=True,
+                dry_run=dry_run,
             )
         except Exception:
             release_direction_lock(table_id_int, sheet_name)
             raise
+        mode = "Диагностика" if dry_run else "Проверка"
         return Response(
             {
                 "status": "ok",
                 "queued": True,
                 "task_id": str(async_result.id),
                 "sheet_name": sheet_name,
+                "dry_run": dry_run,
                 "detail": (
-                    f"Проверка «{sheet_name}» поставлена в очередь. "
+                    f"{mode} «{sheet_name}» поставлена в очередь. "
                     "Прогресс придёт отдельными сообщениями."
                 ),
             }

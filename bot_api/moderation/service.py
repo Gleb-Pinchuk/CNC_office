@@ -4,7 +4,7 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Callable, Optional
+from typing import Callable, List, Optional
 from urllib.parse import urlparse
 
 import requests
@@ -20,7 +20,7 @@ from sections.models import SectionTable
 from .classifier import LightweightClassifier, MatchResult
 from .config import load_moderation_config
 from .rules_store import load_rules
-from .social_scan import SocialEntry, fetch_social_entries
+from .social_scan import SocialEntry, fetch_social_entries_result
 
 # Callable[[dict], None] — прогресс для VK
 ProgressCallback = Optional[Callable[..., None]]
@@ -34,6 +34,21 @@ class ScanStats:
     flagged_students: int = 0
     updated_cells: int = 0
     evidence_saved: int = 0
+    # диагностика (dry_run / diagnostic)
+    students_with_links: int = 0
+    links_tried: int = 0
+    links_ok: int = 0
+    links_fail: int = 0
+    links_skipped: int = 0
+    posts_fetched: int = 0
+    sample_errors: Optional[List[str]] = None
+    sample_links: Optional[List[str]] = None
+
+    def __post_init__(self):
+        if self.sample_errors is None:
+            self.sample_errors = []
+        if self.sample_links is None:
+            self.sample_links = []
 
 
 def _clean_token(token: str) -> str:
@@ -313,6 +328,7 @@ def run_social_moderation_scan(
                 evidence=0,
                 sheet_name=current_sheet,
                 done=False,
+                diagnostic=dry_run,
             )
             continue
 
@@ -327,6 +343,7 @@ def run_social_moderation_scan(
             evidence=0,
             sheet_name=current_sheet,
             done=False,
+            diagnostic=dry_run,
         )
 
         for student in students:
@@ -343,20 +360,36 @@ def run_social_moderation_scan(
                 : cfg.max_links_per_student
             ]
             stats.checked_students += 1
+            if links:
+                stats.students_with_links += 1
             violation: Optional[tuple[str, MatchResult, SocialEntry]] = None
             for link in links:
                 platform = _platform_from_url(link)
                 if cfg.skip_tg and platform == "tg":
+                    stats.links_skipped += 1
                     continue
                 if cfg.skip_tiktok and platform == "tiktok":
+                    stats.links_skipped += 1
                     continue
-                entries = fetch_social_entries(
+                stats.links_tried += 1
+                if dry_run and len(stats.sample_links) < 5:
+                    stats.sample_links.append(link[:120])
+                fetched = fetch_social_entries_result(
                     link,
                     cfg.max_entries_per_link,
                     cfg.ytdlp_timeout_sec,
                     proxy_url=cfg.proxy_url,
                 )
-                for entry in entries:
+                if fetched.error or not fetched.entries:
+                    stats.links_fail += 1
+                    if dry_run and fetched.error and len(stats.sample_errors) < 5:
+                        stats.sample_errors.append(
+                            f"{link[:60]} → {fetched.error[:100]}"
+                        )
+                    continue
+                stats.links_ok += 1
+                stats.posts_fetched += len(fetched.entries)
+                for entry in fetched.entries:
                     result = classifier.classify(entry)
                     if result.is_violation:
                         violation = (link, result, entry)
@@ -400,6 +433,11 @@ def run_social_moderation_scan(
                 evidence=stats.evidence_saved,
                 sheet_name=current_sheet,
                 done=False,
+                diagnostic=dry_run,
+                with_links=stats.students_with_links,
+                links_ok=stats.links_ok,
+                links_fail=stats.links_fail,
+                posts=stats.posts_fetched,
             )
         if stop:
             break
@@ -420,16 +458,33 @@ def run_social_moderation_scan(
         evidence=stats.evidence_saved,
         sheet_name=done_sheet,
         done=True,
+        diagnostic=dry_run,
+        with_links=stats.students_with_links,
+        links_tried=stats.links_tried,
+        links_ok=stats.links_ok,
+        links_fail=stats.links_fail,
+        links_skipped=stats.links_skipped,
+        posts=stats.posts_fetched,
+        sample_errors=list(stats.sample_errors or [])[:5],
+        sample_links=list(stats.sample_links or [])[:5],
+        social_cols=list(cfg.social_cols),
+        skip_tg=cfg.skip_tg,
+        skip_tiktok=cfg.skip_tiktok,
+        proxy=bool(cfg.proxy_url),
     )
 
     logger.info(
         "Social moderation finished: checked=%s flagged=%s cells=%s evidence=%s "
-        "sheet=%s dry_run=%s",
+        "sheet=%s dry_run=%s with_links=%s links_ok=%s links_fail=%s posts=%s",
         stats.checked_students,
         stats.flagged_students,
         stats.updated_cells,
         stats.evidence_saved,
         sheet_name,
         dry_run,
+        stats.students_with_links,
+        stats.links_ok,
+        stats.links_fail,
+        stats.posts_fetched,
     )
     return stats
