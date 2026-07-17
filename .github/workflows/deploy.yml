@@ -91,10 +91,12 @@ jobs:
             [ ! -d "$PROJECT_DIR/.venv/bin" ] || chmod 755 "$PROJECT_DIR"/.venv/bin/*
             chmod +x "$PROJECT_DIR"/ops/start_gunicorn_systemd.sh
             chmod +x "$PROJECT_DIR"/ops/start_web_openrc.sh
+            chmod +x "$PROJECT_DIR"/ops/start_vk_bot_openrc.sh
             chmod +x "$PROJECT_DIR"/ops/openrc/*
 
             sed -i 's/\r$//' "$PROJECT_DIR"/ops/start_gunicorn_systemd.sh
             sed -i 's/\r$//' "$PROJECT_DIR"/ops/start_web_openrc.sh
+            sed -i 's/\r$//' "$PROJECT_DIR"/ops/start_vk_bot_openrc.sh
             sed -i 's/\r$//' "$PROJECT_DIR"/ops/openrc/*
 
             cp "$PROJECT_DIR"/ops/openrc/* /etc/init.d/

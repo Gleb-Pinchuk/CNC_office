@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import random
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -38,6 +39,10 @@ DIRS_RAW = os.getenv("CNC_DIRECTION_SHEETS", "ЧПУ,РОБО,Аэро,микр�
 SPREADSHEETS = [x.strip() for x in DIRS_RAW.split(",") if x.strip()]
 TZ_NAME = os.getenv("TIMEZONE", "Europe/Moscow")
 GROUPS_JSON = os.getenv("CNC_TABLE_GROUPS_JSON", "").strip()
+# Тишина long-poll до soft reconnect (сек). Успешный check() с пустыми events тоже «живая» тик.
+BOT_WATCHDOG_IDLE_SEC = int(os.getenv("BOT_WATCHDOG_IDLE_SEC", "300"))
+# После soft reconnect без нового heartbeat — hard exit для supervisor/Docker.
+BOT_WATCHDOG_HARD_AFTER_SEC = int(os.getenv("BOT_WATCHDOG_HARD_AFTER_SEC", "60"))
 
 
 def _default_table_groups() -> List[dict]:
@@ -416,6 +421,56 @@ class StudentBot:
         self.api = CNCApi(CNC_API_BASE)
         self.table_info: Dict[str, dict] = {}
         self.ctx: Dict[int, UserCtx] = {}
+        self._last_alive = time.monotonic()
+        self._soft_reconnect = threading.Event()
+        self._soft_attempted_at: Optional[float] = None
+        self._watchdog_lock = threading.Lock()
+
+    def _touch_alive(self) -> None:
+        with self._watchdog_lock:
+            self._last_alive = time.monotonic()
+            self._soft_attempted_at = None
+
+    def _reset_vk_longpoll(self) -> None:
+        """Новая HTTP-сессия и long-poll (после обрыва или soft reconnect)."""
+        self.vk_session = vk_api.VkApi(token=VK_TOKEN)
+        self.long_poll = VkBotLongPoll(self.vk_session, VK_GROUP_ID)
+
+    def _interrupt_longpoll(self) -> None:
+        """Пытаемся разблокировать зависший HTTP-запрос long-poll."""
+        try:
+            http = getattr(self.vk_session, "http", None)
+            if http is not None:
+                http.close()
+        except Exception:
+            logger.exception("Не удалось закрыть VK HTTP-сессию для soft reconnect")
+
+    def _watchdog_loop(self) -> None:
+        while True:
+            time.sleep(15)
+            now = time.monotonic()
+            with self._watchdog_lock:
+                idle = now - self._last_alive
+                soft_at = self._soft_attempted_at
+            if idle < BOT_WATCHDOG_IDLE_SEC:
+                continue
+            if soft_at is None:
+                logger.error(
+                    "Watchdog: long-poll молчит %.0f сек (порог %s) — soft reconnect",
+                    idle,
+                    BOT_WATCHDOG_IDLE_SEC,
+                )
+                with self._watchdog_lock:
+                    self._soft_attempted_at = time.monotonic()
+                self._soft_reconnect.set()
+                self._interrupt_longpoll()
+                continue
+            if now - soft_at >= BOT_WATCHDOG_HARD_AFTER_SEC:
+                logger.error(
+                    "Watchdog: soft reconnect не помог за %s сек — hard exit для автоперезапуска",
+                    BOT_WATCHDOG_HARD_AFTER_SEC,
+                )
+                os._exit(1)
 
     def _ctx(self, peer_id: int) -> UserCtx:
         if peer_id not in self.ctx:
@@ -475,17 +530,28 @@ class StudentBot:
         return ordered
 
     def run(self):
-        logger.info("Запуск VK-бота мониторинга…")
+        logger.info(
+            "Запуск VK-бота мониторинга… (watchdog idle=%ss, hard_after=%ss)",
+            BOT_WATCHDOG_IDLE_SEC,
+            BOT_WATCHDOG_HARD_AFTER_SEC,
+        )
+        threading.Thread(target=self._watchdog_loop, name="lp-watchdog", daemon=True).start()
         reconnect_delay = 5
         while True:
             try:
-                for event in self.long_poll.listen():
-                    try:
-                        if event.type == VkBotEventType.MESSAGE_NEW:
-                            self.handle(event.obj.message)
-                    except Exception:
-                        logger.exception("Ошибка обработки сообщения")
-                reconnect_delay = 5
+                self._soft_reconnect.clear()
+                while True:
+                    if self._soft_reconnect.is_set():
+                        raise RuntimeError("soft reconnect requested by watchdog")
+                    events = self.long_poll.check()
+                    self._touch_alive()
+                    reconnect_delay = 5
+                    for event in events:
+                        try:
+                            if event.type == VkBotEventType.MESSAGE_NEW:
+                                self.handle(event.obj.message)
+                        except Exception:
+                            logger.exception("Ошибка обработки сообщения")
             except Exception:
                 logger.exception(
                     "Longpoll оборвался, повторное подключение через %s сек.",
@@ -493,7 +559,7 @@ class StudentBot:
                 )
                 time.sleep(reconnect_delay)
                 reconnect_delay = min(reconnect_delay * 2, 60)
-                self.long_poll = VkBotLongPoll(self.vk_session, VK_GROUP_ID)
+                self._reset_vk_longpoll()
 
     # -------------------- маршрутизация сообщений --------------------
 
@@ -1069,6 +1135,42 @@ class StudentBot:
 
     # -------------------- действия --------------------
 
+    def _student_list_snapshot(self, ctx: UserCtx) -> List[dict]:
+        """Текущий порядок студентов (из кеша или свежий запрос)."""
+        if ctx.students_cache:
+            return list(ctx.students_cache)
+        if not (ctx.table_group_key and ctx.direction and ctx.group):
+            return []
+        try:
+            return self.api.list_students(
+                self.table_id(ctx.table_group_key), ctx.direction, ctx.group
+            )
+        except Exception:
+            logger.exception("Не удалось получить список студентов для автоперехода")
+            return []
+
+    def _go_next_student_or_list(self, peer_id: int, ctx: UserCtx) -> None:
+        """После замечания / «замечаний нет» — следующий студент или список группы."""
+        students = self._student_list_snapshot(ctx)
+        current = (ctx.student or "").strip()
+        idx = next(
+            (i for i, s in enumerate(students) if (s.get("fio") or "").strip() == current),
+            -1,
+        )
+        ctx.students_cache = []  # в данных строки могло поменяться
+
+        if idx >= 0 and idx + 1 < len(students):
+            next_fio = (students[idx + 1].get("fio") or "").strip()
+            if next_fio:
+                ctx.student = next_fio
+                ctx.students_page = (idx + 1) // PER_PAGE
+                self.show_student_profile(peer_id, ctx)
+                return
+
+        ctx.student = None
+        self.send(peer_id, "✅ Группа пройдена. Выберите студента или другую группу.")
+        self.show_students(peer_id, ctx)
+
     def write_remark(
         self,
         peer_id: int,
@@ -1103,8 +1205,7 @@ class StudentBot:
             self.send(peer_id, f"✅ Замечание и скрин записаны на {ctx.selected_date}.")
         else:
             self.send(peer_id, f"✅ Записано «замечаний нет» на {ctx.selected_date}.")
-        ctx.students_cache = []  # в данных строки могло поменяться
-        self.show_student_profile(peer_id, ctx)
+        self._go_next_student_or_list(peer_id, ctx)
 
     def set_status(self, peer_id: int, ctx: UserCtx, status_value: str):
         if not (ctx.table_group_key and ctx.direction and ctx.student):

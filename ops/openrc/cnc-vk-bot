@@ -18,5 +18,5 @@ start_pre() {
     . /etc/cnc-office/app.env
     set +a
     command_user="cnc:cnc"
-    command_args="-lc 'cd ${PROJECT_DIR:-/opt/cnc_office}/vk_student_bot && exec ../.venv/bin/python -u bot.py'"
+    command_args="${PROJECT_DIR:-/opt/cnc_office}/ops/start_vk_bot_openrc.sh"
 }
