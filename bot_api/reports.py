@@ -8,6 +8,7 @@ from django.conf import settings
 
 from bot_api.monthly_rollover import detect_sheet_month, find_week_columns
 from bot_api.sheet_utils import find_sheet_by_name, get_workbook_sheets
+from bot_api.week_column import pick_week_col_by_date
 
 _MONTH_NAMES_RU = (
     "",
@@ -28,10 +29,11 @@ _MONTH_NAMES_RU = (
 try:
     from docx import Document
     from docx.enum.text import WD_ALIGN_PARAGRAPH
-    from docx.shared import Pt
+    from docx.shared import Cm, Pt
 except ImportError:  # pragma: no cover
     Document = None  # type: ignore
     WD_ALIGN_PARAGRAPH = None  # type: ignore
+    Cm = None  # type: ignore
     Pt = None  # type: ignore
 
 
@@ -43,6 +45,7 @@ def generate_monitoring_report_docx(
     report_date: Optional[date] = None,
     report_year: Optional[int] = None,
     report_month: Optional[int] = None,
+    evidence_by_fio_date: Optional[dict[tuple[str, date], bytes]] = None,
 ) -> bytes:
     if Document is None:
         raise RuntimeError("python-docx не установлен")
@@ -60,7 +63,14 @@ def generate_monitoring_report_docx(
     fallback_remark_col = int(getattr(settings, "BOT_SHEET_REMARK_COL", 11))
     remark_cols = find_week_columns(data, fallback_remark_col)
 
-    rows = _collect_report_rows(data, header, fio_col, group_col, remark_cols)
+    rows = _collect_report_rows(
+        data,
+        header,
+        fio_col,
+        group_col,
+        remark_cols,
+        evidence_by_fio_date or {},
+    )
     groups = sorted({row["group"] for row in rows["students"] if row["group"]}, key=str.lower)
     findings = rows["findings"]
 
@@ -190,11 +200,23 @@ def _build_body(
 
         remark = item["remark"]
         social = f" - {item['social']}" if item.get("social") else ""
+        missing = "" if item.get("evidence_bytes") else " (скрин отсутствует)"
         doc.add_paragraph(
-            f"{index}. {item['fio']}: {remark}{social}",
+            f"{index}. {item['fio']}: {remark}{social}{missing}",
             style=None,
         )
+        if item.get("evidence_bytes"):
+            _add_evidence_picture(doc, item["evidence_bytes"])
         index += 1
+
+
+def _add_evidence_picture(doc, raw: bytes) -> None:
+    try:
+        stream = BytesIO(raw)
+        doc.add_picture(stream, width=Cm(14))
+    except Exception:
+        note = doc.add_paragraph()
+        note.add_run("(не удалось вставить скрин в документ)")
 
 
 def _collect_report_rows(
@@ -203,6 +225,7 @@ def _collect_report_rows(
     fio_col: int,
     group_col: int,
     remark_cols: list[int],
+    evidence_by_fio_date: dict[tuple[str, date], bytes],
 ) -> dict[str, Any]:
     students = []
     findings = []
@@ -214,24 +237,47 @@ def _collect_report_rows(
             continue
         group = _cell(row, group_col)
         students.append({"fio": fio, "group": group})
-        remarks = []
+        social = _first_social_link(row, header)
         for col in remark_cols:
             value = _cell(row, col)
             if not value or _is_no_remark(value):
                 continue
             label = _cell(header, col)
-            remarks.append(f"{label}: {value}" if label else value)
-        if remarks:
+            remark_text = f"{label}: {value}" if label else value
+            evidence_bytes = _match_evidence_for_week(
+                data,
+                fio,
+                col,
+                evidence_by_fio_date,
+            )
             findings.append(
                 {
                     "fio": fio,
                     "group": group,
-                    "remark": "; ".join(remarks),
-                    "social": _first_social_link(row, header),
+                    "remark": remark_text,
+                    "social": social,
+                    "week_col": col,
+                    "evidence_bytes": evidence_bytes,
                 }
             )
-    findings.sort(key=lambda item: (item["group"].lower(), item["fio"].lower()))
+    findings.sort(key=lambda item: (item["group"].lower(), item["fio"].lower(), item["week_col"]))
     return {"students": students, "checked_count": len(students), "findings": findings}
+
+
+def _match_evidence_for_week(
+    sheet_data: list,
+    fio: str,
+    week_col: int,
+    evidence_by_fio_date: dict[tuple[str, date], bytes],
+) -> Optional[bytes]:
+    fio_key = " ".join(fio.split()).strip().lower()
+    for (ev_fio, ev_date), blob in evidence_by_fio_date.items():
+        if ev_fio != fio_key:
+            continue
+        matched_col = pick_week_col_by_date(sheet_data, ev_date)
+        if matched_col == week_col:
+            return blob
+    return None
 
 
 def _first_social_link(row: list, header: list) -> str:

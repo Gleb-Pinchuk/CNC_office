@@ -15,6 +15,7 @@ from rest_framework.views import APIView
 from api.xlsx_export import export_custom_sheet_to_xlsx_bytes
 from sections.models import SectionTable, SectionTableMonthlyArchive
 
+from .evidence import delete_remark_evidence, load_evidence_bytes_map, upsert_remark_evidence
 from .remark_utils import parse_input_date
 from .reports import generate_monitoring_report_docx, report_filename
 from .sheet_utils import (
@@ -470,6 +471,34 @@ class BotGatewayView(APIView):
                 {"detail": "Неверный формат даты remark_date"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        has_remark_text = bool(remark_text and str(remark_text).strip())
+        evidence_file = request.FILES.get("evidence")
+        evidence_raw = None
+        evidence_name = ""
+        evidence_ct = ""
+        if has_remark_text and evidence_file is not None:
+            evidence_raw = evidence_file.read()
+            evidence_name = getattr(evidence_file, "name", "") or ""
+            evidence_ct = getattr(evidence_file, "content_type", "") or ""
+            try:
+                # Предварительная проверка до записи в таблицу.
+                from .evidence import validate_evidence_upload
+
+                err = validate_evidence_upload(
+                    raw=evidence_raw,
+                    filename=evidence_name,
+                    content_type=evidence_ct,
+                )
+                if err:
+                    return Response({"detail": err}, status=status.HTTP_400_BAD_REQUEST)
+            except Exception:
+                logger.exception("evidence validate failed")
+                return Response(
+                    {"detail": "Некорректный файл доказательства"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
         fio_c, gcol, st_c, rcol_default = self._bot_cols()
         with transaction.atomic():
             table = (
@@ -513,11 +542,10 @@ class BotGatewayView(APIView):
                 return Response(
                     {"detail": "Некорректная строка"}, status=status.HTTP_400_BAD_REQUEST
                 )
-            row = data[row_idx]
             rcol = pick_week_col_by_date(data, rd) or rcol_default
             # В выбранной недельной колонке храним только итоговый текст замечания,
             # без префикса даты (дата уже определяет саму колонку недели).
-            if remark_text and str(remark_text).strip():
+            if has_remark_text:
                 new_cell = str(remark_text).strip()
             else:
                 new_cell = no_phrase
@@ -526,12 +554,34 @@ class BotGatewayView(APIView):
             table.content = content
             table.needs_nextcloud_push = True
             table.save(update_fields=["content", "needs_nextcloud_push", "updated_at"])
+
+            evidence_saved = False
+            sheet_key = str(sheet_name or "").strip()
+            if not has_remark_text:
+                delete_remark_evidence(
+                    table=table,
+                    sheet_name=sheet_key,
+                    student_fio=student_fio,
+                    remark_date=rd,
+                )
+            elif evidence_raw is not None:
+                upsert_remark_evidence(
+                    table=table,
+                    sheet_name=sheet_key,
+                    student_fio=student_fio,
+                    remark_date=rd,
+                    raw=evidence_raw,
+                    filename=evidence_name,
+                    content_type=evidence_ct,
+                )
+                evidence_saved = True
         logger.info(
-            "Замечание по студенту: table=%s sheet=%s row=%s date=%s",
+            "Замечание по студенту: table=%s sheet=%s row=%s date=%s evidence=%s",
             table_id,
             sheet_name,
             row_idx,
             remark_date_raw,
+            evidence_saved,
         )
         return Response(
             {
@@ -539,6 +589,7 @@ class BotGatewayView(APIView):
                 "table_id": table.id,
                 "row_index": row_idx,
                 "remark_col": rcol,
+                "evidence_saved": evidence_saved,
             }
         )
 
@@ -861,6 +912,7 @@ class BotGatewayView(APIView):
                 if detected:
                     report_year, report_month = detected
 
+        evidence_map = load_evidence_bytes_map(table=table, sheet_name=sheet_name)
         try:
             docx = generate_monitoring_report_docx(
                 table_title=table.title,
@@ -868,6 +920,7 @@ class BotGatewayView(APIView):
                 sheet_name=sheet_name,
                 report_year=report_year,
                 report_month=report_month,
+                evidence_by_fio_date=evidence_map,
             )
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_404_NOT_FOUND)

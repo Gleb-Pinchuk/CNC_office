@@ -230,18 +230,55 @@ class CNCApi:
         remark_date: str,
         remark_text: Optional[str],
         group: Optional[str],
+        evidence: Optional[bytes] = None,
+        evidence_filename: str = "evidence.jpg",
+        evidence_mime: str = "image/jpeg",
     ):
         body: Dict[str, Any] = {
-            "table_id": table_id,
+            "table_id": str(table_id),
             "sheet_name": sheet_name,
             "student_fio": student_fio,
             "remark_date": remark_date,
+            "action": "set_student_remark",
         }
         if remark_text is not None:
             body["remark_text"] = remark_text
         if group:
             body["group"] = group
-        return self.post("set_student_remark", body)
+        if evidence is None:
+            return self.post("set_student_remark", {k: v for k, v in body.items() if k != "action"})
+
+        headers = {"X-CNC-Bot-Token": CNC_BOT_SECRET}
+        files = {
+            "evidence": (evidence_filename, evidence, evidence_mime),
+        }
+        last_error = None
+        for attempt in range(1, 4):
+            try:
+                r = requests.post(
+                    f"{self.base}/bot/gateway/",
+                    data=body,
+                    files=files,
+                    headers=headers,
+                    timeout=60,
+                )
+                if r.status_code >= 400:
+                    text = r.text or str(r.status_code)
+                    try:
+                        detail = r.json().get("detail", text)
+                    except Exception:
+                        detail = text
+                    raise CNCApiError(f"Ошибка API ({r.status_code}): {detail}")
+                return r.json()
+            except CNCApiError:
+                raise
+            except Exception as e:
+                last_error = e
+                if attempt < 3:
+                    time.sleep(2**attempt)
+                    continue
+                raise CNCApiError(str(last_error)) from last_error
+        raise CNCApiError(str(last_error))
 
     def set_student_status(
         self,
@@ -340,7 +377,8 @@ class UserCtx:
     group: Optional[str] = None
     student: Optional[str] = None
     selected_date: str = ""
-    awaiting: Optional[str] = None  # "date_input" | "remark_input"
+    awaiting: Optional[str] = None  # "date_input" | "remark_input" | "remark_photo"
+    remark_draft_text: Optional[str] = None
     current_view: str = "main"
     groups_page: int = 0
     students_page: int = 0
@@ -476,6 +514,9 @@ class StudentBot:
             if ctx.awaiting == "remark_input":
                 self.handle_remark_input(peer_id, ctx, text)
                 return
+            if ctx.awaiting == "remark_photo":
+                self.handle_remark_photo(peer_id, ctx, msg)
+                return
 
             tl = text.lower()
             if tl in ("начать", "старт", "меню", "помощь", "help", "?", "/start"):
@@ -510,6 +551,8 @@ class StudentBot:
             self.send(peer_id, f"❌ Ошибка: {e}")
 
     def handle_payload(self, peer_id: int, ctx: UserCtx, p: dict):
+        if ctx.awaiting in ("remark_input", "remark_photo") or ctx.remark_draft_text:
+            self._clear_remark_draft(ctx)
         cmd = p.get("c")
         try:
             if cmd == "main":
@@ -628,7 +671,12 @@ class StudentBot:
                 self.write_remark(peer_id, ctx, None)
             elif cmd == "rem_txt":
                 ctx.awaiting = "remark_input"
-                self.send(peer_id, "Введите текст замечания одним сообщением.")
+                ctx.remark_draft_text = None
+                self.send(
+                    peer_id,
+                    "Введите текст замечания одним сообщением.\n"
+                    "После текста бот попросит прислать скрин (фото или jpg/png/webp).",
+                )
             elif cmd == "stu_st":
                 self.set_status(peer_id, ctx, "учится")
             elif cmd == "stu_ex":
@@ -669,12 +717,95 @@ class StudentBot:
         self._return_after_date(peer_id, ctx)
 
     def handle_remark_input(self, peer_id: int, ctx: UserCtx, text: str):
-        ctx.awaiting = None
         if not text.strip():
+            self._clear_remark_draft(ctx)
             self.send(peer_id, "❌ Пустой текст замечания.")
             self.show_student_actions(peer_id, ctx)
             return
-        self.write_remark(peer_id, ctx, text.strip())
+        ctx.remark_draft_text = text.strip()
+        ctx.awaiting = "remark_photo"
+        self.send(
+            peer_id,
+            "Текст принят. Пришлите скрин доказательства одним сообщением "
+            "(фото VK или файл jpg/png/webp).\n"
+            "Пока скрин не прислан, замечание в таблицу не записывается.",
+        )
+
+    def handle_remark_photo(self, peer_id: int, ctx: UserCtx, msg: dict):
+        draft = (ctx.remark_draft_text or "").strip()
+        if not draft:
+            self._clear_remark_draft(ctx)
+            self.send(peer_id, "❌ Черновик замечания потерян. Начните заново.")
+            self.show_student_actions(peer_id, ctx)
+            return
+        extracted = self._extract_evidence_from_message(msg)
+        if not extracted:
+            self.send(
+                peer_id,
+                "❌ Нужен скрин: фото или файл jpg/png/webp. Текст уже сохранён в черновике — пришлите картинку.",
+            )
+            return
+        raw, filename, mime = extracted
+        self.write_remark(
+            peer_id,
+            ctx,
+            draft,
+            evidence=raw,
+            evidence_filename=filename,
+            evidence_mime=mime,
+        )
+
+    def _clear_remark_draft(self, ctx: UserCtx) -> None:
+        ctx.awaiting = None
+        ctx.remark_draft_text = None
+
+    def _extract_evidence_from_message(
+        self, msg: dict
+    ) -> Optional[tuple[bytes, str, str]]:
+        attachments = msg.get("attachments") or []
+        if not isinstance(attachments, list):
+            return None
+        for att in attachments:
+            if not isinstance(att, dict):
+                continue
+            kind = (att.get("type") or "").strip().lower()
+            if kind == "photo":
+                photo = att.get("photo") or {}
+                url = _largest_photo_url(photo)
+                if not url:
+                    continue
+                raw = self._download_bytes(url)
+                if raw:
+                    return raw, "evidence.jpg", "image/jpeg"
+            if kind == "doc":
+                doc = att.get("doc") or {}
+                ext = str(doc.get("ext") or "").lower().lstrip(".")
+                title = str(doc.get("title") or f"evidence.{ext or 'jpg'}")
+                url = str(doc.get("url") or "").strip()
+                if ext not in {"jpg", "jpeg", "png", "webp"} or not url:
+                    continue
+                raw = self._download_bytes(url)
+                if not raw:
+                    continue
+                mime = {
+                    "jpg": "image/jpeg",
+                    "jpeg": "image/jpeg",
+                    "png": "image/png",
+                    "webp": "image/webp",
+                }.get(ext, "image/jpeg")
+                if not title.lower().endswith(f".{ext}"):
+                    title = f"{title}.{ext}"
+                return raw, title, mime
+        return None
+
+    def _download_bytes(self, url: str) -> Optional[bytes]:
+        try:
+            resp = requests.get(url, timeout=60)
+            resp.raise_for_status()
+            return resp.content
+        except Exception:
+            logger.exception("Не удалось скачать вложение VK: %s", url)
+            return None
 
     # -------------------- экраны --------------------
 
@@ -938,9 +1069,23 @@ class StudentBot:
 
     # -------------------- действия --------------------
 
-    def write_remark(self, peer_id: int, ctx: UserCtx, text: Optional[str]):
+    def write_remark(
+        self,
+        peer_id: int,
+        ctx: UserCtx,
+        text: Optional[str],
+        *,
+        evidence: Optional[bytes] = None,
+        evidence_filename: str = "evidence.jpg",
+        evidence_mime: str = "image/jpeg",
+    ):
         if not (ctx.table_group_key and ctx.direction and ctx.student):
             self.show_main(peer_id, "Сначала выберите студента.")
+            return
+        if text and evidence is None:
+            self.send(peer_id, "❌ Для замечания нужен скрин. Начните заново.")
+            self._clear_remark_draft(ctx)
+            self.show_student_actions(peer_id, ctx)
             return
         self.api.set_student_remark(
             self.table_id(ctx.table_group_key),
@@ -949,9 +1094,13 @@ class StudentBot:
             ctx.selected_date,
             text,
             ctx.group,
+            evidence=evidence,
+            evidence_filename=evidence_filename,
+            evidence_mime=evidence_mime,
         )
+        self._clear_remark_draft(ctx)
         if text:
-            self.send(peer_id, f"✅ Замечание записано на {ctx.selected_date}.")
+            self.send(peer_id, f"✅ Замечание и скрин записаны на {ctx.selected_date}.")
         else:
             self.send(peer_id, f"✅ Записано «замечаний нет» на {ctx.selected_date}.")
         ctx.students_cache = []  # в данных строки могло поменяться
@@ -1071,47 +1220,91 @@ class StudentBot:
         mime_type: str = "application/octet-stream",
     ):
         vk = self.vk_session.get_api()
-        upload = vk.docs.getMessagesUploadServer(type="doc", peer_id=peer_id)
-        upload_url = upload.get("upload_url")
-        if not upload_url:
-            raise RuntimeError("VK не вернул upload_url для документа")
-        files = {
-            "file": (
-                filename,
-                body,
-                mime_type,
-            )
-        }
-        up_resp = requests.post(upload_url, files=files, timeout=120)
-        up_resp.raise_for_status()
-        payload = up_resp.json()
-        file_token = payload.get("file")
-        if not file_token:
-            raise RuntimeError(f"VK upload error: {payload}")
-        saved = vk.docs.save(file=file_token, title=filename)
-        item = None
-        if isinstance(saved, dict):
-            docs = saved.get("doc") or saved.get("docs")
-            if isinstance(docs, list) and docs:
-                item = docs[0]
-            elif isinstance(docs, dict):
-                item = docs
-        if not item and isinstance(saved, list) and saved:
-            item = saved[0]
-        if not item:
-            raise RuntimeError(f"VK save error: {saved}")
-        owner_id = item.get("owner_id")
-        doc_id = item.get("id")
-        if owner_id is None or doc_id is None:
-            raise RuntimeError(f"VK save returned malformed doc: {item}")
-        msg_payload: Dict[str, Any] = {
-            "peer_id": peer_id,
-            "random_id": random.randint(0, 2**31),
-            "attachment": f"doc{owner_id}_{doc_id}",
-        }
-        if caption:
-            msg_payload["message"] = caption[:3900]
-        self.vk_session.method("messages.send", msg_payload)
+        last_error: Optional[Exception] = None
+        for attempt in range(1, 4):
+            try:
+                upload = vk.docs.getMessagesUploadServer(type="doc", peer_id=peer_id)
+                upload_url = upload.get("upload_url")
+                if not upload_url:
+                    raise RuntimeError("VK не вернул upload_url для документа")
+                files = {
+                    "file": (
+                        filename,
+                        body,
+                        mime_type,
+                    )
+                }
+                up_resp = requests.post(upload_url, files=files, timeout=120)
+                if up_resp.status_code in {405, 500, 502, 503, 504}:
+                    raise requests.HTTPError(
+                        f"{up_resp.status_code} Client Error for url: {upload_url}",
+                        response=up_resp,
+                    )
+                up_resp.raise_for_status()
+                payload = up_resp.json()
+                file_token = payload.get("file")
+                if not file_token:
+                    raise RuntimeError(f"VK upload error: {payload}")
+                saved = vk.docs.save(file=file_token, title=filename)
+                item = None
+                if isinstance(saved, dict):
+                    docs = saved.get("doc") or saved.get("docs")
+                    if isinstance(docs, list) and docs:
+                        item = docs[0]
+                    elif isinstance(docs, dict):
+                        item = docs
+                if not item and isinstance(saved, list) and saved:
+                    item = saved[0]
+                if not item:
+                    raise RuntimeError(f"VK save error: {saved}")
+                owner_id = item.get("owner_id")
+                doc_id = item.get("id")
+                if owner_id is None or doc_id is None:
+                    raise RuntimeError(f"VK save returned malformed doc: {item}")
+                msg_payload: Dict[str, Any] = {
+                    "peer_id": peer_id,
+                    "random_id": random.randint(0, 2**31),
+                    "attachment": f"doc{owner_id}_{doc_id}",
+                }
+                if caption:
+                    msg_payload["message"] = caption[:3900]
+                self.vk_session.method("messages.send", msg_payload)
+                return
+            except Exception as exc:
+                last_error = exc
+                logger.warning(
+                    "VK document upload attempt %s/3 failed: %s", attempt, exc
+                )
+                if attempt < 3:
+                    time.sleep(0.4 * attempt)
+                    continue
+                raise
+        if last_error:
+            raise last_error
+
+
+def _largest_photo_url(photo: dict) -> Optional[str]:
+    sizes = photo.get("sizes") if isinstance(photo, dict) else None
+    if isinstance(sizes, list) and sizes:
+        best = None
+        best_area = -1
+        for item in sizes:
+            if not isinstance(item, dict):
+                continue
+            url = str(item.get("url") or "").strip()
+            if not url:
+                continue
+            area = int(item.get("width") or 0) * int(item.get("height") or 0)
+            if area >= best_area:
+                best_area = area
+                best = url
+        if best:
+            return best
+    for key in ("photo_2560", "photo_1280", "photo_807", "photo_604", "photo_130", "photo_75"):
+        url = str(photo.get(key) or "").strip()
+        if url:
+            return url
+    return None
 
 
 if __name__ == "__main__":
