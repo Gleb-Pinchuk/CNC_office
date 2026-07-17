@@ -14,7 +14,8 @@ PROJECT_DIR="${PROJECT_DIR:-/opt/cnc_office}"
 cd "$PROJECT_DIR/vk_student_bot"
 
 # Сироты после rc-service stop / ручных запусков → тройные ответы в VK
-pkill -f "${PROJECT_DIR}/vk_student_bot/bot.py" 2>/dev/null || true
+# [b]ot.py — чтобы не убить сам wrapper-скрипт через pkill -f
+pkill -f "${PROJECT_DIR}/vk_student_bot/[b]ot.py" 2>/dev/null || true
 pkill -f '[p]ython -u bot.py' 2>/dev/null || true
 sleep 1
 
