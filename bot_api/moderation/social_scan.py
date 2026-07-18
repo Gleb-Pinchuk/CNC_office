@@ -123,6 +123,18 @@ def _parse_vk_owner(url: str) -> tuple[Optional[int], str]:
     return None, screen
 
 
+def moderation_vk_token(explicit: str = "") -> str:
+    """
+    Токен для чтения стен/групп/аватаров.
+    Нужен USER access token — community VK_TOKEN даёт error 27 на wall.get/groups.get.
+    """
+    return (
+        (explicit or "").strip()
+        or (os.getenv("SOCIAL_MOD_VK_USER_TOKEN") or "").strip()
+        or (os.getenv("VK_TOKEN") or "").strip()
+    )
+
+
 def _vk_api(method: str, token: str, **params) -> dict[str, Any]:
     resp = requests.get(
         f"https://api.vk.com/method/{method}",
@@ -133,9 +145,14 @@ def _vk_api(method: str, token: str, **params) -> dict[str, Any]:
     data = resp.json()
     if "error" in data:
         err = data["error"]
-        raise RuntimeError(
-            f"VK API {method}: {err.get('error_code')} {err.get('error_msg')}"
-        )
+        code = err.get("error_code")
+        msg = err.get("error_msg") or ""
+        if code == 27 or "group auth" in str(msg).lower():
+            raise RuntimeError(
+                f"VK API {method}: 27 нужен SOCIAL_MOD_VK_USER_TOKEN "
+                f"(токен пользователя), не токен сообщества"
+            )
+        raise RuntimeError(f"VK API {method}: {code} {msg}")
     return data.get("response") or {}
 
 
@@ -150,7 +167,7 @@ def _best_photo_url(attachment: dict[str, Any]) -> str:
 
 def resolve_vk_user_id(source_url: str, token: str = "") -> tuple[Optional[int], str]:
     """Вернуть (user_id > 0, error). Для сообществ — ошибка."""
-    token = (token or os.getenv("VK_TOKEN") or "").strip()
+    token = moderation_vk_token(token)
     if not token:
         return None, "vk_no_token"
     url = _normalize_vk_url(source_url)
@@ -178,7 +195,7 @@ def resolve_vk_user_id(source_url: str, token: str = "") -> tuple[Optional[int],
 
 
 def fetch_vk_avatar_entry(user_id: int, source_url: str, token: str = "") -> FetchResult:
-    token = (token or os.getenv("VK_TOKEN") or "").strip()
+    token = moderation_vk_token(token)
     if not token:
         return FetchResult([], error="vk_no_token")
     try:
@@ -220,7 +237,7 @@ def fetch_vk_user_groups(
     Список сообществ пользователя: [{id, screen_name, name, photo_url}, ...].
     При ошибке доступа — ([], error).
     """
-    token = (token or os.getenv("VK_TOKEN") or "").strip()
+    token = moderation_vk_token(token)
     if not token:
         return [], "vk_no_token"
     try:
@@ -268,7 +285,7 @@ def fetch_vk_wall_entries(
     max_entries: int,
     token: str = "",
 ) -> FetchResult:
-    token = (token or os.getenv("VK_TOKEN") or "").strip()
+    token = moderation_vk_token(token)
     if not token:
         return FetchResult([], error="vk_no_token")
 

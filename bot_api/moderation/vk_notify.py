@@ -113,6 +113,17 @@ def make_progress_notifier(
                     lines.append(
                         "Список запретных групп пуст — проверка вступлений пока не ловит."
                     )
+                if not info.get("has_vk_user_token"):
+                    lines.append(
+                        "Нет SOCIAL_MOD_VK_USER_TOKEN — токен сообщества не читает "
+                        "стены/группы (ошибка 27). Нужен user access token."
+                    )
+                err_blob = " ".join(str(x) for x in sample_errors)
+                if "27" in err_blob or "USER_TOKEN" in err_blob or "group auth" in err_blob.lower():
+                    lines.append(
+                        "Сейчас API отвечает 27: добавь SOCIAL_MOD_VK_USER_TOKEN в app.env "
+                        "и перезапусти celery-worker."
+                    )
                 if not info.get("proxy") and (
                     int(info.get("fail_tg") or 0) + int(info.get("fail_tiktok") or 0) > 0
                 ):

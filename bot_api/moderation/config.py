@@ -28,6 +28,7 @@ class ModerationConfig:
     proxy_url: str
     skip_tg: bool
     skip_tiktok: bool
+    vk_user_token: str
 
 
 def _parse_int_list(raw: str, fallback: str) -> list[int]:
@@ -60,6 +61,9 @@ def load_moderation_config() -> ModerationConfig:
     banned_groups_path = Path(
         os.getenv("SOCIAL_MOD_BANNED_VK_GROUPS_PATH", str(default_banned))
     )
+    vk_user_token = (
+        os.getenv("SOCIAL_MOD_VK_USER_TOKEN") or os.getenv("VK_USER_TOKEN") or ""
+    ).strip()
     return ModerationConfig(
         table_owner_username=owner,
         section_type=os.getenv("CNC_SECTION_TYPE", "rangers").strip(),
@@ -88,5 +92,6 @@ def load_moderation_config() -> ModerationConfig:
         skip_tg=os.getenv("SOCIAL_MOD_SKIP_TG", "True").lower() in ("true", "1", "yes"),
         skip_tiktok=os.getenv("SOCIAL_MOD_SKIP_TIKTOK", "True").lower()
         in ("true", "1", "yes"),
+        vk_user_token=vk_user_token,
     )
 

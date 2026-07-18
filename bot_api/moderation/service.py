@@ -311,13 +311,14 @@ def _check_vk_profile(
     banned,
     max_posts: int,
     stats: ScanStats,
+    vk_token: str = "",
 ) -> Optional[tuple[MatchResult, SocialEntry, str]]:
     """
     Приоритет: запретная группа → стена → аватар.
     Ранний стоп на первом срабатывании.
     Возвращает (match, entry_for_evidence, source_kind) или None.
     """
-    user_id, resolve_err = resolve_vk_user_id(link)
+    user_id, resolve_err = resolve_vk_user_id(link, token=vk_token)
     if not user_id:
         stats.fail_vk += 1
         stats.links_fail += 1
@@ -331,7 +332,7 @@ def _check_vk_profile(
     got_any = False
 
     # 1) Группы
-    groups, groups_err = fetch_vk_user_groups(user_id)
+    groups, groups_err = fetch_vk_user_groups(user_id, token=vk_token)
     if groups_err:
         stats.vk_groups_unavailable += 1
         if len(stats.sample_errors or []) < 5:
@@ -360,7 +361,7 @@ def _check_vk_profile(
             return match, entry, "group"
 
     # 2) Стена
-    wall = fetch_vk_wall_entries(link, max_posts)
+    wall = fetch_vk_wall_entries(link, max_posts, token=vk_token)
     if wall.entries:
         got_any = True
         stats.posts_fetched += len(wall.entries)
@@ -375,7 +376,7 @@ def _check_vk_profile(
         stats.sample_errors.append(f"{link[:60]} → {wall.error[:100]}")
 
     # 3) Аватар
-    avatar = fetch_vk_avatar_entry(user_id, link)
+    avatar = fetch_vk_avatar_entry(user_id, link, token=vk_token)
     if avatar.error and not avatar.entries:
         if len(stats.sample_errors or []) < 5 and avatar.error not in (
             "vk_no_avatar",
@@ -537,6 +538,7 @@ def run_social_moderation_scan(
                         banned=banned,
                         max_posts=cfg.max_entries_per_link,
                         stats=stats,
+                        vk_token=cfg.vk_user_token,
                     )
                     if hit:
                         match, entry, _kind = hit
@@ -663,6 +665,7 @@ def run_social_moderation_scan(
         hits_wall=stats.hits_wall,
         hits_avatar=stats.hits_avatar,
         banned_groups=banned.count,
+        has_vk_user_token=bool(cfg.vk_user_token),
     )
 
     logger.info(

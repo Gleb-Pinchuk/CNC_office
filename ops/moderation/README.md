@@ -21,7 +21,20 @@
    - `SOCIAL_MOD_MAX_STUDENTS_PER_RUN=50`
    - при блокировках сети: `SOCIAL_MOD_PROXY_URL=http://user:pass@host:port`
    - по умолчанию только VK: `SOCIAL_MOD_SKIP_TG=True` и `SOCIAL_MOD_SKIP_TIKTOK=True`
+   - **обязательно** user-токен: `SOCIAL_MOD_VK_USER_TOKEN=...` (токен сообщества `VK_TOKEN` не читает чужие стены — error 27)
    - запретные сообщества: `bot_api/moderation_data/banned_vk_groups.json`
+
+### Токен для модерации VK
+
+`VK_TOKEN` сообщества оставь для бота (сообщения). Для скана нужен отдельный **user access token** с правами примерно: `wall`, `groups`, `offline`.
+
+1. Создай Standalone-приложение на [vk.com/apps?act=manage](https://vk.com/apps?act=manage).
+2. Получи токен пользователя (служебный аккаунт организации, не личный педагога).
+3. Пропиши в `/etc/cnc-office/app.env`:
+   ```bash
+   SOCIAL_MOD_VK_USER_TOKEN=vk1.a....
+   ```
+4. `rc-service cnc-office-celery-worker restart`
 3. Запустите:
 
 ```bash
