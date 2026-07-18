@@ -148,6 +148,121 @@ def _best_photo_url(attachment: dict[str, Any]) -> str:
     return str(best.get("url") or "").strip()
 
 
+def resolve_vk_user_id(source_url: str, token: str = "") -> tuple[Optional[int], str]:
+    """Вернуть (user_id > 0, error). Для сообществ — ошибка."""
+    token = (token or os.getenv("VK_TOKEN") or "").strip()
+    if not token:
+        return None, "vk_no_token"
+    url = _normalize_vk_url(source_url)
+    owner_id, screen = _parse_vk_owner(url)
+    try:
+        if owner_id is None and screen:
+            resolved = _vk_api("utils.resolveScreenName", token, screen_name=screen)
+            if not resolved:
+                return None, "vk_screen_not_found"
+            rtype = str(resolved.get("type") or "")
+            rid = int(resolved.get("object_id") or 0)
+            if rtype == "user":
+                owner_id = rid
+            elif rtype in ("group", "page", "event"):
+                return None, "vk_url_is_group"
+            else:
+                return None, f"vk_unsupported_type:{rtype}"
+        if owner_id is None:
+            return None, "vk_bad_url"
+        if owner_id < 0:
+            return None, "vk_url_is_group"
+        return int(owner_id), ""
+    except Exception as exc:
+        return None, str(exc)[:180] or "vk_resolve_error"
+
+
+def fetch_vk_avatar_entry(user_id: int, source_url: str, token: str = "") -> FetchResult:
+    token = (token or os.getenv("VK_TOKEN") or "").strip()
+    if not token:
+        return FetchResult([], error="vk_no_token")
+    try:
+        response = _vk_api(
+            "users.get",
+            token,
+            user_ids=str(user_id),
+            fields="photo_max_orig,photo_400,has_photo",
+        )
+    except Exception as exc:
+        return FetchResult([], error=str(exc)[:180] or "vk_avatar_error")
+
+    items = response if isinstance(response, list) else []
+    if not items or not isinstance(items[0], dict):
+        return FetchResult([], error="vk_avatar_empty")
+    user = items[0]
+    avatar = str(user.get("photo_max_orig") or user.get("photo_400") or "").strip()
+    if not avatar or int(user.get("has_photo") or 0) == 0:
+        return FetchResult([], error="vk_no_avatar")
+    return FetchResult(
+        [
+            SocialEntry(
+                source_url=source_url,
+                post_url=f"https://vk.com/id{user_id}",
+                title="avatar",
+                description="",
+                thumbnail_url=avatar,
+            )
+        ]
+    )
+
+
+def fetch_vk_user_groups(
+    user_id: int,
+    token: str = "",
+    max_groups: int = 200,
+) -> tuple[list[dict[str, Any]], str]:
+    """
+    Список сообществ пользователя: [{id, screen_name, name, photo_url}, ...].
+    При ошибке доступа — ([], error).
+    """
+    token = (token or os.getenv("VK_TOKEN") or "").strip()
+    if not token:
+        return [], "vk_no_token"
+    try:
+        response = _vk_api(
+            "groups.get",
+            token,
+            user_id=int(user_id),
+            extended=1,
+            fields="photo_200,screen_name",
+            count=max(1, min(int(max_groups), 1000)),
+        )
+    except Exception as exc:
+        msg = str(exc)[:180]
+        logger.info("VK groups.get failed user=%s: %s", user_id, msg)
+        return [], msg or "vk_groups_error"
+
+    items = response.get("items") if isinstance(response, dict) else []
+    if not isinstance(items, list):
+        return [], "vk_groups_empty"
+
+    out: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        try:
+            gid = abs(int(item.get("id") or 0))
+        except (TypeError, ValueError):
+            continue
+        if not gid:
+            continue
+        photo = str(item.get("photo_200") or item.get("photo_100") or "").strip()
+        out.append(
+            {
+                "id": gid,
+                "screen_name": str(item.get("screen_name") or "").strip().lower(),
+                "name": str(item.get("name") or "").strip(),
+                "photo_url": photo,
+            }
+        )
+    return out, ""
+
+
 def fetch_vk_wall_entries(
     source_url: str,
     max_entries: int,

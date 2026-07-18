@@ -85,6 +85,16 @@ def make_progress_notifier(
                         f"TT {int(info.get('ok_tiktok') or 0)}/"
                         f"{int(info.get('fail_tiktok') or 0)}"
                     ),
+                    (
+                        f"  VK hits: группы {int(info.get('hits_group') or 0)} · "
+                        f"стена {int(info.get('hits_wall') or 0)} · "
+                        f"аватар {int(info.get('hits_avatar') or 0)}"
+                    ),
+                    (
+                        f"  VK недоступен: {int(info.get('vk_inaccessible') or 0)} · "
+                        f"группы API fail: {int(info.get('vk_groups_unavailable') or 0)} · "
+                        f"в списке запретных: {int(info.get('banned_groups') or 0)}"
+                    ),
                     f"Постов получено: {posts}",
                     f"Срабатываний правил: {flagged}",
                     f"Колонки соцсетей: {cols}"
@@ -99,6 +109,10 @@ def make_progress_notifier(
                     "",
                     "В таблицу ничего не записано.",
                 ]
+                if int(info.get("banned_groups") or 0) == 0:
+                    lines.append(
+                        "Список запретных групп пуст — проверка вступлений пока не ловит."
+                    )
                 if not info.get("proxy") and (
                     int(info.get("fail_tg") or 0) + int(info.get("fail_tiktok") or 0) > 0
                 ):

@@ -17,10 +17,19 @@ from bot_api.student_sheet import search_students
 from bot_api.week_column import pick_week_col_by_date
 from sections.models import SectionTable
 
+from .banned_groups import load_banned_vk_groups
 from .classifier import LightweightClassifier, MatchResult
 from .config import load_moderation_config
 from .rules_store import load_rules
-from .social_scan import SocialEntry, fetch_social_entries_result, is_placeholder_social_value
+from .social_scan import (
+    SocialEntry,
+    fetch_social_entries_result,
+    fetch_vk_avatar_entry,
+    fetch_vk_user_groups,
+    fetch_vk_wall_entries,
+    is_placeholder_social_value,
+    resolve_vk_user_id,
+)
 
 # Callable[[dict], None] — прогресс для VK
 ProgressCallback = Optional[Callable[..., None]]
@@ -47,6 +56,11 @@ class ScanStats:
     ok_tg: int = 0
     ok_vk: int = 0
     ok_tiktok: int = 0
+    vk_inaccessible: int = 0
+    vk_groups_unavailable: int = 0
+    hits_group: int = 0
+    hits_wall: int = 0
+    hits_avatar: int = 0
     sample_errors: Optional[List[str]] = None
     sample_links: Optional[List[str]] = None
 
@@ -290,6 +304,96 @@ def _save_hit_evidence(
         return False
 
 
+def _check_vk_profile(
+    *,
+    link: str,
+    classifier: LightweightClassifier,
+    banned,
+    max_posts: int,
+    stats: ScanStats,
+) -> Optional[tuple[MatchResult, SocialEntry, str]]:
+    """
+    Приоритет: запретная группа → стена → аватар.
+    Ранний стоп на первом срабатывании.
+    Возвращает (match, entry_for_evidence, source_kind) или None.
+    """
+    user_id, resolve_err = resolve_vk_user_id(link)
+    if not user_id:
+        stats.fail_vk += 1
+        stats.links_fail += 1
+        if resolve_err and len(stats.sample_errors or []) < 5:
+            stats.sample_errors.append(f"{link[:60]} → {resolve_err[:100]}")
+        return None
+
+    stats.links_ok += 1
+    stats.ok_vk += 1
+
+    got_any = False
+
+    # 1) Группы
+    groups, groups_err = fetch_vk_user_groups(user_id)
+    if groups_err:
+        stats.vk_groups_unavailable += 1
+        if len(stats.sample_errors or []) < 5:
+            stats.sample_errors.append(f"id{user_id} groups → {groups_err[:80]}")
+    else:
+        got_any = True
+        for g in groups:
+            hit = banned.match(int(g["id"]), str(g.get("screen_name") or ""))
+            if not hit:
+                continue
+            stats.hits_group += 1
+            entry = SocialEntry(
+                source_url=link,
+                post_url=f"https://vk.com/club{hit.group_id}",
+                title=hit.title or hit.screen_name,
+                description=f"запрещённая группа: {hit.title or hit.screen_name}",
+                thumbnail_url=str(g.get("photo_url") or ""),
+            )
+            match = MatchResult(
+                is_violation=True,
+                category=hit.category or "banned_group",
+                remark_text=hit.remark,
+                reason=f"группа id={hit.group_id}",
+                post_url=entry.post_url,
+            )
+            return match, entry, "group"
+
+    # 2) Стена
+    wall = fetch_vk_wall_entries(link, max_posts)
+    if wall.entries:
+        got_any = True
+        stats.posts_fetched += len(wall.entries)
+        for entry in wall.entries:
+            result = classifier.classify(entry)
+            if result.is_violation:
+                stats.hits_wall += 1
+                return result, entry, "wall"
+    elif wall.error == "vk_empty_wall":
+        got_any = True
+    elif wall.error and len(stats.sample_errors or []) < 5:
+        stats.sample_errors.append(f"{link[:60]} → {wall.error[:100]}")
+
+    # 3) Аватар
+    avatar = fetch_vk_avatar_entry(user_id, link)
+    if avatar.error and not avatar.entries:
+        if len(stats.sample_errors or []) < 5 and avatar.error not in (
+            "vk_no_avatar",
+        ):
+            stats.sample_errors.append(f"id{user_id} avatar → {avatar.error[:80]}")
+    elif avatar.entries:
+        got_any = True
+        entry = avatar.entries[0]
+        result = classifier.classify(entry)
+        if result.is_violation:
+            stats.hits_avatar += 1
+            return result, entry, "avatar"
+
+    if not got_any:
+        stats.vk_inaccessible += 1
+    return None
+
+
 def run_social_moderation_scan(
     *,
     scan_date: Optional[date] = None,
@@ -307,6 +411,7 @@ def run_social_moderation_scan(
     """
     cfg = load_moderation_config()
     rules = load_rules(cfg.rules_path)
+    banned = load_banned_vk_groups(cfg.banned_groups_path)
     classifier = LightweightClassifier(
         rules=rules,
         block_hash_distance=cfg.block_hash_distance,
@@ -424,6 +529,22 @@ def run_social_moderation_scan(
                 stats.links_tried += 1
                 if dry_run and len(stats.sample_links) < 5:
                     stats.sample_links.append(link[:120])
+
+                if platform == "vk":
+                    hit = _check_vk_profile(
+                        link=link,
+                        classifier=classifier,
+                        banned=banned,
+                        max_posts=cfg.max_entries_per_link,
+                        stats=stats,
+                    )
+                    if hit:
+                        match, entry, _kind = hit
+                        violation = (link, match, entry)
+                        break
+                    continue
+
+                # TG/TikTok (если не skip) — прежний yt-dlp путь
                 fetched = fetch_social_entries_result(
                     link,
                     cfg.max_entries_per_link,
@@ -434,8 +555,6 @@ def run_social_moderation_scan(
                     stats.links_fail += 1
                     if platform == "tg":
                         stats.fail_tg += 1
-                    elif platform == "vk":
-                        stats.fail_vk += 1
                     elif platform == "tiktok":
                         stats.fail_tiktok += 1
                     if dry_run and fetched.error and len(stats.sample_errors) < 5:
@@ -446,8 +565,6 @@ def run_social_moderation_scan(
                 stats.links_ok += 1
                 if platform == "tg":
                     stats.ok_tg += 1
-                elif platform == "vk":
-                    stats.ok_vk += 1
                 elif platform == "tiktok":
                     stats.ok_tiktok += 1
                 stats.posts_fetched += len(fetched.entries)
@@ -540,6 +657,12 @@ def run_social_moderation_scan(
         fail_tg=stats.fail_tg,
         fail_vk=stats.fail_vk,
         fail_tiktok=stats.fail_tiktok,
+        vk_inaccessible=stats.vk_inaccessible,
+        vk_groups_unavailable=stats.vk_groups_unavailable,
+        hits_group=stats.hits_group,
+        hits_wall=stats.hits_wall,
+        hits_avatar=stats.hits_avatar,
+        banned_groups=banned.count,
     )
 
     logger.info(

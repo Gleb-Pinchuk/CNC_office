@@ -20,7 +20,8 @@
    - `SOCIAL_MODERATION_SCHEDULE_MINUTES=180` (или чаще/реже)
    - `SOCIAL_MOD_MAX_STUDENTS_PER_RUN=50`
    - при блокировках сети: `SOCIAL_MOD_PROXY_URL=http://user:pass@host:port`
-   - временно можно отключить источники: `SOCIAL_MOD_SKIP_TG=True` и/или `SOCIAL_MOD_SKIP_TIKTOK=True`
+   - по умолчанию только VK: `SOCIAL_MOD_SKIP_TG=True` и `SOCIAL_MOD_SKIP_TIKTOK=True`
+   - запретные сообщества: `bot_api/moderation_data/banned_vk_groups.json`
 3. Запустите:
 
 ```bash

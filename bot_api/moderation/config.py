@@ -18,6 +18,7 @@ class ModerationConfig:
     status_col: int
     remark_col: int
     rules_path: Path
+    banned_groups_path: Path
     max_entries_per_link: int
     max_links_per_student: int
     block_hash_distance: int
@@ -53,6 +54,12 @@ def load_moderation_config() -> ModerationConfig:
     )
     default_rules_path = settings.BASE_DIR / "bot_api" / "moderation_data" / "rules.json"
     rules_path = Path(os.getenv("SOCIAL_MOD_RULES_PATH", str(default_rules_path)))
+    default_banned = (
+        settings.BASE_DIR / "bot_api" / "moderation_data" / "banned_vk_groups.json"
+    )
+    banned_groups_path = Path(
+        os.getenv("SOCIAL_MOD_BANNED_VK_GROUPS_PATH", str(default_banned))
+    )
     return ModerationConfig(
         table_owner_username=owner,
         section_type=os.getenv("CNC_SECTION_TYPE", "rangers").strip(),
@@ -69,15 +76,17 @@ def load_moderation_config() -> ModerationConfig:
             os.getenv("BOT_SHEET_REMARK_COL", getattr(settings, "BOT_SHEET_REMARK_COL", 12))
         ),
         rules_path=rules_path,
-        max_entries_per_link=int(os.getenv("SOCIAL_MOD_MAX_ENTRIES_PER_LINK", "5")),
+        banned_groups_path=banned_groups_path,
+        max_entries_per_link=int(os.getenv("SOCIAL_MOD_MAX_ENTRIES_PER_LINK", "10")),
         max_links_per_student=int(os.getenv("SOCIAL_MOD_MAX_LINKS_PER_STUDENT", "3")),
         block_hash_distance=int(os.getenv("SOCIAL_MOD_BLOCK_HASH_DISTANCE", "6")),
         allow_hash_distance=int(os.getenv("SOCIAL_MOD_ALLOW_HASH_DISTANCE", "4")),
         request_timeout_sec=int(os.getenv("SOCIAL_MOD_REQUEST_TIMEOUT_SEC", "10")),
         ytdlp_timeout_sec=int(os.getenv("SOCIAL_MOD_YTDLP_TIMEOUT_SEC", "20")),
         proxy_url=os.getenv("SOCIAL_MOD_PROXY_URL", "").strip(),
-        skip_tg=os.getenv("SOCIAL_MOD_SKIP_TG", "False").lower() in ("true", "1", "yes"),
-        skip_tiktok=os.getenv("SOCIAL_MOD_SKIP_TIKTOK", "False").lower()
+        # По умолчанию только VK (TG/TikTok в РФ без VPN недоступны).
+        skip_tg=os.getenv("SOCIAL_MOD_SKIP_TG", "True").lower() in ("true", "1", "yes"),
+        skip_tiktok=os.getenv("SOCIAL_MOD_SKIP_TIKTOK", "True").lower()
         in ("true", "1", "yes"),
     )
 
