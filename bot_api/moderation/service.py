@@ -20,7 +20,7 @@ from sections.models import SectionTable
 from .classifier import LightweightClassifier, MatchResult
 from .config import load_moderation_config
 from .rules_store import load_rules
-from .social_scan import SocialEntry, fetch_social_entries_result
+from .social_scan import SocialEntry, fetch_social_entries_result, is_placeholder_social_value
 
 # Callable[[dict], None] — прогресс для VK
 ProgressCallback = Optional[Callable[..., None]]
@@ -41,6 +41,12 @@ class ScanStats:
     links_fail: int = 0
     links_skipped: int = 0
     posts_fetched: int = 0
+    fail_tg: int = 0
+    fail_vk: int = 0
+    fail_tiktok: int = 0
+    ok_tg: int = 0
+    ok_vk: int = 0
+    ok_tiktok: int = 0
     sample_errors: Optional[List[str]] = None
     sample_links: Optional[List[str]] = None
 
@@ -60,7 +66,10 @@ def _clean_token(token: str) -> str:
         t,
         flags=re.IGNORECASE,
     )
-    return t.strip()
+    t = t.strip()
+    if is_placeholder_social_value(t):
+        return ""
+    return t
 
 
 def _guess_platform(token: str, raw_cell: str, default_platform: str) -> str:
@@ -68,7 +77,7 @@ def _guess_platform(token: str, raw_cell: str, default_platform: str) -> str:
     cell = raw_cell.lower()
     if "tiktok" in t or "тикток" in t or "tiktok" in cell:
         return "tiktok"
-    if "vk.com" in t or t.startswith("id") or t.startswith(("club", "public")):
+    if "vk.com" in t or "vk.ru" in t or t.startswith("id") or t.startswith(("club", "public")):
         return "vk"
     if "t.me" in t or "telegram" in t or "телеграм" in t:
         return "tg"
@@ -83,14 +92,27 @@ def _guess_platform(token: str, raw_cell: str, default_platform: str) -> str:
 
 def _normalize_url(token: str, platform: str) -> str:
     t = token.strip()
-    if not t:
+    if not t or is_placeholder_social_value(t):
         return ""
     if t.startswith(("http://", "https://")):
+        if is_placeholder_social_value(t):
+            return ""
+        if "vk.ru/" in t.lower() or "m.vk." in t.lower():
+            from .social_scan import _normalize_vk_url
+
+            return _normalize_vk_url(t)
         return t
-    if "vk.com/" in t or "t.me/" in t or "tiktok.com/" in t:
-        return f"https://{t}"
+    if "vk.com/" in t or "vk.ru/" in t or "t.me/" in t or "tiktok.com/" in t:
+        url = f"https://{t}"
+        if "vk.ru/" in url.lower():
+            from .social_scan import _normalize_vk_url
+
+            return _normalize_vk_url(url)
+        return url
     if t.startswith("@"):
-        nick = t[1:]
+        nick = t[1:].strip()
+        if not nick or is_placeholder_social_value(nick):
+            return ""
         if platform == "vk":
             return f"https://vk.com/{nick}"
         if platform == "tiktok":
@@ -99,7 +121,10 @@ def _normalize_url(token: str, platform: str) -> str:
     if platform == "vk":
         return f"https://vk.com/{t}"
     if platform == "tiktok":
-        return f"https://www.tiktok.com/@{t.lstrip('@')}"
+        nick = t.lstrip("@")
+        if is_placeholder_social_value(nick):
+            return ""
+        return f"https://www.tiktok.com/@{nick}"
     return f"https://t.me/{t}"
 
 
@@ -171,7 +196,7 @@ def _platform_from_url(url: str) -> str:
         return "tg"
     if "tiktok.com/" in u:
         return "tiktok"
-    if "vk.com/" in u:
+    if "vk.com/" in u or "vk.ru/" in u:
         return "vk"
     return ""
 
@@ -407,12 +432,24 @@ def run_social_moderation_scan(
                 )
                 if fetched.error or not fetched.entries:
                     stats.links_fail += 1
+                    if platform == "tg":
+                        stats.fail_tg += 1
+                    elif platform == "vk":
+                        stats.fail_vk += 1
+                    elif platform == "tiktok":
+                        stats.fail_tiktok += 1
                     if dry_run and fetched.error and len(stats.sample_errors) < 5:
                         stats.sample_errors.append(
                             f"{link[:60]} → {fetched.error[:100]}"
                         )
                     continue
                 stats.links_ok += 1
+                if platform == "tg":
+                    stats.ok_tg += 1
+                elif platform == "vk":
+                    stats.ok_vk += 1
+                elif platform == "tiktok":
+                    stats.ok_tiktok += 1
                 stats.posts_fetched += len(fetched.entries)
                 for entry in fetched.entries:
                     result = classifier.classify(entry)
@@ -497,6 +534,12 @@ def run_social_moderation_scan(
         skip_tg=cfg.skip_tg,
         skip_tiktok=cfg.skip_tiktok,
         proxy=bool(cfg.proxy_url),
+        ok_tg=stats.ok_tg,
+        ok_vk=stats.ok_vk,
+        ok_tiktok=stats.ok_tiktok,
+        fail_tg=stats.fail_tg,
+        fail_vk=stats.fail_vk,
+        fail_tiktok=stats.fail_tiktok,
     )
 
     logger.info(

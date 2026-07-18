@@ -77,6 +77,14 @@ def make_progress_notifier(
                     f"С ссылками: {with_links}",
                     f"Ссылок: ok {links_ok} / fail {links_fail} "
                     f"(tried {links_tried}, skip {links_skipped})",
+                    (
+                        f"  TG ok/fail {int(info.get('ok_tg') or 0)}/"
+                        f"{int(info.get('fail_tg') or 0)} · "
+                        f"VK {int(info.get('ok_vk') or 0)}/"
+                        f"{int(info.get('fail_vk') or 0)} · "
+                        f"TT {int(info.get('ok_tiktok') or 0)}/"
+                        f"{int(info.get('fail_tiktok') or 0)}"
+                    ),
                     f"Постов получено: {posts}",
                     f"Срабатываний правил: {flagged}",
                     f"Колонки соцсетей: {cols}"
@@ -91,11 +99,18 @@ def make_progress_notifier(
                     "",
                     "В таблицу ничего не записано.",
                 ]
+                if not info.get("proxy") and (
+                    int(info.get("fail_tg") or 0) + int(info.get("fail_tiktok") or 0) > 0
+                ):
+                    lines.append(
+                        "Подсказка: TG/TikTok часто недоступны без "
+                        "SOCIAL_MOD_PROXY_URL или SKIP_TG/TIKTOK=True."
+                    )
                 if sample_links:
                     lines.append("Примеры ссылок:")
                     lines.extend(f"· {x}" for x in sample_links[:3])
                 if sample_errors:
-                    lines.append("Ошибки yt-dlp:")
+                    lines.append("Ошибки:")
                     lines.extend(f"· {x}" for x in sample_errors[:3])
                 send_vk_message(int(peer_id), "\n".join(lines))
             else:
