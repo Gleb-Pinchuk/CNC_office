@@ -245,3 +245,69 @@ def test_generate_monitoring_report_embeds_evidence_or_missing_note(settings):
     # У Иванова скрин есть — пометки отсутствия быть не должно в его строке
     assert "Иванов Иван: нарушение" in text or "Иванов Иван:" in text
     assert len(doc.inline_shapes) >= 1
+
+
+def test_bmp_evidence_converts_to_jpeg_for_word(settings, tmp_path):
+    pytest.importorskip("docx")
+    from PIL import Image
+    from docx import Document
+
+    from bot_api.evidence import evidence_bytes_for_docx, upsert_remark_evidence
+    from bot_api.reports import generate_monitoring_report_docx
+
+    settings.MEDIA_ROOT = tmp_path / "media"
+    User = get_user_model()
+    owner = User.objects.create_user(username="bmp_u", password="x")
+    table = SectionTable.objects.create(
+        owner=owner,
+        title="T",
+        section_type="rangers",
+        content={},
+    )
+    buf = BytesIO()
+    Image.new("RGB", (8, 8), color=(200, 50, 50)).save(buf, format="BMP")
+    bmp = buf.getvalue()
+
+    upsert_remark_evidence(
+        table=table,
+        sheet_name="ЧПУ",
+        student_fio="Иванов Иван",
+        remark_date=date(2026, 4, 22),
+        raw=bmp,
+        filename="screen.bmp",
+        content_type="image/bmp",
+    )
+    obj = RemarkEvidence.objects.get(table=table)
+    with obj.image.open("rb") as fh:
+        stored = fh.read()
+    assert stored[:3] == b"\xff\xd8\xff"
+
+    docx_payload = evidence_bytes_for_docx(bmp)
+    assert docx_payload and docx_payload[:3] == b"\xff\xd8\xff"
+
+    content = {
+        "custom_sheet": {
+            "version": 2,
+            "activeSheetIndex": 0,
+            "sheets": [
+                {
+                    "name": "ЧПУ",
+                    "data": [
+                        ["", "Группа", "ФИО", "TG", "20.04-26.04"],
+                        ["", "Г1", "Иванов Иван", "@x", "нарушение"],
+                    ],
+                }
+            ],
+        }
+    }
+    blob = generate_monitoring_report_docx(
+        table_title="Rangers",
+        content=content,
+        sheet_name="ЧПУ",
+        report_year=2026,
+        report_month=4,
+        evidence_by_fio_date={("иванов иван", date(2026, 4, 22)): bmp},
+    )
+    doc = Document(BytesIO(blob))
+    assert len(doc.inline_shapes) >= 1
+    assert "не удалось вставить скрин" not in "\n".join(p.text for p in doc.paragraphs)

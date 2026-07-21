@@ -3,12 +3,7 @@ name: Deploy to Alpine Production
 on:
   push:
     branches:
-      - develop
-      - fix/bot-and-table-editor
-      - feature/student-monitoring-vk-celery
       - feature/monthly-monitoring-reports
-      - "codex-*"
-      - "codex/**"
   workflow_dispatch:
 
 jobs:

@@ -857,7 +857,7 @@ class StudentBot:
                 self.send(
                     peer_id,
                     "Введите текст замечания одним сообщением.\n"
-                    "После текста бот попросит прислать скрин (фото или jpg/png/webp).",
+                    "После текста бот попросит прислать скрин (фото или файл jpg/png/webp/bmp).",
                 )
             elif cmd == "stu_ex":
                 self.confirm_expel(peer_id, ctx)
@@ -926,7 +926,7 @@ class StudentBot:
         self.send(
             peer_id,
             "Текст принят. Пришлите скрин доказательства одним сообщением "
-            "(фото VK или файл jpg/png/webp).\n"
+            "(фото VK или файл jpg/png/webp/bmp).\n"
             "Пока скрин не прислан, замечание в таблицу не записывается.",
         )
 
@@ -941,7 +941,7 @@ class StudentBot:
         if not extracted:
             self.send(
                 peer_id,
-                "❌ Нужен скрин: фото или файл jpg/png/webp. Текст уже сохранён в черновике — пришлите картинку.",
+                "❌ Нужен скрин: фото или файл jpg/png/webp/bmp. Текст уже сохранён в черновике — пришлите картинку.",
             )
             return
         raw, filename, mime = extracted
@@ -981,7 +981,7 @@ class StudentBot:
                 ext = str(doc.get("ext") or "").lower().lstrip(".")
                 title = str(doc.get("title") or f"evidence.{ext or 'jpg'}")
                 url = str(doc.get("url") or "").strip()
-                if ext not in {"jpg", "jpeg", "png", "webp"} or not url:
+                if ext not in {"jpg", "jpeg", "png", "webp", "bmp"} or not url:
                     continue
                 raw = self._download_bytes(url)
                 if not raw:
@@ -991,6 +991,7 @@ class StudentBot:
                     "jpeg": "image/jpeg",
                     "png": "image/png",
                     "webp": "image/webp",
+                    "bmp": "image/bmp",
                 }.get(ext, "image/jpeg")
                 if not title.lower().endswith(f".{ext}"):
                     title = f"{title}.{ext}"

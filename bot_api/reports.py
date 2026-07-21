@@ -7,6 +7,7 @@ from typing import Any, Optional
 from django.conf import settings
 
 from bot_api.monthly_rollover import detect_sheet_month, find_week_columns
+from bot_api.evidence import evidence_bytes_for_docx
 from bot_api.sheet_utils import find_sheet_by_name, get_workbook_sheets
 from bot_api.week_column import pick_week_col_by_date
 
@@ -211,8 +212,9 @@ def _build_body(
 
 
 def _add_evidence_picture(doc, raw: bytes) -> None:
+    payload = evidence_bytes_for_docx(raw) or raw
     try:
-        stream = BytesIO(raw)
+        stream = BytesIO(payload)
         doc.add_picture(stream, width=Cm(14))
     except Exception:
         note = doc.add_paragraph()
