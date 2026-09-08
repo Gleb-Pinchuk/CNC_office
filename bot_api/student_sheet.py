@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List, Optional, Tuple
 
 
@@ -18,6 +19,16 @@ def iter_data_rows(sheet_data: List[List[Any]], header_rows: int = 1):
         yield i, sheet_data[i]
 
 
+def group_sort_key(name: str) -> tuple:
+    """Числовая сортировка: ЧПУ 26-2 перед ЧПУ 26-10, ЧПУ 1 перед ЧПУ 2."""
+    text = str(name or "").strip().lower()
+    nums = [int(n) for n in re.findall(r"\d+", text)]
+    # буквенный префикс без цифр — чтобы «микр» и «чпу» не смешивались хаотично
+    prefix = re.sub(r"\d+", "", text)
+    prefix = re.sub(r"[\s\-_/.,]+", " ", prefix).strip()
+    return (prefix, nums, text)
+
+
 def list_groups(
     sheet_data: List[List[Any]],
     group_col: int,
@@ -32,7 +43,7 @@ def list_groups(
         if g not in seen:
             seen.add(g)
             out.append(normalize_cell(row, group_col))
-    return sorted(out, key=lambda x: x.lower())
+    return sorted(out, key=group_sort_key)
 
 
 def search_students(
@@ -57,7 +68,8 @@ def search_students(
         status = normalize_cell(row, status_col)
         if skip_dismissed and status and "отчислен" in status.lower():
             continue
-        if gf and grp.lower() != gf and gf not in grp.lower():
+        # Точное совпадение группы (иначе «ЧПУ 26-1» цеплял «ЧПУ 26-10»)
+        if gf and grp.lower() != gf:
             continue
         if q and q not in fio.lower():
             continue
